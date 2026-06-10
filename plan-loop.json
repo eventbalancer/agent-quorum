@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "settings": {
+    "iters": 7,
+    "effort": "high",
+    "fix": true,
+    "translate": true,
+    "diffThreshold": 5,
+    "retryCount": 3,
+    "retryDelaySeconds": 10
+  },
+  "roles": {
+    "critic": {
+      "runner": "claude",
+      "model": "claude-sonnet-4-6",
+      "reasoning": "xhigh",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "creator": {
+      "runner": "claude",
+      "model": "claude-opus-4-8",
+      "reasoning": "xhigh",
+      "createTools": ["Read", "Grep", "Glob", "Bash"],
+      "createDisallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ],
+      "updateTools": ["Read"],
+      "updateDisallowedTools": [
+        "Write",
+        "Bash",
+        "Edit",
+        "NotebookEdit",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "fixer": {
+      "runner": "claude",
+      "model": "claude-sonnet-4-6",
+      "reasoning": "high",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "reviewer": {
+      "runner": "claude",
+      "model": "claude-sonnet-4-6",
+      "reasoning": "high",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "translator": {
+      "runner": "claude",
+      "model": "claude-sonnet-4-6",
+      "reasoning": "high",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    }
+  }
+}

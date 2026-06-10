@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+json_encode() {
+  node -e 'let d="";process.stdin.on("data",c=>{d+=c}).on("end",()=>{process.stdout.write(JSON.stringify(d))})'
+}
+is_json=0
+is_resume=0
+args=("$@")
+for arg in "${args[@]}"; do
+  [[ "$arg" == "--json-schema" ]] && is_json=1
+  [[ "$arg" == "--resume" ]] && is_resume=1
+done
+if [[ -n "${FAKE_CLAUDE_ARGS_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_CLAUDE_ARGS_LOG"
+fi
+if [[ -n "${FAKE_CLAUDE_ARGV_LOG:-}" ]]; then
+  { for arg in "$@"; do printf '%s\0' "$arg"; done; printf '\036'; } >> "$FAKE_CLAUDE_ARGV_LOG"
+fi
+prompt="$(cat)"
+if [[ -n "${FAKE_CLAUDE_PROMPT:-}" ]]; then
+  printf '%s' "$prompt" > "$FAKE_CLAUDE_PROMPT"
+fi
+if [[ -n "${FAKE_CLAUDE_ATTEMPTS:-}" ]]; then
+  attempts=0
+  [[ -f "$FAKE_CLAUDE_ATTEMPTS" ]] && attempts="$(cat "$FAKE_CLAUDE_ATTEMPTS")"
+  attempts=$((attempts + 1))
+  printf '%s' "$attempts" > "$FAKE_CLAUDE_ATTEMPTS"
+  if (( attempts <= ${FAKE_CLAUDE_FAILS:-0} )); then
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"API Error: The socket connection was closed unexpectedly"}]}}\n'
+    exit 1
+  fi
+fi
+if (( is_resume == 1 )) && [[ -n "${FAKE_CLAUDE_FAIL_ON_RESUME:-}" ]]; then
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"resume failed"}]}}\n'
+  exit 1
+fi
+if [[ -n "${FAKE_CLAUDE_STALL_ONCE:-}" ]]; then
+  stalls=0
+  [[ -f "$FAKE_CLAUDE_STALL_ONCE" ]] && stalls="$(cat "$FAKE_CLAUDE_STALL_ONCE")"
+  if (( stalls == 0 )); then
+    printf '1' > "$FAKE_CLAUDE_STALL_ONCE"
+    trap 'exit 130' INT TERM
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"stalling"}]}}\n'
+    while true; do sleep 1; done
+  fi
+fi
+if [[ -n "${FAKE_CLAUDE_THINKING_LOOP_ONCE:-}" ]]; then
+  loops=0
+  [[ -f "$FAKE_CLAUDE_THINKING_LOOP_ONCE" ]] && loops="$(cat "$FAKE_CLAUDE_THINKING_LOOP_ONCE")"
+  if (( loops == 0 )); then
+    printf '1' > "$FAKE_CLAUDE_THINKING_LOOP_ONCE"
+    trap 'exit 130' INT TERM
+    while true; do
+      echo '{"type":"system","subtype":"thinking_tokens","tokens":1}'
+      echo '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172,"error":"unknown"}'
+      sleep 0.2 & wait "$!"
+    done
+  fi
+fi
+if [[ -n "${FAKE_CLAUDE_API_RETRY_LOOP_ONCE:-}" ]]; then
+  loops=0
+  [[ -f "$FAKE_CLAUDE_API_RETRY_LOOP_ONCE" ]] && loops="$(cat "$FAKE_CLAUDE_API_RETRY_LOOP_ONCE")"
+  if (( loops == 0 )); then
+    printf '1' > "$FAKE_CLAUDE_API_RETRY_LOOP_ONCE"
+    trap 'exit 130' INT TERM
+    while true; do
+      echo '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172,"error":"unknown"}'
+      sleep 0.2 & wait "$!"
+    done
+  fi
+fi
+if [[ -n "${FAKE_CLAUDE_WALLCLOCK_LOOP_ONCE:-}" ]]; then
+  loops=0
+  [[ -f "$FAKE_CLAUDE_WALLCLOCK_LOOP_ONCE" ]] && loops="$(cat "$FAKE_CLAUDE_WALLCLOCK_LOOP_ONCE")"
+  if (( loops == 0 )); then
+    printf '1' > "$FAKE_CLAUDE_WALLCLOCK_LOOP_ONCE"
+    trap 'exit 130' INT TERM
+    while true; do
+      echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}'
+      sleep 0.4 & wait "$!"
+    done
+  fi
+fi
+if [[ -n "${FAKE_CLAUDE_EMIT_API_RETRY:-}" ]]; then
+  echo '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172}'
+  echo '{"type":"system","subtype":"api_retry","attempt":3,"max_retries":10,"delay_ms":2000,"error":"overloaded"}'
+fi
+if (( is_json == 1 )) && [[ -n "${FAKE_CLAUDE_JSON_RESULT:-}" ]]; then
+  result_file="$FAKE_CLAUDE_JSON_RESULT"
+  if [[ -n "${FAKE_CLAUDE_JSON_CALLS:-}" ]]; then
+    calls=0
+    [[ -f "$FAKE_CLAUDE_JSON_CALLS" ]] && calls="$(cat "$FAKE_CLAUDE_JSON_CALLS")"
+    calls=$((calls + 1))
+    printf '%s' "$calls" > "$FAKE_CLAUDE_JSON_CALLS"
+    var="FAKE_CLAUDE_JSON_RESULT_$calls"
+    result_file="${!var:-$result_file}"
+  fi
+  result="$(cat "$result_file")"
+elif (( is_json == 0 )) && [[ -n "${FAKE_CLAUDE_MARKDOWN_RESULT:-}" ]]; then
+  result_file="$FAKE_CLAUDE_MARKDOWN_RESULT"
+  if [[ -n "${FAKE_CLAUDE_MARKDOWN_CALLS:-}" ]]; then
+    calls=0
+    [[ -f "$FAKE_CLAUDE_MARKDOWN_CALLS" ]] && calls="$(cat "$FAKE_CLAUDE_MARKDOWN_CALLS")"
+    calls=$((calls + 1))
+    printf '%s' "$calls" > "$FAKE_CLAUDE_MARKDOWN_CALLS"
+    var="FAKE_CLAUDE_MARKDOWN_RESULT_$calls"
+    result_file="${!var:-$result_file}"
+  fi
+  result="$(cat "$result_file")"
+else
+  result="$(cat "${FAKE_CLAUDE_RESULT:?}")"
+fi
+printf '{"type":"result","result":%s}\n' "$(printf '%s' "$result" | json_encode)"

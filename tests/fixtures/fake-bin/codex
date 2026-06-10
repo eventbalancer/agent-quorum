@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+if [[ -n "${FAKE_CODEX_ARGS_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_CODEX_ARGS_LOG"
+fi
+if [[ -n "${FAKE_CODEX_ARGV_LOG:-}" ]]; then
+  { for arg in "$@"; do printf '%s\0' "$arg"; done; printf '\036'; } >> "$FAKE_CODEX_ARGV_LOG"
+fi
+# Transient-failure injection: fail the first FAKE_CODEX_FAILS attempts (counted
+# in FAKE_CODEX_ATTEMPTS) before any output, exercising provider_run retries.
+if [[ -n "${FAKE_CODEX_ATTEMPTS:-}" ]]; then
+  attempts=0
+  [[ -f "$FAKE_CODEX_ATTEMPTS" ]] && attempts="$(cat "$FAKE_CODEX_ATTEMPTS")"
+  attempts=$((attempts + 1))
+  printf '%s' "$attempts" > "$FAKE_CODEX_ATTEMPTS"
+  if (( attempts <= ${FAKE_CODEX_FAILS:-0} )); then
+    echo "codex transient failure" >&2
+    exit 1
+  fi
+fi
+[[ "${1:-}" == "exec" ]] && shift
+mode="fresh"
+if [[ "${1:-}" == "resume" ]]; then
+  mode="resume"
+  shift
+fi
+out=""
+prompt=""
+session_id=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--output-last-message)
+      out="$2"; shift 2 ;;
+    --)
+      shift; prompt="${1:-}"; break ;;
+    -m|-c|--output-schema|--sandbox)
+      shift 2 ;;
+    --skip-git-repo-check|--color|--json)
+      if [[ "$1" == "--color" && -n "${2:-}" && "${2:0:1}" != "-" ]]; then
+        shift 2
+      else
+        shift
+      fi ;;
+    *)
+      if [[ "$mode" == "resume" && -z "$session_id" ]]; then
+        session_id="$1"
+      else
+        prompt="$1"
+      fi
+      shift ;;
+  esac
+done
+[[ -n "$out" ]] || exit 2
+if [[ "$prompt" == "-" ]]; then
+  prompt="$(cat)"
+fi
+printf '%s' "$prompt" > "${FAKE_CODEX_PROMPT:?}"
+output="${FAKE_CODEX_OUTPUT:-}"
+if [[ -n "${FAKE_CODEX_OUTPUT_CALLS:-}" ]]; then
+  calls=0
+  [[ -f "$FAKE_CODEX_OUTPUT_CALLS" ]] && calls="$(cat "$FAKE_CODEX_OUTPUT_CALLS")"
+  calls=$((calls + 1))
+  printf '%s' "$calls" > "$FAKE_CODEX_OUTPUT_CALLS"
+  var="FAKE_CODEX_OUTPUT_$calls"
+  output="${!var:-$output}"
+fi
+[[ -n "$output" ]] || exit 2
+cp "$output" "$out"
+if [[ -n "${FAKE_CODEX_EMIT_ID:-}" ]]; then
+  printf '{"type":"thread.started","thread_id":"%s"}\n' "$FAKE_CODEX_EMIT_ID"
+fi
+if [[ -n "${FAKE_CODEX_STREAM_EVENTS:-}" ]]; then
+  printf '{"type":"item.started","item":{"type":"command_execution","command":"/bin/zsh -lc \\"echo fixture\\"","status":"in_progress","exit_code":null}}\n'
+  if [[ "$FAKE_CODEX_STREAM_EVENTS" == "failed" ]]; then
+    printf '{"type":"item.completed","item":{"type":"command_execution","command":"/bin/zsh -lc \\"false\\"","status":"completed","exit_code":1}}\n'
+  fi
+elif [[ -z "${FAKE_CODEX_EMIT_ID:-}" ]]; then
+  printf 'tokens used\n1\n'
+fi

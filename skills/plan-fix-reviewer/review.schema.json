@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanFixReview",
+  "type": "object",
+  "required": ["approval", "concerns"],
+  "additionalProperties": false,
+  "properties": {
+    "approval": {
+      "type": "string",
+      "enum": ["accept", "accept_with_concerns", "reject"],
+      "description": "accept — 0 concerns or nit only; accept_with_concerns — there are minor concerns; reject — there are blocker/major concerns."
+    },
+    "concerns": {
+      "type": "array",
+      "description": "List of concerns about the proposed fix. Each concern is tied to a specific spot in the Proposed fix or to an unresolved finding.",
+      "items": {
+        "type": "object",
+        "required": ["id", "claim", "evidence", "severity"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^R[0-9]+$",
+            "description": "Unique concern identifier, R1, R2, ..."
+          },
+          "claim": {
+            "type": "string",
+            "description": "One phrase describing the problem."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "A concrete anchor: file:line from the Proposed fix, a verbatim quote, or the id of a Findings entry that remains unresolved."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["blocker", "major", "minor", "nit"]
+          }
+        }
+      }
+    }
+  }
+}

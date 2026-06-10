@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanClarifications",
+  "type": "object",
+  "required": ["questions"],
+  "additionalProperties": false,
+  "properties": {
+    "questions": {
+      "type": "array",
+      "description": "Blocking clarification questions the operator must answer before the plan can be created. Empty when the prompt is already unambiguous.",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "why", "options"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^Q[0-9]+$",
+            "description": "Stable identifier, Q1, Q2, … in ask order."
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": "English, in plain language. A single product-level decision, elaborated enough that the operator understands the trade-off without reading the codebase."
+          },
+          "why": {
+            "type": "string",
+            "description": "English. How a different answer changes the plan — the concrete fork it resolves."
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 6,
+            "description": "English. Concrete answer options the operator can pick by number; the operator may also reply with free text.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

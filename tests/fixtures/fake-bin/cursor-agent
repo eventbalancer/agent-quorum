@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+json_encode() {
+  node -e 'let d="";process.stdin.on("data",c=>{d+=c}).on("end",()=>{process.stdout.write(JSON.stringify(d))})'
+}
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'HELP'
+  --trust                      Trust the current workspace without prompting
+  --approve-mcps               Automatically approve all MCP servers
+  --model <model>              Model to use
+  --workspace <path>           Workspace directory
+HELP
+  exit 0
+fi
+is_json=0
+is_resume=0
+args=("$@")
+for arg in "${args[@]}"; do
+  [[ "$arg" == "--resume" ]] && is_resume=1
+done
+if [[ -n "${FAKE_CURSOR_ARGS_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_CURSOR_ARGS_LOG"
+fi
+if [[ -n "${FAKE_CURSOR_ARGV_LOG:-}" ]]; then
+  { for arg in "$@"; do printf '%s\0' "$arg"; done; printf '\036'; } >> "$FAKE_CURSOR_ARGV_LOG"
+fi
+prompt="$(cat)"
+if [[ -n "${FAKE_CURSOR_PROMPT:-}" ]]; then
+  printf '%s' "$prompt" > "$FAKE_CURSOR_PROMPT"
+fi
+if [[ "$prompt" == *"## JSON schema"* ]]; then
+  is_json=1
+fi
+if [[ -n "${FAKE_CURSOR_ATTEMPTS:-}" ]]; then
+  attempts=0
+  [[ -f "$FAKE_CURSOR_ATTEMPTS" ]] && attempts="$(cat "$FAKE_CURSOR_ATTEMPTS")"
+  attempts=$((attempts + 1))
+  printf '%s' "$attempts" > "$FAKE_CURSOR_ATTEMPTS"
+  if (( attempts <= ${FAKE_CURSOR_FAILS:-0} )); then
+    printf '{"type":"result","subtype":"error","is_error":true,"result":"cursor transient failure"}\n' >&2
+    exit 1
+  fi
+fi
+if (( is_resume == 1 )) && [[ -n "${FAKE_CURSOR_FAIL_ON_RESUME:-}" ]]; then
+  printf '{"type":"result","subtype":"error","is_error":true,"result":"resume failed"}\n'
+  exit 1
+fi
+session_id="${FAKE_CURSOR_SESSION_ID:-cursor-session-fixture}"
+if (( is_json == 1 )); then
+  result_file="${FAKE_CURSOR_JSON_RESULT:-}"
+  if [[ -n "${FAKE_CURSOR_JSON_CALLS:-}" ]]; then
+    calls=0
+    [[ -f "$FAKE_CURSOR_JSON_CALLS" ]] && calls="$(cat "$FAKE_CURSOR_JSON_CALLS")"
+    calls=$((calls + 1))
+    printf '%s' "$calls" > "$FAKE_CURSOR_JSON_CALLS"
+    var="FAKE_CURSOR_JSON_RESULT_$calls"
+    result_file="${!var:-$result_file}"
+  fi
+  [[ -n "$result_file" ]] || { echo "fake cursor-agent: missing FAKE_CURSOR_JSON_RESULT" >&2; exit 2; }
+else
+  result_file="${FAKE_CURSOR_MARKDOWN_RESULT:-}"
+  if [[ -n "${FAKE_CURSOR_MARKDOWN_CALLS:-}" ]]; then
+    calls=0
+    [[ -f "$FAKE_CURSOR_MARKDOWN_CALLS" ]] && calls="$(cat "$FAKE_CURSOR_MARKDOWN_CALLS")"
+    calls=$((calls + 1))
+    printf '%s' "$calls" > "$FAKE_CURSOR_MARKDOWN_CALLS"
+    var="FAKE_CURSOR_MARKDOWN_RESULT_$calls"
+    result_file="${!var:-$result_file}"
+  fi
+  [[ -n "$result_file" ]] || { echo "fake cursor-agent: missing FAKE_CURSOR_MARKDOWN_RESULT" >&2; exit 2; }
+fi
+result="$(cat "$result_file")"
+printf '{"type":"system","subtype":"init","session_id":"%s","model":"composer-2.5"}\n' "$session_id"
+printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"session_id":"%s"}\n' \
+  "$(printf '%s' "$result" | json_encode)" "$session_id"

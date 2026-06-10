@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanUpdateMeta",
+  "type": "object",
+  "required": ["plan_version", "issues", "applied", "rejected_append"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version after revision (input.plan_version + 1)."
+    },
+    "issues": {
+      "type": "array",
+      "description": "Each original critique issue receives a verdict. Preserve order and ids.",
+      "items": {
+        "type": "object",
+        "required": ["id", "verdict", "verdict_reason", "final_severity", "duplicate_of"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "verdict": {
+            "enum": [
+              "accept",
+              "reject_hallucinated",
+              "reject_out_of_scope",
+              "reject_taste",
+              "downgrade",
+              "duplicate_of_prior"
+            ]
+          },
+          "verdict_reason": {
+            "type": "string"
+          },
+          "final_severity": {
+            "enum": ["blocker", "major", "minor", "nit"]
+          },
+          "duplicate_of": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "applied": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^C[0-9]+$"
+      }
+    },
+    "rejected_append": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "claim", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

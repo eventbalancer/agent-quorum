@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanMarkdownWrapper",
+  "type": "object",
+  "required": ["plan_markdown"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Full markdown output for a role whose provider only emits JSON (codex). The runner extracts this field and treats it as the role's markdown output."
+    }
+  }
+}

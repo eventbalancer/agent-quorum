@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanCritique",
+  "type": "object",
+  "required": ["plan_version", "summary", "issues"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Plan version the critique targets (vN from the plan.vN.md filename)."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 700,
+      "description": "Brief overall verdict on the plan. Target ~2–3 sentences and at most ~500 characters; 700 is a hard cap with headroom, not a goal. Do not enumerate issues."
+    },
+    "issues": {
+      "type": "array",
+      "description": "Structured list of issues. An empty array means the plan is accepted.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "addresses",
+          "severity",
+          "category",
+          "claim",
+          "evidence",
+          "suggested_fix",
+          "confidence",
+          "duplicate_of"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$",
+            "description": "Issue identifier within this iteration: C1, C2, ..."
+          },
+          "addresses": {
+            "type": ["string", "null"],
+            "pattern": "^v[0-9]+\\.C[0-9]+$",
+            "description": "ID of the immediate parent issue from a previous iteration that this issue refines. Use the most recent iteration covering this concern, for example v2.C1. Null if new."
+          },
+          "severity": {
+            "enum": ["blocker", "major", "minor", "nit"],
+            "description": "blocker — the plan cannot be executed as is; major — a serious gap; minor — an improvement; nit — taste."
+          },
+          "category": {
+            "enum": [
+              "correctness",
+              "scope",
+              "risk",
+              "testability",
+              "clarity",
+              "convention",
+              "missing_context",
+              "assumption"
+            ]
+          },
+          "claim": {
+            "type": "string",
+            "description": "The critic's concrete claim. One sentence."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "A quote from the plan or a path:line reference. Without evidence the issue is dropped by the validator as a hallucination."
+          },
+          "suggested_fix": {
+            "type": "string",
+            "description": "What exactly to change in the plan. An action, not a wish."
+          },
+          "confidence": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Critic confidence 0..1 or null. <0.5 — the judge may reject even plausible-looking issues."
+          },
+          "duplicate_of": {
+            "type": ["string", "null"],
+            "description": "Id of the rejected-log.jsonl entry on a repeat. Null if not a repeat. When non-null the severity must be nit."
+          }
+        }
+      }
+    }
+  }
+}

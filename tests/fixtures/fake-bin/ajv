@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+[[ "${1:-}" == "help" ]] && exit 0
+if [[ "${1:-}" == "validate" ]]; then
+  shift
+  schema=""
+  data=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -s)
+        schema="$2"; shift 2 ;;
+      -d)
+        data="$2"; shift 2 ;;
+      --spec|--strict)
+        shift 2 ;;
+      --spec=*|--strict=*)
+        shift ;;
+      *)
+        shift ;;
+    esac
+  done
+  [[ -n "$schema" && -n "$data" ]] || exit 2
+  jq -e --slurpfile doc "$data" '
+    (.required // []) as $required |
+    ($doc[0]) as $data |
+    all($required[]?; . as $key | ($data | has($key)) and ($data[$key] != null))
+  ' "$schema" >/dev/null
+  exit $?
+fi
+exit 0
