@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+pnpm run format
+git add -u
+pnpm run check

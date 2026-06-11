@@ -75,11 +75,26 @@ pnpm run lint         # eslint .
 pnpm run format       # prettier --write .
 pnpm run format-check # prettier --check .
 pnpm run test         # vitest run --coverage
-pnpm run check        # typecheck && lint && format-check && test
+pnpm run check        # build && typecheck && lint && format-check && test
 pnpm run dev          # tsx src/cli/main.ts
 ```
 
 Use `pnpm exec <bin>` for repo-local binaries; never `npx`. `pnpm run check` green is the floor before claiming an implementation is done.
+
+## Pre-commit Hook
+
+The repository ships a pre-commit hook in `.githooks/pre-commit`. It runs
+automatically on `git commit`:
+
+1. `pnpm run format` — rewrites all files with Prettier.
+2. `git add -u` — re-stages any files the formatter changed.
+3. `pnpm run check` — runs the full build · typecheck · lint · format-check ·
+   test pipeline; the commit is blocked if any step fails.
+
+The hook is activated via `core.hooksPath .githooks`. `pnpm install` sets this
+up through the `prepare` lifecycle script so any fresh clone works after
+install. Never pass `--no-verify` to bypass the hook; the conventions forbid
+it.
 
 ## Linting and Editor Tooling
 
