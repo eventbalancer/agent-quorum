@@ -1,6 +1,6 @@
 {
   "name": "agent-quorum",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Iterative plan → critique → update orchestrator driving the Codex, Claude Code, and Cursor Agent CLIs",
   "license": "MIT",
   "author": "Aleksei Filippov <sensiloles@gmail.com>",
