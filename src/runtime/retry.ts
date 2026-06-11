@@ -6,15 +6,19 @@ export interface RetryPolicy {
   retryDelaySeconds: number;
 }
 
+type MaybePromise<T> = T | Promise<T>;
+
 export async function runWithRetries(
   label: string,
   policy: RetryPolicy,
-  attempt: () => Promise<number>,
+  attempt: () => MaybePromise<number>,
 ): Promise<number> {
   let retry = 0;
   for (;;) {
-    const status = await attempt();
-    if (status === 0) return 0;
+    const status = await Promise.resolve(attempt());
+    if (status === 0) {
+      return 0;
+    }
     if (retry >= policy.retryCount) {
       err(`${label} failed after ${retry + 1} attempt(s)`);
       return status;

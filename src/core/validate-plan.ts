@@ -34,10 +34,14 @@ function snapshotWorkspaceFiles(projectRoot: string): string[] {
     for (const entry of entries) {
       const entryRel = rel === '' ? entry.name : `${rel}/${entry.name}`;
       if (entry.isDirectory()) {
-        if (EXCLUDED_DIRS.has(entry.name)) continue;
+        if (EXCLUDED_DIRS.has(entry.name)) {
+          continue;
+        }
         walk(path.join(dir, entry.name), entryRel);
       } else if (entry.isFile()) {
-        if (isGeneratedName(entry.name)) continue;
+        if (isGeneratedName(entry.name)) {
+          continue;
+        }
         out.push(entryRel);
       }
     }
@@ -63,7 +67,9 @@ export function extractPlanCodeSpans(planFile: string): string[] {
     let rest = line;
     for (;;) {
       const match = /`[^`]+`/.exec(rest);
-      if (!match) break;
+      if (!match) {
+        break;
+      }
       spans.push(match[0].slice(1, -1));
       rest = rest.slice(match.index + match[0].length);
     }
@@ -111,11 +117,16 @@ function lineCountOf(file: string): number | undefined {
   }
 }
 
+interface ResolvePlanReferencesResult {
+  counters: ReferenceCounters;
+  findings: Finding[];
+}
+
 function resolvePlanReferences(
   projectRoot: string,
   planFile: string,
   wsFiles: readonly string[],
-): { counters: ReferenceCounters; findings: Finding[] } {
+): ResolvePlanReferencesResult {
   const counters: ReferenceCounters = {
     direct: 0,
     suffix: 0,
@@ -153,8 +164,11 @@ function resolvePlanReferences(
         pattern === undefined ? [] : wsFiles.filter((candidate) => pattern.test(candidate));
       if (matches.length === 1) {
         resolved = matches[0] ?? file;
-        if (file.includes('/')) counters.suffix += 1;
-        else counters.basename += 1;
+        if (file.includes('/')) {
+          counters.suffix += 1;
+        } else {
+          counters.basename += 1;
+        }
       } else if (matches.length > 1) {
         counters.ambiguous += 1;
         counters.ambiguousSamples.push(`${file}:${line} (${matches.length} candidates)`);
@@ -208,10 +222,18 @@ function reportReferenceFindings(counters: ReferenceCounters): void {
     counters.staleLine +
     counters.glob;
   log(`  file:line references: total=${total}`);
-  if (counters.direct > 0) log(`    resolved (direct):   ${counters.direct}`);
-  if (counters.suffix > 0) log(`    resolved (suffix):   ${counters.suffix}`);
-  if (counters.basename > 0) log(`    resolved (basename): ${counters.basename}`);
-  if (counters.glob > 0) log(`    glob (skipped):      ${counters.glob}`);
+  if (counters.direct > 0) {
+    log(`    resolved (direct):   ${counters.direct}`);
+  }
+  if (counters.suffix > 0) {
+    log(`    resolved (suffix):   ${counters.suffix}`);
+  }
+  if (counters.basename > 0) {
+    log(`    resolved (basename): ${counters.basename}`);
+  }
+  if (counters.glob > 0) {
+    log(`    glob (skipped):      ${counters.glob}`);
+  }
   if (counters.ambiguous > 0) {
     log(
       `    ambiguous basename:  ${counters.ambiguous} (e.g. ${counters.ambiguousSamples[0] ?? ''})`,
@@ -223,7 +245,9 @@ function reportReferenceFindings(counters: ReferenceCounters): void {
     );
   }
   if (counters.staleLine > 0) {
-    for (const sample of counters.staleLineSamples) err(`stale line: ${sample}`);
+    for (const sample of counters.staleLineSamples) {
+      err(`stale line: ${sample}`);
+    }
     log(`WARNING: ${counters.staleLine} line-out-of-bounds references in plan.final.md`);
   }
 }
@@ -249,7 +273,9 @@ function scanRuleViolations(planFile: string): number {
       inBlock = false;
       continue;
     }
-    if (inBlock) blocks.push(line);
+    if (inBlock) {
+      blocks.push(line);
+    }
   }
   const codeBlocks = blocks.join('\n');
 
@@ -288,7 +314,9 @@ export interface FindingsCounts {
 }
 
 export function readFindingsCounts(findingsFile: string): FindingsCounts {
-  if (!existsSync(findingsFile)) return { stale: 0, ambiguous: 0, unresolved: 0 };
+  if (!existsSync(findingsFile)) {
+    return { stale: 0, ambiguous: 0, unresolved: 0 };
+  }
   try {
     const parsed = JSON.parse(readFileSync(findingsFile, 'utf8')) as JsonValue;
     const obj =

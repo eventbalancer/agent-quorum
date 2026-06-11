@@ -283,7 +283,9 @@ describe('role permissions resolution', () => {
     const config = defaultPlanLoopConfig();
     const roles = config.roles as Record<string, JsonObject>;
     const reviewer = roles.reviewer;
-    if (reviewer) Reflect.deleteProperty(reviewer, 'disallowedTools');
+    if (reviewer) {
+      Reflect.deleteProperty(reviewer, 'disallowedTools');
+    }
     writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
     const capture = captureStderr();
     try {

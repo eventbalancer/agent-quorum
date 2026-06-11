@@ -177,6 +177,32 @@ describe('clarification gate', () => {
     );
   });
 
+  it('uses Russian Telegram copy when locale is ru', async () => {
+    seedQuestions({
+      questions: [
+        {
+          id: 'Q1',
+          question: 'Какие регионы включаем?',
+          why: 'От этого зависит матрица выкладки.',
+          options: ['Только IO', 'IO и RU'],
+        },
+      ],
+    });
+    stub.queueReply(150, '2');
+    const ctx = makeTestRunContext(tmp, work, scratch, { locale: 'ru', translatePass: 1 });
+
+    const ok = await withEnvAsync(gateEnv(), () =>
+      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+    );
+
+    expect(ok).toBe(true);
+    const sent = stub.sent.join('\n');
+    expect(sent).toContain('Вопрос 1/1');
+    expect(sent).toContain('Варианты');
+    expect(sent).toContain('Готово');
+    expect(readJsonl(path.join(work, 'clarify-answers.jsonl'))[0]?.answer).toBe('IO и RU');
+  });
+
   it('is a no-op when the creator raises no blocking questions', async () => {
     seedQuestions({ questions: [] });
     const ctx = makeTestRunContext(tmp, work, scratch);

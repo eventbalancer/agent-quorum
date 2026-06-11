@@ -25,7 +25,9 @@ export function runInterveneCli(
     switch (true) {
       case arg === '--work': {
         work = args[i + 1] ?? '';
-        if (work === '') usage();
+        if (work === '') {
+          usage();
+        }
         i += 2;
         break;
       }
@@ -35,7 +37,9 @@ export function runInterveneCli(
         break;
       case arg === '--target': {
         target = args[i + 1] ?? '';
-        if (target === '') usage();
+        if (target === '') {
+          usage();
+        }
         i += 2;
         break;
       }
@@ -68,13 +72,17 @@ export function runInterveneCli(
     }
   }
 
-  if (work === '') usage();
+  if (work === '') {
+    usage();
+  }
   if (!['all', 'critic', 'creator', 'fixer', 'reviewer'].includes(target)) {
     process.stderr.write(`invalid target: ${target}\n`);
     usage();
   }
 
-  if (!path.isAbsolute(work)) work = path.join(process.cwd(), work);
+  if (!path.isAbsolute(work)) {
+    work = path.join(process.cwd(), work);
+  }
   if (!existsSync(work) || !statSync(work).isDirectory()) {
     process.stderr.write(`workdir not found: ${work}\n`);
     return 2;
@@ -84,7 +92,9 @@ export function runInterveneCli(
   if (readStdin) {
     message = readFileSync(0, 'utf8');
   } else {
-    if (messageParts.length === 0) usage();
+    if (messageParts.length === 0) {
+      usage();
+    }
     message = messageParts.join(' ');
   }
   if (message === '') {

@@ -10,9 +10,26 @@ let tmp: string;
 let projectRoot: string;
 
 interface Findings {
-  stale_lines: { file: string; line: number; actual_lines: number }[];
-  ambiguous: { file: string; line: number; candidates: string[] }[];
-  unresolved: { file: string; line: number }[];
+  stale_lines: StaleLineFinding[];
+  ambiguous: AmbiguousFinding[];
+  unresolved: UnresolvedFinding[];
+}
+
+interface StaleLineFinding {
+  file: string;
+  line: number;
+  actual_lines: number;
+}
+
+interface AmbiguousFinding {
+  file: string;
+  line: number;
+  candidates: string[];
+}
+
+interface UnresolvedFinding {
+  file: string;
+  line: number;
 }
 
 function setupProject(): void {
@@ -35,7 +52,9 @@ function runValidate(plan: string): number {
     validateFinalPlan(projectRoot, plan);
     return 0;
   } catch (error) {
-    if (error instanceof HaltError) return error.exitCode;
+    if (error instanceof HaltError) {
+      return error.exitCode;
+    }
     throw error;
   } finally {
     capture.restore();

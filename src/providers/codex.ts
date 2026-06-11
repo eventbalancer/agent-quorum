@@ -54,7 +54,9 @@ export async function codexRun(
     pending += chunk.toString();
     for (;;) {
       const nl = pending.indexOf('\n');
-      if (nl === -1) break;
+      if (nl === -1) {
+        break;
+      }
       for (const rendered of filter.line(pending.slice(0, nl))) {
         process.stderr.write(`${rendered}\n`);
       }
@@ -63,10 +65,14 @@ export async function codexRun(
   });
   const status = await waitForExit(child);
   if (pending !== '') {
-    for (const rendered of filter.line(pending)) process.stderr.write(`${rendered}\n`);
+    for (const rendered of filter.line(pending)) {
+      process.stderr.write(`${rendered}\n`);
+    }
   }
 
-  if (status !== 0) return status;
+  if (status !== 0) {
+    return status;
+  }
   if (!nonEmptyFile(outPath)) {
     err('codex produced empty output');
     return 4;

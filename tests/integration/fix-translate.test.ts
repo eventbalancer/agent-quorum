@@ -271,32 +271,35 @@ describe('fix pass', () => {
 });
 
 describe('translate pass', () => {
-  it('writes plan.final.ru.md through the translator role', async () => {
+  it('writes localized final markdown through the translator role', async () => {
     const finalPlan = seedConvergedPlan();
-    const outRu = path.join(work, 'plan.final.ru.md');
+    const outLocalized = path.join(work, 'plan.final.pt-BR.md');
     const translated = path.join(tmp, 'translated.md');
     writeFileSync(translated, '# Plan\n\n## Context\n- Translation.\n');
     const argvLog = path.join(tmp, 'claude.argv');
-    const ctx = makeContext();
+    const promptLog = path.join(tmp, 'claude.prompt');
+    const ctx = makeContext({ locale: 'pt-BR' });
 
     await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: translated,
         FAKE_CLAUDE_ARGV_LOG: argvLog,
+        FAKE_CLAUDE_PROMPT: promptLog,
       },
-      () => runTranslatePass(ctx, finalPlan, outRu),
+      () => runTranslatePass(ctx, finalPlan, outLocalized),
     );
 
-    expect(readFileSync(outRu, 'utf8')).toBe(readFileSync(translated, 'utf8'));
+    expect(readFileSync(outLocalized, 'utf8')).toBe(readFileSync(translated, 'utf8'));
+    expect(readFileSync(promptLog, 'utf8')).toContain('## Target locale\npt-BR');
     expect(capture.text()).toContain('translate-pass: done');
     const record = argvRecords(argvLog)[0] ?? [];
     expect(record[record.indexOf('--permission-mode') + 1]).toBe('default');
   });
 
-  it('failure is non-fatal and leaves no Russian artifact', async () => {
+  it('failure is non-fatal and leaves no localized artifact', async () => {
     const finalPlan = seedConvergedPlan();
-    const outRu = path.join(work, 'plan.final.ru.md');
+    const outLocalized = path.join(work, 'plan.final.ru.md');
     const ctx = makeContext();
 
     await withEnvAsync(
@@ -305,18 +308,18 @@ describe('translate pass', () => {
         FAKE_CLAUDE_ATTEMPTS: path.join(tmp, 'claude.attempts'),
         FAKE_CLAUDE_FAILS: '9',
       },
-      () => runTranslatePass(ctx, finalPlan, outRu),
+      () => runTranslatePass(ctx, finalPlan, outLocalized),
     );
 
-    expect(existsSync(outRu)).toBe(false);
+    expect(existsSync(outLocalized)).toBe(false);
     expect(capture.text()).toContain('translate-pass: failed/timed out');
     expect(capture.text()).toContain('English plan.final.md unaffected');
   });
 
   it('skips when there is no final plan', async () => {
-    const outRu = path.join(work, 'plan.final.ru.md');
+    const outLocalized = path.join(work, 'plan.final.ru.md');
     const ctx = makeContext();
-    await runTranslatePass(ctx, path.join(work, 'plan.final.md'), outRu);
+    await runTranslatePass(ctx, path.join(work, 'plan.final.md'), outLocalized);
     expect(capture.text()).toContain('translate-pass: no final plan — skipping');
   });
 });

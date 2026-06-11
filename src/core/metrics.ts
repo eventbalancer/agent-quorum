@@ -32,7 +32,9 @@ export function critiqueHealth(
     const id = obj.id;
     const idText =
       id === null || id === undefined ? '' : typeof id === 'string' ? id : JSON.stringify(id);
-    if (idText === '') continue;
+    if (idText === '') {
+      continue;
+    }
     const addresses = obj.addresses;
     const ref =
       addresses === null || addresses === undefined || addresses === false
@@ -63,8 +65,11 @@ export function critiqueHealth(
       const parentIssues =
         isJsonObject(parent) && Array.isArray(parent.issues) ? parent.issues : [];
       const found = parentIssues.some((p) => isJsonObject(p) && p.id === parentId);
-      if (found) addressed += 1;
-      else invalid += 1;
+      if (found) {
+        addressed += 1;
+      } else {
+        invalid += 1;
+      }
     }
   }
 

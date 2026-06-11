@@ -7,12 +7,26 @@ export interface TelegramStub {
   close: () => Promise<void>;
 }
 
+interface StubChat {
+  id: number;
+}
+
+interface StubMessage {
+  chat: StubChat;
+  text: string;
+}
+
+interface StubUpdate {
+  update_id: number;
+  message: StubMessage;
+}
+
 // Minimal Bot API stub served over PLAN_LOOP_TELEGRAM_API_BASE. getUpdates pops
 // one queued reply per call (mirroring the reference test queue); sendMessage
 // records the text and returns a message id.
 export async function startTelegramStub(chatId = '42'): Promise<TelegramStub> {
   const sent: string[] = [];
-  const queue: { update_id: number; message: { chat: { id: number }; text: string } }[] = [];
+  const queue: StubUpdate[] = [];
 
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -55,8 +69,11 @@ export async function startTelegramStub(chatId = '42'): Promise<TelegramStub> {
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {
-          if (error) reject(error);
-          else resolve();
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
         });
       }),
   };

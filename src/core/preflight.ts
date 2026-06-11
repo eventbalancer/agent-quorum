@@ -6,11 +6,15 @@ import type { Runner } from '../types.js';
 
 export function commandExists(name: string): boolean {
   for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (dir === '') continue;
+    if (dir === '') {
+      continue;
+    }
     const candidate = path.join(dir, name);
     try {
       accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return true;
+      if (statSync(candidate).isFile()) {
+        return true;
+      }
     } catch {
       /* keep scanning */
     }
@@ -51,7 +55,9 @@ function probeAuth(runner: Runner, cursorBin: string): string | undefined {
   } catch {
     status = null;
   }
-  if (status === 0) return undefined;
+  if (status === 0) {
+    return undefined;
+  }
   if (status === 1) {
     return `preflight: ${runner} is installed but not authenticated — run \`${probe.remedy}\``;
   }
@@ -68,15 +74,21 @@ export function preflightRunners(
   cursorBin: string,
 ): PreflightFailure | undefined {
   for (const runner of required) {
-    if (runner === 'codex' && !commandExists('codex')) return { message: 'codex is required' };
-    if (runner === 'claude' && !commandExists('claude')) return { message: 'claude is required' };
+    if (runner === 'codex' && !commandExists('codex')) {
+      return { message: 'codex is required' };
+    }
+    if (runner === 'claude' && !commandExists('claude')) {
+      return { message: 'claude is required' };
+    }
     if (runner === 'cursor' && !commandExists(cursorBin)) {
       return { message: 'cursor-agent is required' };
     }
   }
   for (const runner of required) {
     const failure = probeAuth(runner, cursorBin);
-    if (failure !== undefined) return { message: failure };
+    if (failure !== undefined) {
+      return { message: failure };
+    }
   }
   return undefined;
 }

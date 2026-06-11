@@ -16,7 +16,13 @@ export interface WatchdogKnobs {
   translatePass: PassKnobs;
 }
 
-function envNumber(name: string, fallback: number): { name: string; raw: string; value: number } {
+interface EnvNumberEntry {
+  name: string;
+  raw: string;
+  value: number;
+}
+
+function envNumber(name: string, fallback: number): EnvNumberEntry {
   const raw = process.env[name];
   if (raw === undefined || raw === '') {
     return { name, raw: String(fallback), value: fallback };
@@ -24,7 +30,7 @@ function envNumber(name: string, fallback: number): { name: string; raw: string;
   return { name, raw, value: Number(raw) };
 }
 
-function requireNonNegativeInteger(entry: { name: string; raw: string; value: number }): number {
+function requireNonNegativeInteger(entry: EnvNumberEntry): number {
   if (!/^[0-9]+$/.test(entry.raw)) {
     throw new HaltError(`${entry.name} expects a non-negative integer`, 1);
   }

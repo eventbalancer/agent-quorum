@@ -53,7 +53,9 @@ async function claudeStreamToFile(
   const { status, output } = await claudeStream(rt, promptText, args);
   if (mode === 'markdown') {
     writeFileSync(outFile, output);
-    if (status !== 0) return status;
+    if (status !== 0) {
+      return status;
+    }
     if (output.length === 0) {
       err('claude produced no final result');
       return 4;
@@ -61,7 +63,9 @@ async function claudeStreamToFile(
     return 0;
   }
 
-  if (status !== 0) return status;
+  if (status !== 0) {
+    return status;
+  }
   if (output.length === 0) {
     err('claude produced no final result');
     return 4;
@@ -95,7 +99,9 @@ async function claudeRunOnce(
     ...session.args,
     ...invokeArgs,
   ]);
-  if (status === 0) return 0;
+  if (status === 0) {
+    return 0;
+  }
 
   const isStallWithLiveSession =
     status === rt.claudeKnobs.stallStatus && sessionFile !== '' && nonEmptyFile(sessionFile);
@@ -108,7 +114,9 @@ async function claudeRunOnce(
       ...resumeArgs,
       ...invokeArgs,
     ]);
-    if (status === 0) return 0;
+    if (status === 0) {
+      return 0;
+    }
   }
 
   if (sessionFile !== '') {

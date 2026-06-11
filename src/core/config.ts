@@ -14,6 +14,7 @@ const SETTINGS_KEYS = [
   'effort',
   'fix',
   'translate',
+  'locale',
   'diffThreshold',
   'retryCount',
   'retryDelaySeconds',
@@ -63,6 +64,7 @@ export interface CliSettings {
   effort?: string;
   fix?: string;
   translate?: string;
+  locale?: string;
 }
 
 export interface RunSettings {
@@ -70,6 +72,7 @@ export interface RunSettings {
   effort: string;
   fixPass: 0 | 1;
   translatePass: 0 | 1;
+  locale: string;
   diffThreshold: number;
   retryCount: number;
   retryDelaySeconds: number;
@@ -82,7 +85,9 @@ function halt(message: string): never {
 
 export function configFilePath(): string {
   const override = process.env.PLAN_LOOP_CONFIG_FILE;
-  if (override) return override;
+  if (override) {
+    return override;
+  }
   return path.join(packageRoot(), 'plan-loop.json');
 }
 
@@ -96,27 +101,37 @@ export function resetConfigCache(): void {
 
 function configWarnUnknown(config: JsonObject): void {
   for (const key of Object.keys(config).sort()) {
-    if (key === 'version' || key === 'roles' || key === 'settings') continue;
+    if (key === 'version' || key === 'roles' || key === 'settings') {
+      continue;
+    }
     log(`WARNING: plan-loop.json ignoring unknown top-level key '${key}'`);
   }
   const settings = config.settings;
   if (isJsonObject(settings)) {
     for (const key of Object.keys(settings).sort()) {
-      if (SETTINGS_KEYS.includes(key)) continue;
+      if (SETTINGS_KEYS.includes(key)) {
+        continue;
+      }
       log(`WARNING: plan-loop.json ignoring unknown setting '${key}'`);
     }
   }
   const roles = config.roles;
   if (isJsonObject(roles)) {
     for (const key of Object.keys(roles).sort()) {
-      if ((PLAN_LOOP_ROLES as readonly string[]).includes(key)) continue;
+      if ((PLAN_LOOP_ROLES as readonly string[]).includes(key)) {
+        continue;
+      }
       log(`WARNING: plan-loop.json ignoring unknown role '${key}'`);
     }
     for (const role of PLAN_LOOP_ROLES) {
       const roleConfig = roles[role];
-      if (!isJsonObject(roleConfig)) continue;
+      if (!isJsonObject(roleConfig)) {
+        continue;
+      }
       for (const key of Object.keys(roleConfig).sort()) {
-        if (ROLE_FIELD_KEYS.includes(key)) continue;
+        if (ROLE_FIELD_KEYS.includes(key)) {
+          continue;
+        }
         log(`WARNING: plan-loop.json ignoring unknown field '${role}.${key}'`);
       }
     }
@@ -124,7 +139,9 @@ function configWarnUnknown(config: JsonObject): void {
 }
 
 function isValidToolField(value: JsonValue | undefined): boolean {
-  if (typeof value === 'string') return value.length > 0;
+  if (typeof value === 'string') {
+    return value.length > 0;
+  }
   if (Array.isArray(value)) {
     return value.length > 0 && value.every((item) => typeof item === 'string' && item.length > 0);
   }
@@ -133,15 +150,23 @@ function isValidToolField(value: JsonValue | undefined): boolean {
 
 function roleField(config: JsonObject, role: string, field: string): JsonValue | undefined {
   const roles = config.roles;
-  if (!isJsonObject(roles)) return undefined;
+  if (!isJsonObject(roles)) {
+    return undefined;
+  }
   const roleConfig = roles[role];
-  if (!isJsonObject(roleConfig)) return undefined;
+  if (!isJsonObject(roleConfig)) {
+    return undefined;
+  }
   return roleConfig[field];
 }
 
 export function validatePlanLoopConfig(file: string): JsonObject {
-  if (validatedFile === file && validatedConfig !== undefined) return validatedConfig;
-  if (!existsSync(file)) halt(`plan-loop config: file not found: ${file}`);
+  if (validatedFile === file && validatedConfig !== undefined) {
+    return validatedConfig;
+  }
+  if (!existsSync(file)) {
+    halt(`plan-loop config: file not found: ${file}`);
+  }
   let parsed: JsonValue;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
@@ -151,9 +176,15 @@ export function validatePlanLoopConfig(file: string): JsonObject {
   const config: JsonObject = isJsonObject(parsed) ? parsed : {};
 
   configWarnUnknown(config);
-  if (!('version' in config)) halt('plan-loop config: missing required field version');
-  if (!isJsonObject(config.settings)) halt('plan-loop config: missing required object settings');
-  if (!isJsonObject(config.roles)) halt('plan-loop config: missing required object roles');
+  if (!('version' in config)) {
+    halt('plan-loop config: missing required field version');
+  }
+  if (!isJsonObject(config.settings)) {
+    halt('plan-loop config: missing required object settings');
+  }
+  if (!isJsonObject(config.roles)) {
+    halt('plan-loop config: missing required object roles');
+  }
 
   for (const field of [
     'iters',
@@ -211,11 +242,19 @@ export function validatePlanLoopConfig(file: string): JsonObject {
 // null/absent resolve to empty (treated as missing by the precedence chain).
 function configFileSetting(config: JsonObject, key: string): string {
   const settings = config.settings;
-  if (!isJsonObject(settings)) return '';
+  if (!isJsonObject(settings)) {
+    return '';
+  }
   const value = settings[key];
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
   return JSON.stringify(value, null, 2);
 }
 
@@ -225,37 +264,86 @@ function resolveSetting(
   key: string,
   config: JsonObject,
 ): string {
-  if (cli) return cli;
+  if (cli) {
+    return cli;
+  }
   if (envName) {
     const envVal = process.env[envName];
-    if (envVal) return envVal;
+    if (envVal) {
+      return envVal;
+    }
   }
   const fileVal = configFileSetting(config, key);
-  if (fileVal) return fileVal;
+  if (fileVal) {
+    return fileVal;
+  }
   halt(`plan-loop config: missing required setting settings.${key}`);
 }
 
-function resolveSettingDefault(
-  cli: string | undefined,
-  envName: string | undefined,
-  key: string,
-  config: JsonObject,
-  defaultValue: string,
-): string {
-  if (cli) return cli;
-  if (envName) {
-    const envVal = process.env[envName];
-    if (envVal) return envVal;
+function parseBooleanSetting(raw: string, key: string): 0 | 1 {
+  if (raw === 'true' || raw === '1' || raw === 'on' || raw === 'yes') {
+    return 1;
   }
-  const fileVal = configFileSetting(config, key);
-  if (fileVal) return fileVal;
-  return defaultValue;
+  if (raw === 'false' || raw === '0' || raw === 'off' || raw === 'no') {
+    return 0;
+  }
+  halt(`plan-loop config: settings.${key} must be true or false (got '${raw}')`);
 }
 
-function parseBooleanSetting(raw: string, key: string): 0 | 1 {
-  if (raw === 'true' || raw === '1' || raw === 'on' || raw === 'yes') return 1;
-  if (raw === 'false' || raw === '0' || raw === 'off' || raw === 'no') return 0;
-  halt(`plan-loop config: settings.${key} must be true or false (got '${raw}')`);
+// Default locale when nothing requests one: operator interaction and the
+// companion plan stay in English and no translate pass runs.
+const DEFAULT_LOCALE = 'en';
+// Back-compat: a bare --translate / settings.translate with no explicit locale
+// still produces the Russian companion plan the tool historically emitted.
+const LEGACY_TRANSLATE_LOCALE = 'ru';
+
+function normalizeLocale(raw: string): string {
+  const locale = raw.trim();
+  if (locale === '') {
+    return '';
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(locale)) {
+    halt(`plan-loop config: settings.locale must be a locale tag (got '${raw}')`);
+  }
+  return locale;
+}
+
+function localeNeedsTranslation(locale: string): boolean {
+  return !/^en([._-]|$)/i.test(locale);
+}
+
+interface ResolvedLocales {
+  cliLocale: string;
+  envLocale: string;
+  fileLocale: string;
+}
+
+// Translate-pass precedence: an explicit --translate / PLAN_LOOP_TRANSLATE /
+// settings.translate toggle wins at its level; otherwise a requested locale
+// implies the pass unless it is English. cli > env > file throughout.
+function resolveTranslatePass(
+  cli: CliSettings,
+  config: JsonObject,
+  locales: ResolvedLocales,
+): 0 | 1 {
+  if (cli.translate !== undefined) {
+    return parseBooleanSetting(cli.translate, 'translate');
+  }
+  if (locales.cliLocale !== '') {
+    return localeNeedsTranslation(locales.cliLocale) ? 1 : 0;
+  }
+  const envTranslate = process.env.PLAN_LOOP_TRANSLATE ?? '';
+  if (envTranslate !== '') {
+    return parseBooleanSetting(envTranslate, 'translate');
+  }
+  if (locales.envLocale !== '') {
+    return localeNeedsTranslation(locales.envLocale) ? 1 : 0;
+  }
+  const fileTranslate = configFileSetting(config, 'translate');
+  if (fileTranslate !== '') {
+    return parseBooleanSetting(fileTranslate, 'translate');
+  }
+  return locales.fileLocale !== '' && localeNeedsTranslation(locales.fileLocale) ? 1 : 0;
 }
 
 export function resolveRunSettings(cli: CliSettings, file: string = configFilePath()): RunSettings {
@@ -278,10 +366,15 @@ export function resolveRunSettings(cli: CliSettings, file: string = configFilePa
   );
 
   const fixPass = parseBooleanSetting(resolveSetting(cli.fix, undefined, 'fix', config), 'fix');
-  const translatePass = parseBooleanSetting(
-    resolveSettingDefault(cli.translate, 'PLAN_LOOP_TRANSLATE', 'translate', config, 'true'),
-    'translate',
-  );
+  const cliLocale = normalizeLocale(cli.locale ?? '');
+  const envLocale = normalizeLocale(process.env.PLAN_LOOP_LOCALE ?? '');
+  const fileLocale = normalizeLocale(configFileSetting(config, 'locale'));
+  const requestedLocale = cliLocale || envLocale || fileLocale;
+  const translatePass = resolveTranslatePass(cli, config, { cliLocale, envLocale, fileLocale });
+  const usesLegacyRussianDefault = translatePass === 1 && requestedLocale === '';
+  const locale = usesLegacyRussianDefault
+    ? LEGACY_TRANSLATE_LOCALE
+    : requestedLocale || DEFAULT_LOCALE;
 
   if (!/^[0-9]+$/.test(maxIters) || Number(maxIters) <= 0) {
     halt(`plan-loop config: iters must be a positive integer (got '${maxIters}')`);
@@ -303,6 +396,7 @@ export function resolveRunSettings(cli: CliSettings, file: string = configFilePa
     effort,
     fixPass,
     translatePass,
+    locale,
     diffThreshold: Number(diffThreshold),
     retryCount: Number(retryCount),
     retryDelaySeconds: Number(retryDelaySeconds),
@@ -311,7 +405,9 @@ export function resolveRunSettings(cli: CliSettings, file: string = configFilePa
 
 function configFileValue(config: JsonObject, role: string, field: string): string {
   const value = roleField(config, role, field);
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value;
+  }
   return '';
 }
 
@@ -410,8 +506,12 @@ export function resolveRolePermissions(file: string = configFilePath()): RolePer
 
 export function runnersInUse(matrix: RoleMatrix, fixPass: 0 | 1, translatePass: 0 | 1): Runner[] {
   const roles: Role[] = ['critic', 'creator'];
-  if (fixPass === 1) roles.push('fixer', 'reviewer');
-  if (translatePass === 1) roles.push('translator');
+  if (fixPass === 1) {
+    roles.push('fixer', 'reviewer');
+  }
+  if (translatePass === 1) {
+    roles.push('translator');
+  }
   const seen = new Set(roles.map((role) => matrix[role].runner));
   const order: Runner[] = ['codex', 'claude', 'cursor'];
   return order.filter((runner) => seen.has(runner));

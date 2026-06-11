@@ -15,6 +15,7 @@ export interface RunPlanLoopOptions {
   effort?: Effort;
   fix?: boolean;
   translate?: boolean;
+  locale?: string;
   workDir?: string;
   configFile?: string;
 }
@@ -58,14 +59,32 @@ export type InterventionTarget = 'all' | 'critic' | 'creator' | 'fixer' | 'revie
 
 function commonArgs(options: RunPlanLoopOptions): string[] {
   const args: string[] = [];
-  if (options.iters !== undefined) args.push('--iters', String(options.iters));
-  if (options.effort !== undefined) args.push('--effort', options.effort);
-  if (options.fix === true) args.push('--fix');
-  if (options.fix === false) args.push('--no-fix');
-  if (options.translate === true) args.push('--translate');
-  if (options.translate === false) args.push('--no-translate');
-  if (options.prompt === true) args.push('--prompt', options.input);
-  else args.push(options.input);
+  if (options.iters !== undefined) {
+    args.push('--iters', String(options.iters));
+  }
+  if (options.effort !== undefined) {
+    args.push('--effort', options.effort);
+  }
+  if (options.fix === true) {
+    args.push('--fix');
+  }
+  if (options.fix === false) {
+    args.push('--no-fix');
+  }
+  if (options.translate === true) {
+    args.push('--translate');
+  }
+  if (options.translate === false) {
+    args.push('--no-translate');
+  }
+  if (options.locale !== undefined) {
+    args.push('--locale', options.locale);
+  }
+  if (options.prompt === true) {
+    args.push('--prompt', options.input);
+  } else {
+    args.push(options.input);
+  }
   return args;
 }
 
@@ -78,7 +97,9 @@ function runOverrides(options: RunPlanLoopOptions): RunOverrides {
 
 function toRunResult(outcome: RunOutcome): RunResult {
   const report = outcome.report;
-  if (report === undefined) return { exitCode: outcome.exitCode };
+  if (report === undefined) {
+    return { exitCode: outcome.exitCode };
+  }
   return {
     exitCode: outcome.exitCode,
     workDir: report.workDir,
@@ -101,7 +122,9 @@ function toRunResult(outcome: RunOutcome): RunResult {
 
 function haltToExit(error: unknown): number {
   if (error instanceof HaltError) {
-    if (!error.logged) process.stderr.write(`${error.message}\n`);
+    if (!error.logged) {
+      process.stderr.write(`${error.message}\n`);
+    }
     return error.exitCode;
   }
   throw error;

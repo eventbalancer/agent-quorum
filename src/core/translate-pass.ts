@@ -34,9 +34,10 @@ function translateRuntime(ctx: RunContext): ProviderRuntime {
 export async function runTranslatePass(
   ctx: RunContext,
   finalPlan: string,
-  outRu: string,
+  outFile: string,
 ): Promise<void> {
   const rt = translateRuntime(ctx);
+  const locale = ctx.settings.locale;
 
   if (!nonEmptyFile(finalPlan)) {
     log('translate-pass: no final plan — skipping');
@@ -44,15 +45,16 @@ export async function runTranslatePass(
   }
 
   log(
-    `translate-pass: ${rt.matrix.translator.runner} translate (${rt.matrix.translator.model} reasoning=${rt.matrix.translator.reasoning})`,
+    `translate-pass: ${rt.matrix.translator.runner} translate to ${locale} (${rt.matrix.translator.model} reasoning=${rt.matrix.translator.reasoning})`,
   );
-  const translatePrompt = `## Plan\n${readStripped(finalPlan)}`;
+  const translatePrompt =
+    `## Target locale\n${locale}\n` + '\n' + `## Plan\n${readStripped(finalPlan)}`;
 
   const status = await providerRun(
     rt,
     'translator',
     'markdown',
-    outRu,
+    outFile,
     ctx.skills.translatorSkill,
     '',
     ctx.permissions.translator.tools,
@@ -60,14 +62,14 @@ export async function runTranslatePass(
     translatePrompt,
   );
 
-  if (status !== 0 || !nonEmptyFile(outRu)) {
+  if (status !== 0 || !nonEmptyFile(outFile)) {
     err(
-      `translate-pass: failed/timed out (status=${status}) — Russian plan not produced; English plan.final.md unaffected`,
+      `translate-pass: failed/timed out (status=${status}) — localized plan not produced; English plan.final.md unaffected`,
     );
-    rmSync(outRu, { force: true });
+    rmSync(outFile, { force: true });
     return;
   }
 
-  log(`translate-pass:   → plan.final.ru.md created (${fileLineCount(outRu)} lines)`);
+  log(`translate-pass:   → ${outFile} created (${fileLineCount(outFile)} lines)`);
   log('translate-pass: done');
 }

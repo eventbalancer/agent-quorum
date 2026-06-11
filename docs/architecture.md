@@ -11,7 +11,7 @@ Five roles drive the loop, each resolved to a provider through
 | creator    | creates plan.v0 and applies critique verdicts      | markdown + JSON        |
 | fixer      | proposes/applies reference fixes after convergence | markdown               |
 | reviewer   | reviews the fixer's proposal                       | JSON (review schema)   |
-| translator | renders the Russian companion plan                 | markdown               |
+| translator | renders the localized companion plan               | markdown               |
 
 Three provider adapters share one entry point (`providerRun`) that owns the
 single retry wrapper:
@@ -44,15 +44,15 @@ Post-convergence: the reference validator mines `file:line` tokens out of code
 spans, resolves them against an in-process workspace snapshot, and writes
 `findings.json`; the fix pass proposes → reviews → applies (every failure path
 keeps the converged plan); the final status computes clean / needs-review /
-blocked; the non-fatal translate pass renders `plan.final.ru.md`; `summary.md`
-closes the run.
+blocked; when a locale is requested, the non-fatal translate pass renders
+`plan.final.<locale>.md`; `summary.md` closes the run.
 
 ## Artifact contract ($WORK)
 
 `plan.vN.md`, `critique.vN.json`, `update.vN.json`, `update-meta.vN.json`,
 `plan.revision.vN.md`, `*.raw` normalization sidecars, `plan.final.md`,
 `plan.final.before-fix.md`, `fix-proposal.md`, `fix-review.json`,
-`fix-applied.md`, `plan.final.ru.md`, `findings.json`, `summary.md`,
+`fix-applied.md`, optional `plan.final.<locale>.md`, `findings.json`, `summary.md`,
 `rejected-log.jsonl`, `operator-interventions.jsonl`,
 `operator-intervention-migrations.jsonl`, `clarify-questions.json`,
 `clarify-answers.jsonl`, `clarify.offset`, `clarify.done`, `prompt.md`,

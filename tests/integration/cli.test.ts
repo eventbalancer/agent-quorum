@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runCli, runCliAsync } from '../helpers/cli.js';
+import { runCli, runCliAsync, type EnvOverrides } from '../helpers/cli.js';
 import {
   emptyCritique,
   REPO_ROOT,
@@ -17,9 +17,7 @@ let tmp: string;
 let fake: string;
 let work: string;
 
-function baseEnv(
-  extra: Record<string, string | undefined> = {},
-): Record<string, string | undefined> {
+function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
     PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),

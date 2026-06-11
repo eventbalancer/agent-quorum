@@ -17,7 +17,9 @@ function ensureSessionId(file: string): string {
 // Empty sessionFile means stateless: no --session-id/--resume. Only
 // (creator, claude) and (creator, cursor) under SESSION_MODE pass a file.
 export function claudeSessionArgs(sessionFile: string): SessionArgs {
-  if (sessionFile === '') return { args: [], wasResume: false };
+  if (sessionFile === '') {
+    return { args: [], wasResume: false };
+  }
   if (nonEmptyFile(sessionFile)) {
     return { args: ['--resume', readFileSync(sessionFile, 'utf8').trim()], wasResume: true };
   }
@@ -27,7 +29,9 @@ export function claudeSessionArgs(sessionFile: string): SessionArgs {
 // Cursor assigns session_id on the first result event; until captured there is
 // no session arg at all.
 export function cursorSessionArgs(sessionFile: string): SessionArgs {
-  if (sessionFile === '') return { args: [], wasResume: false };
+  if (sessionFile === '') {
+    return { args: [], wasResume: false };
+  }
   if (nonEmptyFile(sessionFile)) {
     return { args: ['--resume', readFileSync(sessionFile, 'utf8').trim()], wasResume: true };
   }

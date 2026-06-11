@@ -13,7 +13,12 @@ import type { RunOverrides } from '../types.js';
 // The detached runner entry resolves from this module's own location (not
 // process.argv) so the library API can launch too: dist runs node main.js,
 // source runs main.ts through the local tsx.
-function runnerCommand(): { command: string; baseArgs: string[] } {
+interface RunnerCommand {
+  command: string;
+  baseArgs: string[];
+}
+
+function runnerCommand(): RunnerCommand {
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
   if (!here.endsWith('.ts')) {
@@ -75,14 +80,18 @@ export async function runLaunchCli(
         break;
       case arg === '--iters' || arg === '--max-iters': {
         const value = args[i + 1];
-        if (value === undefined || value === '') fail(`${arg} needs a value`, 2);
+        if (value === undefined || value === '') {
+          fail(`${arg} needs a value`, 2);
+        }
         passArgs.push(arg, value);
         i += 2;
         break;
       }
       case arg === '--prompt': {
         const value = args[i + 1];
-        if (value === undefined || value === '') fail('--prompt needs a file', 2);
+        if (value === undefined || value === '') {
+          fail('--prompt needs a file', 2);
+        }
         passArgs.push('--prompt', value);
         input = value;
         i += 2;
@@ -90,7 +99,9 @@ export async function runLaunchCli(
       }
       case arg === '--effort': {
         const value = args[i + 1];
-        if (value === undefined || value === '') fail('--effort needs a value', 2);
+        if (value === undefined || value === '') {
+          fail('--effort needs a value', 2);
+        }
         effortVal = value;
         passArgs.push('--effort', value);
         i += 2;
@@ -98,6 +109,22 @@ export async function runLaunchCli(
       }
       case arg.startsWith('--effort='):
         effortVal = arg.slice('--effort='.length);
+        passArgs.push(arg);
+        i += 1;
+        break;
+      case arg === '--locale': {
+        const value = args[i + 1];
+        if (value === undefined || value === '') {
+          fail('--locale needs a value', 2);
+        }
+        passArgs.push('--locale', value);
+        i += 2;
+        break;
+      }
+      case arg.startsWith('--locale='):
+        if (arg.slice('--locale='.length) === '') {
+          fail('--locale needs a value', 2);
+        }
         passArgs.push(arg);
         i += 1;
         break;
@@ -118,7 +145,9 @@ export async function runLaunchCli(
         fail(`unknown flag: ${arg}`, 2);
         break;
       default:
-        if (input !== '') fail(`unexpected extra arg: ${arg}`, 2);
+        if (input !== '') {
+          fail(`unexpected extra arg: ${arg}`, 2);
+        }
         input = arg;
         passArgs.push(arg);
         i += 1;
@@ -131,7 +160,9 @@ export async function runLaunchCli(
     process.stderr.write('see --help\n');
     throw new HaltError('missing input.md', 2, true);
   }
-  if (!existsSync(input) || !statSync(input).isFile()) fail(`input not found: ${input}`, 2);
+  if (!existsSync(input) || !statSync(input).isFile()) {
+    fail(`input not found: ${input}`, 2);
+  }
 
   const absInput = path.resolve(input);
   const base = path.basename(absInput, path.extname(absInput));
@@ -140,8 +171,12 @@ export async function runLaunchCli(
   let workOverride = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
   if (resume && (workOverride === undefined || workOverride === '')) {
     const resolved = resolveResumeWorkdir(plansDir, base, effortVal);
-    if (resolved.kind === 'none') throw new HaltError('resume: no workdir', 3, true);
-    if (resolved.kind === 'ambiguous') throw new HaltError('resume: ambiguous workdir', 4, true);
+    if (resolved.kind === 'none') {
+      throw new HaltError('resume: no workdir', 3, true);
+    }
+    if (resolved.kind === 'ambiguous') {
+      throw new HaltError('resume: ambiguous workdir', 4, true);
+    }
     workOverride = resolved.dir;
     process.stderr.write(`resume: attaching to ${resolved.dir}\n`);
   }
@@ -158,9 +193,15 @@ export async function runLaunchCli(
   }
 
   const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
-  if (resume) env.PLAN_LOOP_RESUME = '1';
-  if (workOverride !== undefined && workOverride !== '') env.PLAN_LOOP_WORK_DIR = workOverride;
-  if (overrides.configFile !== undefined) env.PLAN_LOOP_CONFIG_FILE = overrides.configFile;
+  if (resume) {
+    env.PLAN_LOOP_RESUME = '1';
+  }
+  if (workOverride !== undefined && workOverride !== '') {
+    env.PLAN_LOOP_WORK_DIR = workOverride;
+  }
+  if (overrides.configFile !== undefined) {
+    env.PLAN_LOOP_CONFIG_FILE = overrides.configFile;
+  }
 
   const runner = runnerCommand();
   const logFd = openSync(logPath, 'w');

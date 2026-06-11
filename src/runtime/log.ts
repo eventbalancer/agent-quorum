@@ -1,9 +1,15 @@
+export interface ColorStream {
+  isTTY?: boolean;
+}
+
 // Computed per call (never cached at import time) so a NO_COLOR/isTTY change
 // after module load takes effect. NO_COLOR follows no-color.org: present and
 // non-empty disables color regardless of its value.
-export function colorsEnabled(stream: { isTTY?: boolean } = process.stderr): boolean {
+export function colorsEnabled(stream: ColorStream = process.stderr): boolean {
   const noColor = process.env.NO_COLOR;
-  if (noColor !== undefined && noColor !== '') return false;
+  if (noColor !== undefined && noColor !== '') {
+    return false;
+  }
   return stream.isTTY === true;
 }
 

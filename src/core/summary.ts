@@ -28,13 +28,17 @@ function updateIssueCount(file: string, predicate: (issue: JsonObject) => boolea
 
 function lineCount(content: string): number {
   let count = 0;
-  for (const ch of content) if (ch === '\n') count += 1;
+  for (const ch of content) {
+    if (ch === '\n') {
+      count += 1;
+    }
+  }
   return count;
 }
 
 export interface SummaryInput {
   iter: number;
-  finalRuFile: string;
+  localizedFinalFile: string;
   finalStale: number;
   finalAmbiguous: number;
   finalUnresolved: number;
@@ -46,7 +50,9 @@ export interface SummaryInput {
 // never drift from the `final_health` line in summary.md.
 function finalHealth(ctx: RunContext): CritiqueHealth | undefined {
   const lastCritique = path.join(ctx.work, `critique.v${ctx.lastCritiqueIter}.json`);
-  if (ctx.lastCritiqueIter < 0 || !existsSync(lastCritique)) return undefined;
+  if (ctx.lastCritiqueIter < 0 || !existsSync(lastCritique)) {
+    return undefined;
+  }
   return critiqueHealth(ctx.work, ctx.skills.criticSchema, ctx.lastCritiqueIter, lastCritique);
 }
 
@@ -83,8 +89,13 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   lines.push(`- workdir: \`${ctx.work}\``);
   lines.push(`- iterations: ${input.iter}`);
   lines.push(`- final: \`${finalPlan}\``);
-  if (existsSync(input.finalRuFile) && statSync(input.finalRuFile).size > 0) {
-    lines.push(`- final_ru: \`${input.finalRuFile}\``);
+  lines.push(`- locale: ${ctx.settings.locale}`);
+  const hasLocalizedFinal =
+    ctx.settings.translatePass === 1 &&
+    existsSync(input.localizedFinalFile) &&
+    statSync(input.localizedFinalFile).size > 0;
+  if (hasLocalizedFinal) {
+    lines.push(`- final_localized: \`${input.localizedFinalFile}\``);
   }
   lines.push(`- resume_start: ${ctx.resume.startIter}`);
   lines.push(`- archived_stale_artifacts: ${ctx.resume.archivedCount}`);
@@ -122,7 +133,9 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   lines.push('## Per-iteration');
   for (let i = 0; i <= input.iter; i += 1) {
     const critique = path.join(ctx.work, `critique.v${i}.json`);
-    if (!existsSync(critique)) continue;
+    if (!existsSync(critique)) {
+      continue;
+    }
     const raw = jsonArrayLength(critique, 'issues');
     const update = path.join(ctx.work, `update.v${i}.json`);
     const acc = updateIssueCount(

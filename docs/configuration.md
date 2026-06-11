@@ -13,7 +13,8 @@ a controlled error; unknown keys warn and are ignored.
     "iters": 7,              // iteration cap (required)
     "effort": "high",        // low | high | max (required)
     "fix": true,             // reference fix pass (required)
-    "translate": true,       // russian companion plan (optional, default true)
+    "locale": "en",          // human interaction locale (optional, default en)
+    "translate": false,      // compatibility translate-pass toggle (optional)
     "diffThreshold": 5,      // stable-diff convergence threshold (required)
     "retryCount": 3,         // provider retry attempts (required)
     "retryDelaySeconds": 10  // delay between retries (required)
@@ -35,8 +36,10 @@ string or a non-empty string array (joined with commas).
 
 ### Precedence
 
-- Loop settings: `CLI > env > file`. `effort` and `fix` deliberately have no
-  env layer (`--effort`/`--fix`/`--no-fix` or the file).
+- Loop settings: `CLI > env > file`. `locale` defaults to `en`; non-English
+  locales enable the localized final companion plan unless `translate` is
+  explicitly off. `effort` and `fix` deliberately have no env layer
+  (`--effort`/`--fix`/`--no-fix` or the file).
 - Role matrix (`runner`/`model`/`reasoning`): `env > file`.
 - Tool permissions: file only.
 
@@ -66,7 +69,7 @@ default. The CLI contract stays env-first ([details](api.md)).
 ### Loop settings (env layer)
 
 `PLAN_LOOP_MAX_ITERS`, `PLAN_LOOP_DIFF_THRESHOLD`, `PLAN_LOOP_RETRY_COUNT`,
-`PLAN_LOOP_RETRY_DELAY_SECONDS`, `PLAN_LOOP_TRANSLATE`,
+`PLAN_LOOP_RETRY_DELAY_SECONDS`, `PLAN_LOOP_LOCALE`, `PLAN_LOOP_TRANSLATE`,
 `PLAN_LOOP_MAX_PLAN_LINES` (plan-size warning threshold, default 900).
 
 ### Role matrix overrides

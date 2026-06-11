@@ -13,7 +13,9 @@ import { STATUS_USAGE } from './help.js';
 function ps(args: string[]): string {
   try {
     const result = spawnSync('ps', args, { encoding: 'utf8' });
-    if (result.status !== 0) return '';
+    if (result.status !== 0) {
+      return '';
+    }
     return result.stdout;
   } catch {
     return '';
@@ -36,7 +38,9 @@ function ppidOf(pid: number): number | undefined {
     }
   }
   const out = psField(pid, 'ppid');
-  if (!/^[0-9]+$/.test(out)) return undefined;
+  if (!/^[0-9]+$/.test(out)) {
+    return undefined;
+  }
   return Number(out);
 }
 
@@ -59,17 +63,27 @@ function baseToken(token: string): string {
 }
 
 function statusStateDirCandidates(): string[] {
-  if (process.env.PLAN_LOOP_STATE_DIR) return [process.env.PLAN_LOOP_STATE_DIR];
-  if (process.env.PLAN_LOOP_PLANS_DIR) return [path.join(process.env.PLAN_LOOP_PLANS_DIR, '.runs')];
+  if (process.env.PLAN_LOOP_STATE_DIR) {
+    return [process.env.PLAN_LOOP_STATE_DIR];
+  }
+  if (process.env.PLAN_LOOP_PLANS_DIR) {
+    return [path.join(process.env.PLAN_LOOP_PLANS_DIR, '.runs')];
+  }
   return [path.join(os.homedir(), '.claude', 'plans', '.runs')];
 }
 
 function readMetaValue(file: string, key: string): string | undefined {
-  if (!existsSync(file)) return undefined;
+  if (!existsSync(file)) {
+    return undefined;
+  }
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     const tab = line.indexOf('\t');
-    if (tab === -1) continue;
-    if (line.slice(0, tab) === key) return line.slice(tab + 1);
+    if (tab === -1) {
+      continue;
+    }
+    if (line.slice(0, tab) === key) {
+      return line.slice(tab + 1);
+    }
   }
   return undefined;
 }
@@ -77,11 +91,17 @@ function readMetaValue(file: string, key: string): string | undefined {
 function registryPids(dirs: readonly string[]): Set<number> {
   const pids = new Set<number>();
   for (const dir of dirs) {
-    if (!existsSync(dir)) continue;
+    if (!existsSync(dir)) {
+      continue;
+    }
     for (const name of readdirSync(dir)) {
-      if (!name.endsWith('.tsv')) continue;
+      if (!name.endsWith('.tsv')) {
+        continue;
+      }
       const pid = readMetaValue(path.join(dir, name), 'pid');
-      if (pid !== undefined && /^[0-9]+$/.test(pid)) pids.add(Number(pid));
+      if (pid !== undefined && /^[0-9]+$/.test(pid)) {
+        pids.add(Number(pid));
+      }
     }
   }
   return pids;
@@ -92,13 +112,19 @@ function registryPids(dirs: readonly string[]): Set<number> {
 // whose arguments merely mention plan-loop never passes).
 function commandIsPlanLoopRoot(pid: number): boolean {
   const cmd = commandOf(pid);
-  if (cmd === '') return false;
+  if (cmd === '') {
+    return false;
+  }
   const tokens = cmd.split(/\s+/).filter((token) => token !== '');
   const first = baseToken(tokens[0] ?? '');
   const second = baseToken(tokens[1] ?? '');
-  if (first === 'plan-loop' || first === 'plan-loop.sh') return true;
+  if (first === 'plan-loop' || first === 'plan-loop.sh') {
+    return true;
+  }
   if (['bash', 'sh', 'zsh', 'node'].includes(first)) {
-    if (second === 'plan-loop.sh' || second === 'plan-loop') return true;
+    if (second === 'plan-loop.sh' || second === 'plan-loop') {
+      return true;
+    }
   }
   return false;
 }
@@ -107,7 +133,9 @@ function findRootPlanLoop(pid: number): number | undefined {
   let cur: number | undefined = pid;
   let last: number | undefined;
   while (cur !== undefined && cur !== 0 && cur !== 1) {
-    if (commandIsPlanLoopRoot(cur)) last = cur;
+    if (commandIsPlanLoopRoot(cur)) {
+      last = cur;
+    }
     cur = ppidOf(cur);
   }
   return last;
@@ -133,14 +161,18 @@ function processEnvVar(root: number, key: string): string | undefined {
     try {
       const environ = readFileSync(`/proc/${root}/environ`, 'utf8');
       for (const entry of environ.split('\0')) {
-        if (entry.startsWith(`${key}=`)) return entry.slice(key.length + 1);
+        if (entry.startsWith(`${key}=`)) {
+          return entry.slice(key.length + 1);
+        }
       }
     } catch {
       /* fall through to ps */
     }
   }
   const cmdline = ps(['eww', '-p', String(root), '-o', 'command=']);
-  if (cmdline === '') return undefined;
+  if (cmdline === '') {
+    return undefined;
+  }
   const match = new RegExp(`(?:^|\\s)${key}=(.*?)(?=\\s[A-Za-z_][A-Za-z0-9_]*=|$)`, 's').exec(
     cmdline.replace(/\n$/, ''),
   );
@@ -149,13 +181,20 @@ function processEnvVar(root: number, key: string): string | undefined {
 
 function stateDirCandidates(root: number): string[] {
   const dirs: string[] = [];
-  if (process.env.PLAN_LOOP_STATE_DIR) dirs.push(process.env.PLAN_LOOP_STATE_DIR);
+  if (process.env.PLAN_LOOP_STATE_DIR) {
+    dirs.push(process.env.PLAN_LOOP_STATE_DIR);
+  }
   const envState = processEnvVar(root, 'PLAN_LOOP_STATE_DIR');
-  if (envState !== undefined && envState !== '') dirs.push(envState);
-  if (process.env.PLAN_LOOP_PLANS_DIR)
+  if (envState !== undefined && envState !== '') {
+    dirs.push(envState);
+  }
+  if (process.env.PLAN_LOOP_PLANS_DIR) {
     dirs.push(path.join(process.env.PLAN_LOOP_PLANS_DIR, '.runs'));
+  }
   const envPlans = processEnvVar(root, 'PLAN_LOOP_PLANS_DIR');
-  if (envPlans !== undefined && envPlans !== '') dirs.push(path.join(envPlans, '.runs'));
+  if (envPlans !== undefined && envPlans !== '') {
+    dirs.push(path.join(envPlans, '.runs'));
+  }
   dirs.push(path.join(os.homedir(), '.claude', 'plans', '.runs'));
   return [...new Set(dirs)];
 }
@@ -172,7 +211,9 @@ function canonicalDir(dir: string): string {
 }
 
 function canonicalFile(file: string): string {
-  if (existsSync(file)) return path.resolve(file);
+  if (existsSync(file)) {
+    return path.resolve(file);
+  }
   return file;
 }
 
@@ -180,9 +221,13 @@ function registryWorkDir(root: number, input: string): string | undefined {
   const canonicalInput = input !== '' && existsSync(input) ? canonicalFile(input) : '';
   for (const dir of stateDirCandidates(root)) {
     const file = path.join(dir, `${root}.tsv`);
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) {
+      continue;
+    }
     const pid = readMetaValue(file, 'pid');
-    if (pid !== undefined && pid !== '' && pid !== String(root)) continue;
+    if (pid !== undefined && pid !== '' && pid !== String(root)) {
+      continue;
+    }
     const metaInput = readMetaValue(file, 'input_path');
     if (
       metaInput !== undefined &&
@@ -193,7 +238,9 @@ function registryWorkDir(root: number, input: string): string | undefined {
       continue;
     }
     const work = readMetaValue(file, 'work_dir');
-    if (work !== undefined && work !== '') return work;
+    if (work !== undefined && work !== '') {
+      return work;
+    }
   }
   return undefined;
 }
@@ -201,11 +248,17 @@ function registryWorkDir(root: number, input: string): string | undefined {
 function processLogWorkDir(root: number): string | undefined {
   try {
     const result = spawnSync('lsof', ['-p', String(root), '-Fn'], { encoding: 'utf8' });
-    if (result.error) return undefined;
+    if (result.error) {
+      return undefined;
+    }
     for (const line of (result.stdout || '').split('\n')) {
-      if (!line.startsWith('n')) continue;
+      if (!line.startsWith('n')) {
+        continue;
+      }
       const p = line.slice(1);
-      if (p.endsWith('/run.log')) return path.dirname(p);
+      if (p.endsWith('/run.log')) {
+        return path.dirname(p);
+      }
     }
   } catch {
     return undefined;
@@ -214,7 +267,9 @@ function processLogWorkDir(root: number): string | undefined {
 }
 
 function defaultWorkDirFromInput(input: string, plansDir: string): string | undefined {
-  if (input === '') return undefined;
+  if (input === '') {
+    return undefined;
+  }
   const abs = existsSync(input) ? canonicalFile(input) : input;
   const base = path.basename(abs, path.extname(abs));
   return path.join(plansDir, `loop-${base}`);
@@ -222,19 +277,29 @@ function defaultWorkDirFromInput(input: string, plansDir: string): string | unde
 
 function resolveWorkDir(root: number, input: string): string | undefined {
   const fromRegistry = registryWorkDir(root, input);
-  if (fromRegistry !== undefined) return canonicalDir(fromRegistry);
+  if (fromRegistry !== undefined) {
+    return canonicalDir(fromRegistry);
+  }
   const fromLog = processLogWorkDir(root);
-  if (fromLog !== undefined) return canonicalDir(fromLog);
+  if (fromLog !== undefined) {
+    return canonicalDir(fromLog);
+  }
   const fromEnv = processEnvVar(root, 'PLAN_LOOP_WORK_DIR');
-  if (fromEnv !== undefined && fromEnv !== '') return canonicalDir(fromEnv);
+  if (fromEnv !== undefined && fromEnv !== '') {
+    return canonicalDir(fromEnv);
+  }
   const envPlans = processEnvVar(root, 'PLAN_LOOP_PLANS_DIR');
   if (envPlans !== undefined && envPlans !== '') {
     const work = defaultWorkDirFromInput(input, envPlans);
-    if (work !== undefined) return canonicalDir(work);
+    if (work !== undefined) {
+      return canonicalDir(work);
+    }
   }
   const plansDir = process.env.PLAN_LOOP_PLANS_DIR ?? path.join(os.homedir(), '.claude', 'plans');
   const work = defaultWorkDirFromInput(input, plansDir);
-  if (work === undefined) return undefined;
+  if (work === undefined) {
+    return undefined;
+  }
   return canonicalDir(work);
 }
 
@@ -262,14 +327,14 @@ function palette(): Palette {
 }
 
 function strippedLogLines(logPath: string): string[] {
-  if (!existsSync(logPath)) return [];
-  return (
-    readFileSync(logPath, 'utf8')
-      .split('\n')
-      // eslint-disable-next-line no-control-regex
-      .map((line) => line.replace(/\x1b\[[0-9;]*m/g, ''))
-      .filter((line) => line.startsWith('[plan-loop]'))
-  );
+  if (!existsSync(logPath)) {
+    return [];
+  }
+  const ansiPattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+  return readFileSync(logPath, 'utf8')
+    .split('\n')
+    .map((line) => line.replace(ansiPattern, ''))
+    .filter((line) => line.startsWith('[plan-loop]'));
 }
 
 function phaseActiveRole(logPath: string): string {
@@ -279,12 +344,24 @@ function phaseActiveRole(logPath: string): string {
     ),
   );
   const line = lines[lines.length - 1];
-  if (line === undefined) return '';
-  if (line.includes('— critic ')) return 'critic';
-  if (line.includes('creator update')) return 'creator';
-  if (line.includes('creating plan v0')) return 'creator';
-  if (line.includes(' propose ') || line.includes(' apply ')) return 'fixer';
-  if (line.includes(' review ')) return 'reviewer';
+  if (line === undefined) {
+    return '';
+  }
+  if (line.includes('— critic ')) {
+    return 'critic';
+  }
+  if (line.includes('creator update')) {
+    return 'creator';
+  }
+  if (line.includes('creating plan v0')) {
+    return 'creator';
+  }
+  if (line.includes(' propose ') || line.includes(' apply ')) {
+    return 'fixer';
+  }
+  if (line.includes(' review ')) {
+    return 'reviewer';
+  }
   return '';
 }
 
@@ -293,8 +370,12 @@ function childrenOf(pid: number): number[] {
   const kids: number[] = [];
   for (const line of out.split('\n')) {
     const parts = line.trim().split(/\s+/);
-    if (parts.length < 2) continue;
-    if (Number(parts[1]) === pid) kids.push(Number(parts[0]));
+    if (parts.length < 2) {
+      continue;
+    }
+    if (Number(parts[1]) === pid) {
+      kids.push(Number(parts[0]));
+    }
   }
   return kids;
 }
@@ -319,12 +400,19 @@ function printTreeChildren(
       const scmd = commandOf(spid).slice(0, 50);
       const sel = psField(spid, 'etime');
       let type = '?';
-      if (scmd.startsWith('claude')) type = phaseRole || 'creator';
-      else if (scmd.startsWith('codex')) type = phaseRole || 'critic';
-      else if (scmd.startsWith('awk')) type = 'log-filter';
-      else if (scmd.startsWith('tee')) type = 'tee';
-      else if (scmd.startsWith('jq')) type = 'jq';
-      else if (scmd.startsWith('bash')) type = 'subshell';
+      if (scmd.startsWith('claude')) {
+        type = phaseRole || 'creator';
+      } else if (scmd.startsWith('codex')) {
+        type = phaseRole || 'critic';
+      } else if (scmd.startsWith('awk')) {
+        type = 'log-filter';
+      } else if (scmd.startsWith('tee')) {
+        type = 'tee';
+      } else if (scmd.startsWith('jq')) {
+        type = 'jq';
+      } else if (scmd.startsWith('bash')) {
+        type = 'subshell';
+      }
       write(`      └─ ${spid}  (${sel}, ${type})\n`);
     }
   }
@@ -351,7 +439,9 @@ function printIterTable(work: string, pal: Palette, write: (s: string) => void):
   const iters: number[] = [];
   for (const name of readdirSync(work)) {
     const match = /^critique\.v([0-9]+)\.json$/.exec(name);
-    if (match) iters.push(Number(match[1]));
+    if (match) {
+      iters.push(Number(match[1]));
+    }
   }
   iters.sort((a, b) => a - b);
   if (iters.length === 0) {
@@ -403,10 +493,18 @@ function printIterTable(work: string, pal: Palette, write: (s: string) => void):
     const lines = existsSync(nextPlan) ? String(fileLineCount(nextPlan)) : '—';
 
     let flag = '';
-    if (pct !== '?' && Number(pct) < 30 && iter >= 2) flag += ` ${pal.YEL}⚠drift${pal.R}`;
-    if (lines !== '—' && Number(lines) > maxPlanLines) flag += ` ${pal.YEL}⚠big${pal.R}`;
-    if (invalid !== '?' && invalid !== '0') flag += ` ${pal.YEL}⚠invalid-ref${pal.R}`;
-    if (invalid === '0' && blk === '0' && maj === '0') flag += ` ${pal.GRN}✓healthy${pal.R}`;
+    if (pct !== '?' && Number(pct) < 30 && iter >= 2) {
+      flag += ` ${pal.YEL}⚠drift${pal.R}`;
+    }
+    if (lines !== '—' && Number(lines) > maxPlanLines) {
+      flag += ` ${pal.YEL}⚠big${pal.R}`;
+    }
+    if (invalid !== '?' && invalid !== '0') {
+      flag += ` ${pal.YEL}⚠invalid-ref${pal.R}`;
+    }
+    if (invalid === '0' && blk === '0' && maj === '0') {
+      flag += ` ${pal.GRN}✓healthy${pal.R}`;
+    }
 
     write(
       `    ${pad(String(iter), 5)} ${pad(raw, 5)} ${pad(`${addr}/${neu}/${invalid}/${pct}%`, 13)} ${pad(applied, 7)} ${pad(`${blk}/${maj}`, 8)} ${pad(rej, 7)} ${pad(lines, 7)} ${flag}\n`,
@@ -437,7 +535,9 @@ function operatorInterventionsStatus(work: string): InterventionStatusLine {
   const parseJsonl = (target: string): JsonObject[] | undefined => {
     const entries: JsonObject[] = [];
     for (const line of readFileSync(target, 'utf8').split('\n')) {
-      if (line.trim() === '') continue;
+      if (line.trim() === '') {
+        continue;
+      }
       try {
         const parsed = JSON.parse(line) as JsonValue;
         entries.push(isJsonObject(parsed) ? parsed : {});
@@ -557,21 +657,33 @@ function collectPlanLoopRoots(): number[] {
   const roots: number[] = [];
   const identities = new Set<string>();
   const consider = (pid: number) => {
-    if (!isAlive(pid)) return;
-    if (!commandIsPlanLoopRoot(pid)) return;
+    if (!isAlive(pid)) {
+      return;
+    }
+    if (!commandIsPlanLoopRoot(pid)) {
+      return;
+    }
     const pgid = psField(pid, 'pgid');
     const identity = pgid !== '' ? `pgid:${pgid}` : `pid:${pid}`;
-    if (identities.has(identity)) return;
+    if (identities.has(identity)) {
+      return;
+    }
     identities.add(identity);
     roots.push(pid);
   };
-  for (const pid of registry) consider(pid);
+  for (const pid of registry) {
+    consider(pid);
+  }
   if ((process.env.PLAN_LOOP_STATUS_SCAN_PS ?? '1') !== '0') {
     const out = ps(['-axo', 'pid=,ppid=']);
     for (const line of out.split('\n')) {
       const parts = line.trim().split(/\s+/);
-      if (parts.length < 2) continue;
-      if (Number(parts[1]) === 1) consider(Number(parts[0]));
+      if (parts.length < 2) {
+        continue;
+      }
+      if (Number(parts[1]) === 1) {
+        consider(Number(parts[0]));
+      }
     }
   }
   return roots;
@@ -591,7 +703,9 @@ export function runStatusCli(
       return 0;
     }
     write(`${pal.DIM}found ${roots.length} plan-loop run(s)${pal.R}\n`);
-    for (const root of roots) printStatus(root, pal, write);
+    for (const root of roots) {
+      printStatus(root, pal, write);
+    }
     return 0;
   }
 

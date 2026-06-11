@@ -40,7 +40,9 @@ main()
   })
   .catch((error: unknown) => {
     if (error instanceof HaltError) {
-      if (!error.logged) process.stderr.write(`${error.message}\n`);
+      if (!error.logged) {
+        process.stderr.write(`${error.message}\n`);
+      }
       process.exitCode = error.exitCode;
       return;
     }

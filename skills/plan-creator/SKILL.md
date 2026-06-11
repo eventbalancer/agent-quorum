@@ -102,13 +102,13 @@ This runs once, before any plan is created. Your job is to surface the blocking 
 
 1. Read the prompt completely and investigate the codebase with read-only tools (Read, Grep, Glob) exactly as in Create Mode. Resolve everything you can from the repo, conventions, and `ecosystem.yaml` yourself.
 2. Emit a question ONLY when all three hold: (a) the answer is a decision the operator owns, not a fact you can verify in the code; (b) different answers lead to materially different plans; (c) guessing wrong would waste a full plan iteration or violate an invariant.
-3. **Write `question`, `why`, and every option in clear, human, conversational English** — these strings are sent verbatim to the operator's Telegram. Elaborate enough that the trade-off is understandable from a phone without reading the codebase. No pipeline jargon, no `file:line` in the question itself; put the concrete technical fork in `why`.
+3. **Write `question`, `why`, and every option in the requested operator locale, or clear conversational English when no locale is requested** — these strings are sent verbatim to the operator's Telegram. Elaborate enough that the trade-off is understandable from a phone without reading the codebase. No pipeline jargon, no `file:line` in the question itself; put the concrete technical fork in `why`.
 4. For every question, provide 2–6 concrete `options` — the realistic answers the operator is choosing between — so they can reply with just a number. Make options mutually distinct and self-explanatory; the operator can always answer with free text instead, so do not add a generic "other" option.
 5. Prefer few, high-leverage questions. If the prompt is already unambiguous, return an empty list — do not invent questions to look thorough.
 
 ### Output Format
 
-Return ONLY JSON conforming to `clarify.schema.json`. No prose, no markdown fences. All operator-facing strings (`question`, `why`, `options`) must be in English.
+Return ONLY JSON conforming to `clarify.schema.json`. No prose, no markdown fences. All operator-facing strings (`question`, `why`, `options`) must use the requested operator locale, or English when no locale is requested.
 
 ```json
 {

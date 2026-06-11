@@ -23,13 +23,17 @@ let otherDir: string;
 beforeEach(() => {
   root = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-envtest.'));
   otherDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-envother.'));
-  for (const key of TRACKED_KEYS) Reflect.deleteProperty(process.env, key);
+  for (const key of TRACKED_KEYS) {
+    Reflect.deleteProperty(process.env, key);
+  }
 });
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   rmSync(otherDir, { recursive: true, force: true });
-  for (const key of TRACKED_KEYS) Reflect.deleteProperty(process.env, key);
+  for (const key of TRACKED_KEYS) {
+    Reflect.deleteProperty(process.env, key);
+  }
 });
 
 describe('loadPlanLoopDotenv', () => {

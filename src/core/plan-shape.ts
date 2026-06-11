@@ -22,7 +22,9 @@ function fileLines(file: string): string[] {
 }
 
 export function planHasTitleHeading(file: string): boolean {
-  if (!existsSync(file)) return false;
+  if (!existsSync(file)) {
+    return false;
+  }
   const first = fileLines(file)[0] ?? '';
   return new RegExp(`^#${SPACE}+[^ \\t\\v\\f\\r]`).test(first);
 }
@@ -41,8 +43,12 @@ function planHasImpactGraphMermaid(file: string): boolean {
       inSection = true;
       continue;
     }
-    if (anyHeading.test(line) && inSection) break;
-    if (inSection && /^```mermaid[ \t\v\f]*$/.test(line)) return true;
+    if (anyHeading.test(line) && inSection) {
+      break;
+    }
+    if (inSection && /^```mermaid[ \t\v\f]*$/.test(line)) {
+      return true;
+    }
   }
   return false;
 }
@@ -55,7 +61,9 @@ export interface PlanShapeHealth {
 export function planDocumentShapeHealth(file: string): PlanShapeHealth {
   let missing = 0;
   for (const heading of PLAN_DOCUMENT_REQUIRED_SECTIONS) {
-    if (!planHasHeading(file, heading)) missing += 1;
+    if (!planHasHeading(file, heading)) {
+      missing += 1;
+    }
   }
   return { missing, graph: planHasImpactGraphMermaid(file) ? 1 : 0 };
 }
@@ -69,7 +77,9 @@ export function validatePlanDocumentShape(file: string): void {
   let missing = 0;
   let graph = 0;
   const title = planHasTitleHeading(file) ? 1 : 0;
-  if (title === 0) log('WARNING: plan document must start with a level-1 title');
+  if (title === 0) {
+    log('WARNING: plan document must start with a level-1 title');
+  }
   for (const heading of PLAN_DOCUMENT_REQUIRED_SECTIONS) {
     if (!planHasHeading(file, heading)) {
       log(`WARNING: plan document missing section: ${heading}`);
@@ -102,20 +112,32 @@ export function planFirstTitleLine(file: string): number | undefined {
       fence = !fence;
       continue;
     }
-    if (!fence && titlePattern.test(line)) return i + 1;
+    if (!fence && titlePattern.test(line)) {
+      return i + 1;
+    }
   }
   return undefined;
 }
 
 function planHealInlineFirstLineTitle(file: string): void {
-  if (!existsSync(file)) return;
-  if (planHasTitleHeading(file)) return;
+  if (!existsSync(file)) {
+    return;
+  }
+  if (planHasTitleHeading(file)) {
+    return;
+  }
   const content = readFileSync(file, 'utf8');
   const firstLine = content.split('\n')[0] ?? '';
-  if (firstLine === '') return;
-  if (firstLine.startsWith('\ufeff')) return;
+  if (firstLine === '') {
+    return;
+  }
+  if (firstLine.startsWith('\ufeff')) {
+    return;
+  }
   const match = new RegExp(`#${SPACE}+[^ \\t\\v\\f\\r].*$`).exec(firstLine);
-  if (!match) return;
+  if (!match) {
+    return;
+  }
   const titleLine = match[0];
   copyFileSync(file, `${file}.raw`);
   const rest = content.split('\n').slice(1).join('\n');
@@ -129,8 +151,12 @@ function planHealInlineFirstLineTitle(file: string): void {
 // the plan title, or split a title glued onto the first prose line. The raw
 // capture is preserved at <file>.raw. Idempotent.
 export function normalizePlanDocument(file: string): void {
-  if (!existsSync(file)) return;
-  if (planHasTitleHeading(file)) return;
+  if (!existsSync(file)) {
+    return;
+  }
+  if (planHasTitleHeading(file)) {
+    return;
+  }
   const firstTitle = planFirstTitleLine(file);
   if (firstTitle !== undefined && firstTitle > 1) {
     copyFileSync(file, `${file}.raw`);

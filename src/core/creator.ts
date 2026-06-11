@@ -41,7 +41,9 @@ const SPLIT_META_OUTPUT_MODE =
   '- do not include plan_markdown or any other markdown content in this JSON.';
 
 function jqRawRender(value: JsonValue | undefined): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value;
+  }
   return JSON.stringify(value ?? null, null, 2);
 }
 
@@ -94,7 +96,9 @@ export async function runCreatorCreate(
     ctx.permissions.creator.createDisallowedTools,
     prompt,
   );
-  if (status !== 0) throw new HaltError(`creator provider call failed (${status})`, status, true);
+  if (status !== 0) {
+    throw new HaltError(`creator provider call failed (${status})`, status, true);
+  }
 
   if (!nonEmptyFile(outFile)) {
     err('creator produced empty plan from prompt');
@@ -130,17 +134,25 @@ async function runCreatorUpdateOneShot(
     ctx.permissions.creator.updateDisallowedTools,
     prompt,
   );
-  if (status !== 0) return status;
+  if (status !== 0) {
+    return status;
+  }
 
   sanitizeUpdateJson(updateFile, planVersion);
-  if (!validateSchema(updateFile, ctx.skills.creatorSchema)) return 3;
+  if (!validateSchema(updateFile, ctx.skills.creatorSchema)) {
+    return 3;
+  }
   const update = JSON.parse(readFileSync(updateFile, 'utf8')) as JsonValue;
   const planMarkdown = isJsonObject(update) ? update.plan_markdown : null;
   writeFileSync(revisionFile, `${jqRawRender(planMarkdown)}\n`);
-  if (!nonEmptyFile(revisionFile)) return 4;
+  if (!nonEmptyFile(revisionFile)) {
+    return 4;
+  }
   normalizePlanDocument(revisionFile);
   validatePlanDocumentShape(revisionFile);
-  if (!planDocumentShapeOk(revisionFile)) return 4;
+  if (!planDocumentShapeOk(revisionFile)) {
+    return 4;
+  }
   copyFileSync(revisionFile, nextFile);
   const updateObj: JsonObject = isJsonObject(update) ? update : {};
   const meta = {
@@ -151,7 +163,9 @@ async function runCreatorUpdateOneShot(
   };
   writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`);
   sanitizeUpdateMetaJson(metaFile, planVersion);
-  if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) return 3;
+  if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) {
+    return 3;
+  }
   return 0;
 }
 
@@ -174,7 +188,9 @@ async function runCreatorUpdatePlan(
     ctx.permissions.creator.updateDisallowedTools,
     prompt,
   );
-  if (status !== 0) throw new HaltError(`creator provider call failed (${status})`, status, true);
+  if (status !== 0) {
+    throw new HaltError(`creator provider call failed (${status})`, status, true);
+  }
 }
 
 async function runCreatorUpdateMeta(
@@ -197,7 +213,9 @@ async function runCreatorUpdateMeta(
     ctx.permissions.creator.updateDisallowedTools,
     prompt,
   );
-  if (status !== 0) throw new HaltError(`creator provider call failed (${status})`, status, true);
+  if (status !== 0) {
+    throw new HaltError(`creator provider call failed (${status})`, status, true);
+  }
 }
 
 export async function runCreatorUpdate(
@@ -271,11 +289,13 @@ export async function runCreatorClarify(
   promptFile: string,
   outFile: string,
 ): Promise<number> {
+  const localeInstruction = `Write all operator-facing strings in the requested locale: ${ctx.settings.locale}.`;
   const prompt =
     `## Prompt\n${readStripped(promptFile)}\n` +
     '\n' +
     '## Output mode: clarification questions\n' +
     'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
+    `${localeInstruction}\n` +
     'Surface only the blocking questions whose answers would materially change the plan, following the Clarify Mode rules in the plan-creator skill. Resolve everything you can from the repo yourself; return {"questions": []} when nothing is genuinely blocking.';
 
   const status = await providerRun(
@@ -289,7 +309,9 @@ export async function runCreatorClarify(
     ctx.permissions.creator.createDisallowedTools,
     prompt,
   );
-  if (status !== 0) return status;
+  if (status !== 0) {
+    return status;
+  }
 
   if (!nonEmptyFile(outFile)) {
     err('creator produced no clarification output');
@@ -310,6 +332,8 @@ export async function runCreatorClarify(
     };
   });
   writeFileSync(outFile, `${JSON.stringify({ questions }, null, 2)}\n`);
-  if (!validateSchema(outFile, ctx.skills.clarifySchema)) return 3;
+  if (!validateSchema(outFile, ctx.skills.clarifySchema)) {
+    return 3;
+  }
   return 0;
 }

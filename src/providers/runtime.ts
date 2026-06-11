@@ -21,9 +21,13 @@ export interface ProviderRuntime {
 // The session-capable combos are (creator, claude) and (creator, cursor) under
 // SESSION_MODE; every other (role, runner) runs stateless.
 export function roleSessionFile(rt: ProviderRuntime, role: Role): string {
-  if (role !== 'creator' || rt.sessionMode !== 1) return '';
+  if (role !== 'creator' || rt.sessionMode !== 1) {
+    return '';
+  }
   const runner = rt.matrix.creator.runner;
-  if (runner === 'claude' || runner === 'cursor') return rt.creatorSessionFile;
+  if (runner === 'claude' || runner === 'cursor') {
+    return rt.creatorSessionFile;
+  }
   return '';
 }
 

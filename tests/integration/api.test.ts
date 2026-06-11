@@ -37,9 +37,9 @@ let fake: string;
 let work: string;
 let capture: StderrCapture;
 
-function baseEnv(
-  extra: Record<string, string | undefined> = {},
-): Record<string, string | undefined> {
+type EnvOverrides = Record<string, string | undefined>;
+
+function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
     PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
@@ -139,7 +139,7 @@ describe('runPlanLoop (in-process)', () => {
     });
   });
 
-  it('runs the fix pass and the translate pass when enabled', async () => {
+  it('runs the fix pass and the localized final pass when locale is set', async () => {
     const input = path.join(tmp, 'bad-input.md');
     writeStructuredPlanFile(input, 'API Known Bad');
     writeFileSync(
@@ -164,7 +164,7 @@ describe('runPlanLoop (in-process)', () => {
           iters: 1,
           effort: 'low',
           fix: true,
-          translate: true,
+          locale: 'pt-BR',
         }),
     );
 
@@ -173,8 +173,9 @@ describe('runPlanLoop (in-process)', () => {
       readFileSync(fixed, 'utf8'),
     );
     expect(existsSync(path.join(work, 'plan.final.before-fix.md'))).toBe(true);
-    expect(existsSync(path.join(work, 'plan.final.ru.md'))).toBe(true);
-    expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- final_ru:');
+    expect(existsSync(path.join(work, 'plan.final.pt-BR.md'))).toBe(true);
+    expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- final_localized:');
+    expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- locale: pt-BR');
   });
 
   it('resumes from the last stable plan and archives stale artifacts', async () => {
@@ -241,8 +242,7 @@ describe('getRunStatus (in-process)', () => {
         PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
         PLAN_LOOP_STATUS_SCAN_PS: '0',
       },
-      // eslint-disable-next-line @typescript-eslint/require-await
-      async () => getRunStatus(),
+      () => getRunStatus(),
     );
     expect(result.exitCode).toBe(0);
     expect(capture.text()).toContain('no plan-loop runs currently active');
@@ -254,11 +254,9 @@ describe('getRunStatus (in-process)', () => {
       PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
       PLAN_LOOP_STATUS_SCAN_PS: '0',
     };
-    // eslint-disable-next-line @typescript-eslint/require-await
-    const dead = await withEnvAsync(env, async () => getRunStatus(999999));
+    const dead = await withEnvAsync(env, () => getRunStatus(999999));
     expect(dead.exitCode).toBe(2);
-    // eslint-disable-next-line @typescript-eslint/require-await
-    const alien = await withEnvAsync(env, async () => getRunStatus(process.pid));
+    const alien = await withEnvAsync(env, () => getRunStatus(process.pid));
     expect(alien.exitCode).toBe(3);
   });
 });
@@ -314,20 +312,12 @@ describe('launchPlanLoop (in-process)', () => {
     let byPid = { exitCode: -1, output: '' };
     for (let attempt = 0; attempt < 50 && byPid.exitCode !== 0; attempt += 1) {
       await sleep(200);
-      byPid = await withEnvAsync(
-        statusEnv,
-        // eslint-disable-next-line @typescript-eslint/require-await
-        async () => getRunStatus(pid),
-      );
+      byPid = await withEnvAsync(statusEnv, () => getRunStatus(pid));
     }
     expect(byPid.exitCode).toBe(0);
     expect(byPid.output).toContain('━━ input ━━');
     expect(byPid.output).toContain(`PID=${pid}`);
-    const listing = await withEnvAsync(
-      statusEnv,
-      // eslint-disable-next-line @typescript-eslint/require-await
-      async () => getRunStatus(),
-    );
+    const listing = await withEnvAsync(statusEnv, () => getRunStatus());
     expect(listing.exitCode).toBe(0);
     expect(listing.output).toContain('found 1 plan-loop run(s)');
 
@@ -449,7 +439,9 @@ describe('typed workDir/configFile options', () => {
         const metaFile = path.join(optWork, 'run.meta.tsv');
         if (existsSync(metaFile)) {
           meta = readFileSync(metaFile, 'utf8');
-          if (meta.includes('launch-model-probe')) break;
+          if (meta.includes('launch-model-probe')) {
+            break;
+          }
         }
         await sleep(200);
       }

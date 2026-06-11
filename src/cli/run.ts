@@ -75,21 +75,27 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
       case arg === '--prompt': {
         mode = 'prompt';
         const value = args[i + 1] ?? '';
-        if (value === '') usage();
+        if (value === '') {
+          usage();
+        }
         inputPath = value;
         i += 2;
         break;
       }
       case arg === '--iters' || arg === '--max-iters': {
         const value = args[i + 1] ?? '';
-        if (!/^[0-9]+$/.test(value)) usageError('--iters expects a positive integer');
+        if (!/^[0-9]+$/.test(value)) {
+          usageError('--iters expects a positive integer');
+        }
         cli.maxIters = value;
         i += 2;
         break;
       }
       case arg.startsWith('--iters=') || arg.startsWith('--max-iters='): {
         const value = arg.slice(arg.indexOf('=') + 1);
-        if (!/^[0-9]+$/.test(value)) usageError('--iters expects a positive integer');
+        if (!/^[0-9]+$/.test(value)) {
+          usageError('--iters expects a positive integer');
+        }
         cli.maxIters = value;
         i += 1;
         break;
@@ -110,9 +116,27 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
         cli.translate = '0';
         i += 1;
         break;
+      case arg === '--locale': {
+        const value = args[i + 1] ?? '';
+        if (value === '') {
+          usageError('--locale expects a locale tag');
+        }
+        cli.locale = value;
+        i += 2;
+        break;
+      }
+      case arg.startsWith('--locale='):
+        cli.locale = arg.slice('--locale='.length);
+        if (cli.locale === '') {
+          usageError('--locale expects a locale tag');
+        }
+        i += 1;
+        break;
       case arg === '--effort': {
         const value = args[i + 1] ?? '';
-        if (value === '') usageError('--effort expects low, high, or max');
+        if (value === '') {
+          usageError('--effort expects low, high, or max');
+        }
         cli.effort = value;
         i += 2;
         break;
@@ -141,7 +165,9 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
     }
   }
 
-  if (inputPath === '') usage();
+  if (inputPath === '') {
+    usage();
+  }
   if (!existsSync(inputPath) || !statSync(inputPath).isFile()) {
     process.stderr.write(`file not found: ${inputPath}\n`);
     throw new HaltError(`file not found: ${inputPath}`, 1, true);
@@ -162,7 +188,9 @@ function absolutePath(file: string): string {
 }
 
 function filesEqual(a: string, b: string): boolean {
-  if (!existsSync(a) || !existsSync(b)) return false;
+  if (!existsSync(a) || !existsSync(b)) {
+    return false;
+  }
   return readFileSync(a).equals(readFileSync(b));
 }
 
@@ -188,11 +216,15 @@ export async function runPlanLoopCli(
   const base = path.basename(inputPath, '.md');
   let work =
     overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR ?? path.join(plansDir, `loop-${base}`);
-  if (!path.isAbsolute(work)) work = path.join(process.cwd(), work);
+  if (!path.isAbsolute(work)) {
+    work = path.join(process.cwd(), work);
+  }
   mkdirSync(work, { recursive: true });
   work = canonicalDir(work);
   let runStateDir = process.env.PLAN_LOOP_STATE_DIR ?? path.join(plansDir, '.runs');
-  if (!path.isAbsolute(runStateDir)) runStateDir = path.join(process.cwd(), runStateDir);
+  if (!path.isAbsolute(runStateDir)) {
+    runStateDir = path.join(process.cwd(), runStateDir);
+  }
   mkdirSync(runStateDir, { recursive: true });
   runStateDir = canonicalDir(runStateDir);
   const runMetaFile = path.join(work, 'run.meta.tsv');
@@ -321,7 +353,9 @@ export async function runPlanLoopCli(
       rmSync(creatorSessionFile, { force: true });
     }
     const rejectedLog = path.join(work, 'rejected-log.jsonl');
-    if (!existsSync(rejectedLog)) writeFileSync(rejectedLog, '');
+    if (!existsSync(rejectedLog)) {
+      writeFileSync(rejectedLog, '');
+    }
 
     if (parsed.mode === 'prompt') {
       const promptCopy = path.join(work, 'prompt.md');
@@ -331,7 +365,9 @@ export async function runPlanLoopCli(
       const v0 = path.join(work, 'plan.v0.md');
       if (!existsSync(v0) || statSync(v0).size === 0) {
         const gateOk = await runClarificationGate(ctx, inputPath);
-        if (!gateOk) return { exitCode: 7, report: { workDir: work } };
+        if (!gateOk) {
+          return { exitCode: 7, report: { workDir: work } };
+        }
         log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
         await runCreatorCreate(ctx, inputPath, v0);
         markOperatorInterventionsMigrated(work, 'creator', 'plan.v0.md');
@@ -339,14 +375,18 @@ export async function runPlanLoopCli(
       }
     } else {
       const v0 = path.join(work, 'plan.v0.md');
-      if (!existsSync(v0)) copyFileSync(inputPath, v0);
+      if (!existsSync(v0)) {
+        copyFileSync(inputPath, v0);
+      }
     }
 
     let startIter = 0;
     if (process.env.PLAN_LOOP_RESUME === '1') {
       startIter = prepareResume(ctx);
     }
-    if (startIter > 0) log(`resuming from v${startIter}`);
+    if (startIter > 0) {
+      log(`resuming from v${startIter}`);
+    }
 
     const { iter } = await runIterationLoop(ctx, startIter);
 
@@ -380,16 +420,16 @@ export async function runPlanLoopCli(
       err(`FINAL: ${finalStatus} — ${finalReason}`);
     }
 
-    const translateRuFile = path.join(work, 'plan.final.ru.md');
+    const translateFile = path.join(work, `plan.final.${settings.locale}.md`);
     if (settings.translatePass === 1) {
-      await runTranslatePass(ctx, finalPlan, translateRuFile);
+      await runTranslatePass(ctx, finalPlan, translateFile);
     } else {
-      log('translate-pass: disabled via --no-translate');
+      log('translate-pass: disabled (locale=en)');
     }
 
     writeSummary(ctx, {
       iter,
-      finalRuFile: translateRuFile,
+      localizedFinalFile: translateFile,
       finalStale: findings.stale,
       finalAmbiguous: findings.ambiguous,
       finalUnresolved: findings.unresolved,
@@ -399,7 +439,9 @@ export async function runPlanLoopCli(
 
     log(`done. summary: ${path.join(work, 'summary.md')}`);
     const report = buildRunReport(ctx, iter);
-    if (finalStatus === 'blocked') return { exitCode: 6, report };
+    if (finalStatus === 'blocked') {
+      return { exitCode: 6, report };
+    }
     return { exitCode: 0, report };
   } finally {
     cleanup();

@@ -34,7 +34,9 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
 
   const consumeLine = (line: string) => {
     lines.push(line);
-    if (options.progressEvent(line)) state.progress += 1;
+    if (options.progressEvent(line)) {
+      state.progress += 1;
+    }
     for (const rendered of options.renderLine(line)) {
       process.stderr.write(`${rendered}\n`);
     }
@@ -45,7 +47,9 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
     pending += chunk.toString();
     for (;;) {
       const nl = pending.indexOf('\n');
-      if (nl === -1) break;
+      if (nl === -1) {
+        break;
+      }
       consumeLine(pending.slice(0, nl));
       pending = pending.slice(nl + 1);
     }
@@ -60,13 +64,17 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
   const stallPromise = watchStream(child, state, options.knobs);
   const status = await waitForExit(child);
   const stallReason = await stallPromise;
-  if (pending !== '') consumeLine(pending);
+  if (pending !== '') {
+    consumeLine(pending);
+  }
 
   return { status, stallReason, streamLines: lines };
 }
 
 function jqRawRender(value: JsonValue): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value;
+  }
   return JSON.stringify(value, null, 2);
 }
 
@@ -81,9 +89,13 @@ export function extractResultField(streamLines: readonly string[], field: string
     } catch {
       continue;
     }
-    if (!isJsonObject(event) || event.type !== 'result') continue;
+    if (!isJsonObject(event) || event.type !== 'result') {
+      continue;
+    }
     const value = event[field];
-    if (value === undefined || value === null || value === false) continue;
+    if (value === undefined || value === null || value === false) {
+      continue;
+    }
     out += `${jqRawRender(value)}\n`;
   }
   return out;
@@ -126,17 +138,27 @@ export function extractJsonPayload(rawInput: string, ctx: JsonExtractionContext)
     /* not an envelope */
   }
 
-  if (raw.startsWith('```json')) raw = raw.slice('```json'.length);
-  if (raw.startsWith('```')) raw = raw.slice('```'.length);
-  if (raw.endsWith('```')) raw = raw.slice(0, -'```'.length);
+  if (raw.startsWith('```json')) {
+    raw = raw.slice('```json'.length);
+  }
+  if (raw.startsWith('```')) {
+    raw = raw.slice('```'.length);
+  }
+  if (raw.endsWith('```')) {
+    raw = raw.slice(0, -'```'.length);
+  }
 
-  if (parsesAsTruthyJson(raw)) return { content: raw };
+  if (parsesAsTruthyJson(raw)) {
+    return { content: raw };
+  }
 
   const fenceLines = raw.split('\n');
   const firstBrace = fenceLines.findIndex((line) => line.startsWith('{'));
   raw = firstBrace === -1 ? '' : fenceLines.slice(firstBrace).join('\n').replace(/\n+$/, '');
 
-  if (parsesAsTruthyJson(raw)) return { content: raw };
+  if (parsesAsTruthyJson(raw)) {
+    return { content: raw };
+  }
 
   const refMatch = /(\/tmp|\/var)[a-zA-Z0-9_./-]+\.json/.exec(raw);
   const refPath = refMatch?.[0];

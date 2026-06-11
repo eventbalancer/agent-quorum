@@ -22,7 +22,9 @@ function issueCount(update: JsonValue, predicate: (issue: JsonObject) => boolean
 }
 
 function jqLength(value: JsonValue | undefined): number {
-  if (Array.isArray(value)) return value.length;
+  if (Array.isArray(value)) {
+    return value.length;
+  }
   return 0;
 }
 
@@ -42,7 +44,9 @@ function changedLineCount(oldFile: string, newFile: string): number {
   let count = 0;
   for (const hunk of patch.hunks) {
     for (const line of hunk.lines) {
-      if (/^[+-][^+-]/.test(line)) count += 1;
+      if (/^[+-][^+-]/.test(line)) {
+        count += 1;
+      }
     }
   }
   return count;

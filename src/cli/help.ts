@@ -8,11 +8,11 @@ import { isJsonObject, type JsonValue } from '../core/json.js';
 // `plan-loop`; the reference *.sh names never appear in user-facing output.
 
 export const RUN_USAGE =
-  'usage: plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] <plan.md>\n' +
-  '       plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] --prompt <prompt.md>\n';
+  'usage: plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
+  '       plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>\n';
 
 export const LAUNCH_USAGE =
-  'usage: plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--no-translate] <input.md>\n';
+  'usage: plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n';
 
 export const INTERVENE_USAGE =
   'usage: plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
@@ -34,9 +34,15 @@ export function packageVersion(): string {
 }
 
 function settingText(value: JsonValue | undefined): string | undefined {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'on' : 'off';
+  }
   return undefined;
 }
 
@@ -51,21 +57,27 @@ function defaultsLine(): string {
   } catch {
     return '';
   }
-  if (!isJsonObject(parsed) || !isJsonObject(parsed.settings)) return '';
+  if (!isJsonObject(parsed) || !isJsonObject(parsed.settings)) {
+    return '';
+  }
   const settings = parsed.settings;
   const parts: string[] = [];
-  for (const key of ['iters', 'effort', 'fix', 'translate']) {
+  for (const key of ['iters', 'effort', 'fix', 'locale', 'translate']) {
     const text = settingText(settings[key]);
-    if (text !== undefined) parts.push(`${key}=${text}`);
+    if (text !== undefined) {
+      parts.push(`${key}=${text}`);
+    }
   }
-  if (parts.length === 0) return '';
+  if (parts.length === 0) {
+    return '';
+  }
   return `\ndefaults: ${parts.join(' ')} (from ${file})\n`;
 }
 
 export function globalHelp(): string {
   return (
     RUN_USAGE +
-    '       plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--no-translate] <input.md>\n' +
+    '       plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n' +
     '       plan-loop status [PID]\n' +
     '       plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
     '\n' +
@@ -78,7 +90,8 @@ export function globalHelp(): string {
     '  --iters N                     iteration cap\n' +
     '  --effort {low,high,max}       effort preset\n' +
     '  --fix / --no-fix              enable/disable the fix pass\n' +
-    '  --translate / --no-translate  enable/disable the russian companion plan\n' +
+    '  --locale LOCALE               localize human interaction and final companion plan\n' +
+    '  --translate / --no-translate  compatibility toggle for the translate pass\n' +
     '  --prompt <prompt.md>          create plan.v0 from a prompt file first\n' +
     '  -h, --help                    print usage\n' +
     '\n' +

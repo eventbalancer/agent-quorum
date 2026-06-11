@@ -11,15 +11,16 @@ export interface CliResult {
   stderr: string;
 }
 
-export function runCli(
-  args: readonly string[],
-  env: Record<string, string | undefined> = {},
-  input?: string,
-): CliResult {
+export type EnvOverrides = Record<string, string | undefined>;
+
+export function runCli(args: readonly string[], env: EnvOverrides = {}, input?: string): CliResult {
   const merged: NodeJS.ProcessEnv = { ...process.env };
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) Reflect.deleteProperty(merged, key);
-    else merged[key] = value;
+    if (value === undefined) {
+      Reflect.deleteProperty(merged, key);
+    } else {
+      merged[key] = value;
+    }
   }
   const result: SpawnSyncReturns<string> = spawnSync(TSX_BIN, [MAIN_TS, ...args], {
     encoding: 'utf8',
@@ -38,12 +39,15 @@ export function runCli(
 // the Telegram stub) while the CLI runs.
 export async function runCliAsync(
   args: readonly string[],
-  env: Record<string, string | undefined> = {},
+  env: EnvOverrides = {},
 ): Promise<CliResult> {
   const merged: NodeJS.ProcessEnv = { ...process.env };
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) Reflect.deleteProperty(merged, key);
-    else merged[key] = value;
+    if (value === undefined) {
+      Reflect.deleteProperty(merged, key);
+    } else {
+      merged[key] = value;
+    }
   }
   const child = spawn(TSX_BIN, [MAIN_TS, ...args], { env: merged });
   let stdout = '';

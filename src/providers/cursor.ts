@@ -44,7 +44,9 @@ async function cursorStream(
   if (captureFile !== '') {
     const sessionRendering = extractResultField(result.streamLines, 'session_id');
     const sessionId = sessionRendering.split('\n')[0] ?? '';
-    if (sessionId !== '') writeFileSync(captureFile, sessionId);
+    if (sessionId !== '') {
+      writeFileSync(captureFile, sessionId);
+    }
   }
   let status = result.status;
   if (result.stallReason !== undefined) {
@@ -67,7 +69,9 @@ async function cursorStreamToFile(
   const { status, output } = await cursorStream(rt, promptText, args, captureFile);
   if (mode === 'markdown') {
     writeFileSync(outFile, output);
-    if (status !== 0) return status;
+    if (status !== 0) {
+      return status;
+    }
     if (output.length === 0) {
       err('cursor produced no final result');
       return 4;
@@ -75,7 +79,9 @@ async function cursorStreamToFile(
     return 0;
   }
 
-  if (status !== 0) return status;
+  if (status !== 0) {
+    return status;
+  }
   if (output.length === 0) {
     err('cursor produced no final result');
     return 4;
@@ -110,7 +116,9 @@ async function cursorRunOnce(
     [...session.args, ...invokeArgs],
     captureFile,
   );
-  if (status === 0) return 0;
+  if (status === 0) {
+    return 0;
+  }
 
   const isStallWithLiveSession =
     status === rt.cursorKnobs.stallStatus && sessionFile !== '' && nonEmptyFile(sessionFile);
@@ -127,7 +135,9 @@ async function cursorRunOnce(
       [...resumeArgs, ...invokeArgs],
       captureFile,
     );
-    if (status === 0) return 0;
+    if (status === 0) {
+      return 0;
+    }
   }
 
   if (sessionFile !== '') {
@@ -160,13 +170,19 @@ export interface CursorInvokeInput {
   promptBody: string;
 }
 
-function cursorPromptAndArgs(
-  rt: ProviderRuntime,
-  input: CursorInvokeInput,
-): { args: string[]; fullPrompt: string } {
+interface CursorPromptAndArgs {
+  args: string[];
+  fullPrompt: string;
+}
+
+function cursorPromptAndArgs(rt: ProviderRuntime, input: CursorInvokeInput): CursorPromptAndArgs {
   const args = ['--workspace', rt.projectRoot, '--model', input.model];
-  if (cursorCliSupportsFlag(rt.cursorBin, '--trust')) args.push('--trust');
-  if (cursorCliSupportsFlag(rt.cursorBin, '--approve-mcps')) args.push('--approve-mcps');
+  if (cursorCliSupportsFlag(rt.cursorBin, '--trust')) {
+    args.push('--trust');
+  }
+  if (cursorCliSupportsFlag(rt.cursorBin, '--approve-mcps')) {
+    args.push('--approve-mcps');
+  }
 
   let schemaHint = '';
   if (input.schemaFile !== '') {

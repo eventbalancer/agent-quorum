@@ -54,7 +54,8 @@ const result = await runPlanLoop({
   iters: 3,
   effort: 'high', // 'low' | 'high' | 'max'
   fix: true,
-  translate: false,
+  locale: 'ru', // optional; localizes Telegram interaction + final companion plan
+  translate: false, // optional compatibility toggle
   workDir: '/abs/path/loop-my-plan', // optional; takes precedence over PLAN_LOOP_WORK_DIR
   configFile: '/abs/path/plan-loop.json', // optional; takes precedence over PLAN_LOOP_CONFIG_FILE
 });
@@ -76,7 +77,11 @@ summary lines; path fields are present only when the file exists, and failure
 exits may carry `workDir` alone. Artifacts land in the resolved workdir; for
 both `workDir` and `configFile` the precedence is option > environment
 variable > default (`<plans>/loop-<base>` / the packaged `plan-loop.json`).
-The options are typed alternatives to mutating `process.env` — the
+`locale` is the typed counterpart of `--locale`; it defaults to `en`.
+Clarification questions sent through Telegram target that locale. Non-English
+locales also run the translate pass and write `plan.final.<locale>.md`; `en`
+keeps the final plan English-only unless `translate` is explicitly enabled for
+compatibility. The options are typed alternatives to mutating `process.env` — the
 `workDir`/`configFile` plumbing itself never writes to the calling process
 environment. (The package-root `.env` loader keeps its reference semantics
 and still fills missing keys; see

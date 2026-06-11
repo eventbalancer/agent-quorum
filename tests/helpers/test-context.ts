@@ -38,6 +38,7 @@ export interface TestContextOptions {
   projectRoot?: string;
   fixPass?: 0 | 1;
   translatePass?: 0 | 1;
+  locale?: string;
   matrix?: RoleMatrix;
   mode?: 'plan' | 'prompt';
 }
@@ -59,6 +60,7 @@ export function makeTestRunContext(
       effort,
       fixPass: options.fixPass ?? 0,
       translatePass: options.translatePass ?? 0,
+      locale: options.locale ?? 'en',
       diffThreshold: options.diffThreshold ?? 5,
       retryCount: 0,
       retryDelaySeconds: 0,

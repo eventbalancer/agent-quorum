@@ -15,7 +15,9 @@ let ajvBinWarned = false;
 // validation now runs in-process, so a set value is obsolete — warned once and
 // ignored, never an error (Finding F8).
 function warnObsoleteAjvBin(): void {
-  if (ajvBinWarned) return;
+  if (ajvBinWarned) {
+    return;
+  }
   if (process.env.PLAN_LOOP_AJV_BIN) {
     log(
       'WARNING: PLAN_LOOP_AJV_BIN is ignored — schema validation runs in-process via the ajv npm package',
@@ -26,7 +28,9 @@ function warnObsoleteAjvBin(): void {
 
 function compiledSchema(schemaPath: string): ValidateFunction {
   let validate = compiledSchemas.get(schemaPath);
-  if (validate !== undefined) return validate;
+  if (validate !== undefined) {
+    return validate;
+  }
   ajv ??= new Ajv2019({ strict: false, allErrors: true });
   const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as object;
   validate = ajv.compile(schema);
@@ -49,13 +53,17 @@ export function validateSchema(file: string, schemaPath: string): boolean {
   } catch (error) {
     err(`schema validation failed: ${file} vs ${schemaPath}`);
     const message = error instanceof Error ? error.message : String(error);
-    for (const line of message.split('\n')) process.stderr.write(`    ${line}\n`);
+    for (const line of message.split('\n')) {
+      process.stderr.write(`    ${line}\n`);
+    }
     return false;
   }
   if (!validate(data)) {
     err(`schema validation failed: ${file} vs ${schemaPath}`);
     const detail = JSON.stringify(validate.errors, null, 2);
-    for (const line of detail.split('\n')) process.stderr.write(`    ${line}\n`);
+    for (const line of detail.split('\n')) {
+      process.stderr.write(`    ${line}\n`);
+    }
     return false;
   }
   return true;
@@ -85,7 +93,9 @@ function checkExpectedVersion(
   name: string,
   expectedVersion: number | string | undefined,
 ): number | undefined {
-  if (expectedVersion === undefined || expectedVersion === '') return undefined;
+  if (expectedVersion === undefined || expectedVersion === '') {
+    return undefined;
+  }
   if (!/^[0-9]+$/.test(String(expectedVersion))) {
     const message = `${name}: expected_version must be an integer: ${String(expectedVersion)}`;
     err(message);
@@ -118,7 +128,9 @@ export function sanitizeCritiqueJson(file: string, expectedVersion?: number | st
   const obj: JsonObject = isJsonObject(parsed) ? parsed : {};
 
   const extras = sortedExtraKeys(obj, ['plan_version', 'summary', 'issues']).join(',');
-  if (extras) log(`WARNING: dropping unknown top-level fields from critique: ${extras}`);
+  if (extras) {
+    log(`WARNING: dropping unknown top-level fields from critique: ${extras}`);
+  }
 
   const issues = Array.isArray(obj.issues) ? obj.issues : [];
   const issueObjects = issues.map((issue) => (isJsonObject(issue) ? issue : {}));
@@ -132,7 +144,9 @@ export function sanitizeCritiqueJson(file: string, expectedVersion?: number | st
   ]
     .sort()
     .join(';');
-  if (issueExtras) log(`WARNING: dropping unknown critique issue fields: ${issueExtras}`);
+  if (issueExtras) {
+    log(`WARNING: dropping unknown critique issue fields: ${issueExtras}`);
+  }
 
   const prefixedIds = issueObjects.filter(
     (issue) => typeof issue.id === 'string' && /^v[0-9]+\.C[0-9]+$/.test(issue.id),
@@ -175,7 +189,9 @@ function sanitizedUpdateIssues(issues: JsonValue[]): JsonValue[] {
 
 function sanitizedRejectedAppend(entries: JsonValue): JsonValue {
   const list = jqAlt(entries, []);
-  if (!Array.isArray(list)) return list;
+  if (!Array.isArray(list)) {
+    return list;
+  }
   return list
     .map((entry) => (isJsonObject(entry) ? entry : {}))
     .map((entry) => ({
@@ -197,7 +213,9 @@ export function sanitizeUpdateJson(file: string, expectedVersion?: number | stri
     'applied',
     'rejected_append',
   ]).join(',');
-  if (extras) log(`WARNING: dropping unknown top-level fields from update: ${extras}`);
+  if (extras) {
+    log(`WARNING: dropping unknown top-level fields from update: ${extras}`);
+  }
 
   const pv: JsonValue = expected ?? obj.plan_version ?? null;
   const issues = jqAlt(obj.issues, []);
@@ -221,7 +239,9 @@ export function sanitizeUpdateMetaJson(file: string, expectedVersion?: number | 
     'applied',
     'rejected_append',
   ]).join(',');
-  if (extras) log(`WARNING: dropping unknown top-level fields from update metadata: ${extras}`);
+  if (extras) {
+    log(`WARNING: dropping unknown top-level fields from update metadata: ${extras}`);
+  }
 
   const pv: JsonValue = expected ?? obj.plan_version ?? null;
   const issues = jqAlt(obj.issues, []);

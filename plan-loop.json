@@ -4,7 +4,8 @@
     "iters": 7,
     "effort": "high",
     "fix": true,
-    "translate": true,
+    "locale": "en",
+    "translate": false,
     "diffThreshold": 5,
     "retryCount": 3,
     "retryDelaySeconds": 10

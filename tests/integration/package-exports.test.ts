@@ -7,10 +7,15 @@ import { REPO_ROOT } from '../helpers/harness.js';
 
 let tempDir: string;
 
+interface ConsumerRunResult {
+  status: number | null;
+  stderr: string;
+}
+
 // Both consumer processes run with cwd=tempDir: `require`/`import` in a -e
 // script resolve from the process cwd, and the agent-quorum symlink lives in
 // tempDir/node_modules.
-function runConsumer(args: string[]): { status: number | null; stderr: string } {
+function runConsumer(args: string[]): ConsumerRunResult {
   const result = spawnSync(process.execPath, args, { cwd: tempDir, encoding: 'utf8' });
   return { status: result.status, stderr: result.stderr };
 }

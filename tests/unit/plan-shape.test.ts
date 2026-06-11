@@ -24,7 +24,9 @@ function requireShapeStatus(target: string): number {
     requirePlanDocumentShape(target);
     return 0;
   } catch (error) {
-    if (error instanceof HaltError) return error.exitCode;
+    if (error instanceof HaltError) {
+      return error.exitCode;
+    }
     throw error;
   } finally {
     capture.restore();

@@ -6,8 +6,13 @@ import { stripAnsi, withEnv } from '../helpers/harness.js';
 const stderrStream = process.stderr as unknown as { isTTY: boolean | undefined };
 const originalIsTTY = stderrStream.isTTY;
 
+interface RawStderrCapture {
+  text: () => string;
+  restore: () => void;
+}
+
 // Raw capture (no ANSI stripping) — the escape codes are the subject here.
-function captureRawStderr(): { text: () => string; restore: () => void } {
+function captureRawStderr(): RawStderrCapture {
   let buffer = '';
   const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
     buffer += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();

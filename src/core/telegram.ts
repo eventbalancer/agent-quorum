@@ -35,9 +35,13 @@ async function telegramCall(
           }),
       signal: AbortSignal.timeout(timeoutSeconds * 1000),
     });
-    if (!response.ok) return undefined;
+    if (!response.ok) {
+      return undefined;
+    }
     const body = JSON.parse(await response.text()) as JsonValue;
-    if (!isJsonObject(body) || body.ok !== true) return undefined;
+    if (!isJsonObject(body) || body.ok !== true) {
+      return undefined;
+    }
     return body;
   } catch {
     return undefined;
@@ -52,10 +56,14 @@ export async function telegramSend(text: string): Promise<string | undefined> {
     text,
     disable_web_page_preview: 'true',
   });
-  if (body === undefined) return undefined;
+  if (body === undefined) {
+    return undefined;
+  }
   const result = isJsonObject(body.result) ? body.result : {};
   const messageId = result.message_id;
-  if (messageId === null || messageId === undefined || messageId === false) return '';
+  if (messageId === null || messageId === undefined || messageId === false) {
+    return '';
+  }
   return typeof messageId === 'string' ? messageId : JSON.stringify(messageId);
 }
 
@@ -79,20 +87,30 @@ export async function telegramGetUpdates(
     },
     { get: true, timeoutSeconds: timeout + 15 },
   );
-  if (body === undefined) return undefined;
+  if (body === undefined) {
+    return undefined;
+  }
   const chat = process.env.PLAN_LOOP_TELEGRAM_CHAT_ID ?? '';
   const results = Array.isArray(body.result) ? body.result : [];
   const updates: TelegramUpdate[] = [];
   for (const entry of results) {
-    if (!isJsonObject(entry)) continue;
+    if (!isJsonObject(entry)) {
+      continue;
+    }
     const message = entry.message;
-    if (!isJsonObject(message)) continue;
+    if (!isJsonObject(message)) {
+      continue;
+    }
     const chatObj = isJsonObject(message.chat) ? message.chat : {};
     const chatId = chatObj.id;
     const chatIdText = typeof chatId === 'string' ? chatId : JSON.stringify(chatId ?? null);
-    if (chatIdText !== chat) continue;
+    if (chatIdText !== chat) {
+      continue;
+    }
     const updateId = entry.update_id;
-    if (typeof updateId !== 'number') continue;
+    if (typeof updateId !== 'number') {
+      continue;
+    }
     const text = message.text;
     const rendered =
       text === null || text === undefined || text === false

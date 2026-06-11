@@ -11,8 +11,12 @@ const red = (text: string): string => paint('\x1b[31m', text);
 const dim = (text: string): string => paint('\x1b[2m', text);
 
 function jqToString(value: JsonValue | undefined): string {
-  if (value === undefined || value === null) return String(value);
-  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) {
+    return String(value);
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
   return JSON.stringify(value);
 }
 
@@ -28,21 +32,28 @@ function shortCommand(command: JsonValue | undefined): string {
 }
 
 function contentText(value: JsonValue | undefined): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value;
+  }
   if (Array.isArray(value)) {
     const parts: string[] = [];
     for (const item of value) {
-      if (typeof item === 'string') parts.push(item);
-      else if (isJsonObject(item)) {
+      if (typeof item === 'string') {
+        parts.push(item);
+      } else if (isJsonObject(item)) {
         const text = item.text ?? item.message;
-        if (text !== undefined && text !== null) parts.push(jqToString(text));
+        if (text !== undefined && text !== null) {
+          parts.push(jqToString(text));
+        }
       }
     }
     return parts.join(' ');
   }
   if (isJsonObject(value)) {
     const text = value.text ?? value.message;
-    if (text === undefined || text === null) return '';
+    if (text === undefined || text === null) {
+      return '';
+    }
     return jqToString(text);
   }
   return '';
@@ -57,14 +68,18 @@ export function streamJsonEvent(line: string): string[] {
   } catch {
     return [];
   }
-  if (!isJsonObject(event)) return [];
+  if (!isJsonObject(event)) {
+    return [];
+  }
   const out: string[] = [];
 
   if (event.type === 'assistant') {
     const message = isJsonObject(event.message) ? event.message : {};
     const content = Array.isArray(message.content) ? message.content : [];
     for (const item of content) {
-      if (!isJsonObject(item)) continue;
+      if (!isJsonObject(item)) {
+        continue;
+      }
       if (item.type === 'tool_use') {
         out.push(`    ${yellow(jqToString(item.name))} ${jqToString(item.input).slice(0, 120)}`);
       } else if (item.type === 'text') {
@@ -96,12 +111,16 @@ export function streamJsonEvent(line: string): string[] {
     itemContent !== null
   ) {
     const text = firstLine(contentText(itemContent));
-    if (text !== '') out.push(`    ${dim(text)}`);
+    if (text !== '') {
+      out.push(`    ${dim(text)}`);
+    }
     return out;
   }
   if (event.type === 'agent_message' && event.message !== undefined && event.message !== null) {
     const text = firstLine(event.message);
-    if (text !== '') out.push(`    ${dim(text)}`);
+    if (text !== '') {
+      out.push(`    ${dim(text)}`);
+    }
     return out;
   }
 
@@ -133,9 +152,13 @@ export function streamJsonEvent(line: string): string[] {
 function streamPlainExec(text: string): string {
   let cmd = text;
   const lc = cmd.indexOf('-lc "');
-  if (lc !== -1) cmd = cmd.slice(lc + '-lc "'.length);
+  if (lc !== -1) {
+    cmd = cmd.slice(lc + '-lc "'.length);
+  }
   const tail = cmd.indexOf('" in ');
-  if (tail !== -1) cmd = cmd.slice(0, tail);
+  if (tail !== -1) {
+    cmd = cmd.slice(0, tail);
+  }
   return `    ${yellow('exec')} ${cmd.slice(0, 120)}`;
 }
 
@@ -190,16 +213,22 @@ export function cursorStreamJsonEvent(line: string): string[] {
   } catch {
     return [];
   }
-  if (!isJsonObject(event)) return [];
+  if (!isJsonObject(event)) {
+    return [];
+  }
   const out: string[] = [];
 
   if (event.type === 'assistant') {
     const message = isJsonObject(event.message) ? event.message : {};
     const content = Array.isArray(message.content) ? message.content : [];
     for (const item of content) {
-      if (!isJsonObject(item) || item.type !== 'text') continue;
+      if (!isJsonObject(item) || item.type !== 'text') {
+        continue;
+      }
       const text = firstLine(item.text);
-      if (text !== '') out.push(`    ${dim(text)}`);
+      if (text !== '') {
+        out.push(`    ${dim(text)}`);
+      }
     }
     return out;
   }
@@ -242,7 +271,9 @@ export function cursorStreamJsonEvent(line: string): string[] {
 
 export class CursorStreamLogFilter {
   line(line: string): string[] {
-    if (!line.startsWith('{')) return [];
+    if (!line.startsWith('{')) {
+      return [];
+    }
     return cursorStreamJsonEvent(line);
   }
 }

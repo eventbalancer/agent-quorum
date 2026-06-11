@@ -26,15 +26,25 @@ export function lastStablePlan(work: string, creatorSchema: string): number {
   let best = -1;
   for (const file of sortedMatches(work, 'plan.v', '.md')) {
     const n = artifactVersion(file, 'plan.v', '.md');
-    if (n === undefined) continue;
+    if (n === undefined) {
+      continue;
+    }
     if (n === 0) {
-      if (n > best) best = n;
+      if (n > best) {
+        best = n;
+      }
       continue;
     }
     const update = path.join(work, `update.v${n - 1}.json`);
-    if (!nonEmptyFile(update)) continue;
-    if (!schemaValidQuiet(update, creatorSchema)) continue;
-    if (n > best) best = n;
+    if (!nonEmptyFile(update)) {
+      continue;
+    }
+    if (!schemaValidQuiet(update, creatorSchema)) {
+      continue;
+    }
+    if (n > best) {
+      best = n;
+    }
   }
   if (best < 0) {
     const message = `resume failed: no stable plan.vN.md found in ${work}`;
@@ -54,7 +64,9 @@ function stampForArchive(): string {
 }
 
 function archiveResumeFile(work: string, state: ResumeState, file: string): void {
-  if (!existsSync(file)) return;
+  if (!existsSync(file)) {
+    return;
+  }
   if (state.archiveDir === '') {
     state.archiveDir = path.join(work, `stale.${stampForArchive()}`);
     mkdirSync(state.archiveDir, { recursive: true });
@@ -67,8 +79,12 @@ export function archiveResumeStale(work: string, state: ResumeState, start: numb
   const sweep = (prefix: string, suffix: string, keepUpTo: (n: number) => boolean) => {
     for (const file of sortedMatches(work, prefix, suffix)) {
       const n = artifactVersion(file, prefix, suffix);
-      if (n === undefined) continue;
-      if (!keepUpTo(n)) archiveResumeFile(work, state, file);
+      if (n === undefined) {
+        continue;
+      }
+      if (!keepUpTo(n)) {
+        archiveResumeFile(work, state, file);
+      }
     }
   };
   sweep('critique.v', '.json', (n) => n < start);
@@ -118,7 +134,9 @@ export function resolveResumeWorkdir(
   effort = '',
 ): ResumeWorkdirResult {
   const candidates: string[] = [];
-  if (effort !== '') candidates.push(path.join(plansDir, `loop-${base}-${effort}`));
+  if (effort !== '') {
+    candidates.push(path.join(plansDir, `loop-${base}-${effort}`));
+  }
   candidates.push(path.join(plansDir, `loop-${base}`));
   try {
     candidates.push(
@@ -133,11 +151,15 @@ export function resolveResumeWorkdir(
 
   const existing: string[] = [];
   for (const dir of candidates) {
-    if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+      continue;
+    }
     if (!existsSync(path.join(dir, 'run.meta.tsv')) && !existsSync(path.join(dir, 'plan.v0.md'))) {
       continue;
     }
-    if (!existing.includes(dir)) existing.push(dir);
+    if (!existing.includes(dir)) {
+      existing.push(dir);
+    }
   }
 
   if (existing.length === 0) {
@@ -150,10 +172,14 @@ export function resolveResumeWorkdir(
   if (existing.length > 1) {
     if (effort !== '') {
       const exact = path.join(plansDir, `loop-${base}-${effort}`);
-      if (existing.includes(exact)) return { kind: 'resolved', dir: exact };
+      if (existing.includes(exact)) {
+        return { kind: 'resolved', dir: exact };
+      }
     }
     process.stderr.write(`resume: ambiguous workdir for ${base}; candidates:\n`);
-    for (const dir of existing) process.stderr.write(`  ${dir}\n`);
+    for (const dir of existing) {
+      process.stderr.write(`  ${dir}\n`);
+    }
     process.stderr.write('  set PLAN_LOOP_WORK_DIR to the one you want to resume\n');
     return { kind: 'ambiguous' };
   }

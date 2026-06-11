@@ -21,7 +21,9 @@ export function spawnDetached(
 }
 
 export function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined) return;
+  if (child.pid === undefined) {
+    return;
+  }
   try {
     process.kill(-child.pid, signal);
   } catch {
@@ -57,11 +59,15 @@ export async function interruptThenTerminate(
   child: ChildProcess,
   graceSeconds: number,
 ): Promise<void> {
-  if (hasExited(child)) return;
+  if (hasExited(child)) {
+    return;
+  }
   killTree(child, 'SIGINT');
   const deadline = Date.now() + graceSeconds * 1000;
   while (Date.now() < deadline) {
-    if (hasExited(child)) return;
+    if (hasExited(child)) {
+      return;
+    }
     await sleep(200);
   }
   killTree(child, 'SIGTERM');
@@ -85,7 +91,9 @@ export function ownPgid(): string {
     const result = spawnSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], {
       encoding: 'utf8',
     });
-    if (result.status === 0) return result.stdout.trim();
+    if (result.status === 0) {
+      return result.stdout.trim();
+    }
     return '';
   } catch {
     return '';
@@ -97,7 +105,9 @@ let teardownInstalled = false;
 
 export function installSignalTeardown(cleanup: () => void): void {
   activeCleanup = cleanup;
-  if (teardownInstalled) return;
+  if (teardownInstalled) {
+    return;
+  }
   teardownInstalled = true;
   const teardown = () => {
     err('termination signal — killing run tree and cleaning scratch');
@@ -106,7 +116,9 @@ export function installSignalTeardown(cleanup: () => void): void {
     } catch {
       /* best effort */
     }
-    for (const child of liveChildren) killTree(child, 'SIGTERM');
+    for (const child of liveChildren) {
+      killTree(child, 'SIGTERM');
+    }
     process.exit(143);
   };
   process.on('SIGTERM', teardown);

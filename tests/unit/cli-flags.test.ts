@@ -27,7 +27,9 @@ function haltCode(fn: () => unknown): number {
     fn();
     return 0;
   } catch (error) {
-    if (error instanceof HaltError) return error.exitCode;
+    if (error instanceof HaltError) {
+      return error.exitCode;
+    }
     throw error;
   }
 }
@@ -41,6 +43,8 @@ describe('core run flag parsing', () => {
     expect(parseRunArgs(['--effort=max', input]).cli.effort).toBe('max');
     expect(parseRunArgs(['--fix', input]).cli.fix).toBe('1');
     expect(parseRunArgs(['--translate', input]).cli.translate).toBe('1');
+    expect(parseRunArgs(['--locale', 'ru', input]).cli.locale).toBe('ru');
+    expect(parseRunArgs(['--locale=pt-BR', input]).cli.locale).toBe('pt-BR');
     const prompt = parseRunArgs(['--prompt', input]);
     expect(prompt.mode).toBe('prompt');
     expect(haltCode(() => parseRunArgs([input, '--', 'ignored.md']))).toBe(0);
@@ -52,6 +56,7 @@ describe('core run flag parsing', () => {
     expect(capture.text()).toContain('--iters expects a positive integer');
     expect(haltCode(() => parseRunArgs(['--iters=x', input]))).toBe(1);
     expect(haltCode(() => parseRunArgs(['--effort']))).toBe(1);
+    expect(haltCode(() => parseRunArgs(['--locale']))).toBe(1);
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     expect(haltCode(() => parseRunArgs(['-h']))).toBe(0);
     stdoutSpy.mockRestore();
@@ -81,7 +86,7 @@ describe('intervene flag parsing', () => {
 describe('launch flag parsing', () => {
   it('rejects missing values with exit 2 and accepts pass-through flags', async () => {
     const codes: number[] = [];
-    for (const args of [['--iters'], ['--prompt'], ['--effort'], ['x', 'y']]) {
+    for (const args of [['--iters'], ['--prompt'], ['--effort'], ['--locale'], ['x', 'y']]) {
       try {
         await runLaunchCli(args, () => undefined);
         codes.push(0);
@@ -89,7 +94,7 @@ describe('launch flag parsing', () => {
         codes.push(error instanceof HaltError ? error.exitCode : -1);
       }
     }
-    expect(codes).toEqual([2, 2, 2, 2]);
+    expect(codes).toEqual([2, 2, 2, 2, 2]);
     expect((await runLaunchCli(['--help'], () => undefined)).exitCode).toBe(0);
   });
 });

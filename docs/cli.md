@@ -22,13 +22,17 @@ output and `run.log` stay escape-free; the log text itself is unchanged.
 ## Core run — `plan-loop [flags] <plan.md>`
 
 ```text
-plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] <plan.md>
-plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--no-translate] --prompt <prompt.md>
+plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>
+plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
 ```
 
 Flags accept both `--flag value` and `--flag=value` forms for `--iters` /
-`--max-iters` and `--effort`. Unknown flags print `unknown flag:` plus usage
-and exit 1. One positional input only.
+`--max-iters`, `--effort`, and `--locale`. `--locale <tag>` selects the
+human-interaction locale; when omitted, the locale is `en`. Clarification
+questions sent through Telegram use that locale. Non-English locales also run
+the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
+keeps the final plan English-only. Unknown flags print `unknown flag:` plus
+usage and exit 1. One positional input only.
 
 Before the loop starts, every runner the effective config selects is
 preflighted: installation on `PATH`, then an authentication probe
@@ -54,7 +58,7 @@ Exit codes:
 ## `plan-loop launch`
 
 ```text
-plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--no-translate] <input.md>
+plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>
 ```
 
 Backgrounds the run in its own process group, rotates `run.log`, exports

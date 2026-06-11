@@ -10,14 +10,20 @@ import { readStripped, type RunContext } from './run-context.js';
 
 export function artifactVersion(file: string, prefix: string, suffix: string): number | undefined {
   let base = path.basename(file);
-  if (!base.startsWith(prefix) || !base.endsWith(suffix)) return undefined;
+  if (!base.startsWith(prefix) || !base.endsWith(suffix)) {
+    return undefined;
+  }
   base = base.slice(prefix.length, base.length - suffix.length);
-  if (!/^[0-9]+$/.test(base)) return undefined;
+  if (!/^[0-9]+$/.test(base)) {
+    return undefined;
+  }
   return Number(base);
 }
 
 function jqAlt(value: JsonValue | undefined, fallback: string): string {
-  if (value === null || value === undefined || value === false) return fallback;
+  if (value === null || value === undefined || value === false) {
+    return fallback;
+  }
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
@@ -25,7 +31,9 @@ export function compactCritiqueFile(file: string): string {
   const name = path.basename(file);
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   const issues = isJsonObject(parsed) && Array.isArray(parsed.issues) ? parsed.issues : [];
-  if (issues.length === 0) return `- ${name}: no issues`;
+  if (issues.length === 0) {
+    return `- ${name}: no issues`;
+  }
   return issues
     .map((issue) => {
       const obj = isJsonObject(issue) ? issue : {};
@@ -36,7 +44,9 @@ export function compactCritiqueFile(file: string): string {
 
 export function topologyContext(projectRoot: string, topologyMode: string): string {
   const ecosystem = path.join(projectRoot, 'ecosystem.yaml');
-  if (!existsSync(ecosystem)) return '';
+  if (!existsSync(ecosystem)) {
+    return '';
+  }
   if (topologyMode === 'compact') {
     return (
       '## Repo topology summary\n' +
@@ -55,7 +65,9 @@ function previousCritiquesBlock(ctx: RunContext, iter: number): string {
     .map((name) => path.join(ctx.work, name));
   for (const file of files) {
     const n = artifactVersion(file, 'critique.v', '.json');
-    if (n === undefined || n >= iter) continue;
+    if (n === undefined || n >= iter) {
+      continue;
+    }
     if (!schemaValidQuiet(file, ctx.skills.criticSchema)) {
       log(`WARNING: skipping invalid previous critique: ${path.basename(file)}`);
       continue;
@@ -109,5 +121,7 @@ export async function runCritic(
     ctx.permissions.critic.disallowedTools,
     prompt,
   );
-  if (status !== 0) throw new HaltError(`critic provider call failed (${status})`, status, true);
+  if (status !== 0) {
+    throw new HaltError(`critic provider call failed (${status})`, status, true);
+  }
 }

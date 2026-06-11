@@ -26,7 +26,9 @@ function exited(child: ChildProcess): boolean {
 async function sleepWatchingExit(child: ChildProcess, seconds: number): Promise<void> {
   const deadline = Date.now() + seconds * 1000;
   while (Date.now() < deadline) {
-    if (exited(child)) return;
+    if (exited(child)) {
+      return;
+    }
     await sleep(Math.min(200, Math.max(1, deadline - Date.now())));
   }
 }
@@ -42,7 +44,9 @@ export async function watchStream(
   const byteTo = knobs.byteTimeoutSeconds;
   const semTo = knobs.semanticTimeoutSeconds;
   const wallTo = knobs.wallTimeoutSeconds;
-  if (!(byteTo > 0 || semTo > 0 || wallTo > 0)) return undefined;
+  if (!(byteTo > 0 || semTo > 0 || wallTo > 0)) {
+    return undefined;
+  }
 
   let elapsed = 0;
   let byteIdle = 0;
@@ -52,7 +56,9 @@ export async function watchStream(
 
   while (!exited(child)) {
     await sleepWatchingExit(child, knobs.pollSeconds);
-    if (exited(child)) return undefined;
+    if (exited(child)) {
+      return undefined;
+    }
     elapsed += knobs.pollSeconds;
 
     const size = state.bytes;
@@ -83,7 +89,9 @@ export async function watchStream(
 
     killTree(child, 'SIGINT');
     await sleepWatchingExit(child, knobs.graceSeconds);
-    if (!exited(child)) killTree(child, 'SIGTERM');
+    if (!exited(child)) {
+      killTree(child, 'SIGTERM');
+    }
     return reason;
   }
   return undefined;
@@ -102,11 +110,21 @@ function parseEvent(line: string): JsonObject | undefined {
 // tool_result, thinking_tokens heartbeats (any encoding), or the final result.
 export function claudeProgressEvent(line: string): boolean {
   const event = parseEvent(line);
-  if (!event) return false;
-  if (event.type === 'thinking_tokens') return true;
-  if (event.subtype === 'thinking_tokens') return true;
-  if (event.thinking_tokens !== undefined && event.thinking_tokens !== null) return true;
-  if (event.type === 'result') return true;
+  if (!event) {
+    return false;
+  }
+  if (event.type === 'thinking_tokens') {
+    return true;
+  }
+  if (event.subtype === 'thinking_tokens') {
+    return true;
+  }
+  if (event.thinking_tokens !== undefined && event.thinking_tokens !== null) {
+    return true;
+  }
+  if (event.type === 'result') {
+    return true;
+  }
   const message = isJsonObject(event.message) ? event.message : undefined;
   const content = message && Array.isArray(message.content) ? message.content : [];
   if (event.type === 'assistant') {
@@ -123,9 +141,15 @@ export function claudeProgressEvent(line: string): boolean {
 // Cursor semantic-progress predicate: assistant text, any tool_call, or result.
 export function cursorProgressEvent(line: string): boolean {
   const event = parseEvent(line);
-  if (!event) return false;
-  if (event.type === 'tool_call') return true;
-  if (event.type === 'result') return true;
+  if (!event) {
+    return false;
+  }
+  if (event.type === 'tool_call') {
+    return true;
+  }
+  if (event.type === 'result') {
+    return true;
+  }
   if (event.type === 'assistant') {
     const message = isJsonObject(event.message) ? event.message : undefined;
     const content = message && Array.isArray(message.content) ? message.content : [];

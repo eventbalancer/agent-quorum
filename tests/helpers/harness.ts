@@ -141,8 +141,12 @@ export function argvRecords(file: string): string[][] {
       field.push(byte);
     }
   }
-  if (field.length > 0) record.push(Buffer.from(field).toString('utf8'));
-  if (record.length > 0) records.push(record);
+  if (field.length > 0) {
+    record.push(Buffer.from(field).toString('utf8'));
+  }
+  if (record.length > 0) {
+    records.push(record);
+  }
   return records;
 }
 
@@ -263,12 +267,22 @@ export function writePlanLoopConfig(file: string, ...specs: string[]): void {
   const roles = config.roles as Record<string, JsonObject>;
   for (const spec of specs) {
     const [role, runner, model, reasoning] = spec.split(':');
-    if (!role) continue;
+    if (!role) {
+      continue;
+    }
     const target = roles[role];
-    if (target === undefined) continue;
-    if (runner) target.runner = runner;
-    if (model) target.model = model;
-    if (reasoning) target.reasoning = reasoning;
+    if (target === undefined) {
+      continue;
+    }
+    if (runner) {
+      target.runner = runner;
+    }
+    if (model) {
+      target.model = model;
+    }
+    if (reasoning) {
+      target.reasoning = reasoning;
+    }
   }
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
 }
@@ -278,8 +292,9 @@ export interface StderrCapture {
   restore: () => void;
 }
 
-// eslint-disable-next-line no-control-regex
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+type MaybePromise<T> = T | Promise<T>;
+
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
@@ -303,13 +318,19 @@ export function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T
   const saved = new Map<string, string | undefined>();
   for (const [key, value] of Object.entries(vars)) {
     saved.set(key, process.env[key]);
-    if (value === undefined) Reflect.deleteProperty(process.env, key);
-    else process.env[key] = value;
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, key);
+    } else {
+      process.env[key] = value;
+    }
   }
   const restore = () => {
     for (const [key, value] of saved) {
-      if (value === undefined) Reflect.deleteProperty(process.env, key);
-      else process.env[key] = value;
+      if (value === undefined) {
+        Reflect.deleteProperty(process.env, key);
+      } else {
+        process.env[key] = value;
+      }
     }
   };
   try {
@@ -324,20 +345,26 @@ export function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T
 
 export async function withEnvAsync<T>(
   vars: Record<string, string | undefined>,
-  fn: () => Promise<T>,
+  fn: () => MaybePromise<T>,
 ): Promise<T> {
   const saved = new Map<string, string | undefined>();
   for (const [key, value] of Object.entries(vars)) {
     saved.set(key, process.env[key]);
-    if (value === undefined) Reflect.deleteProperty(process.env, key);
-    else process.env[key] = value;
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, key);
+    } else {
+      process.env[key] = value;
+    }
   }
   try {
-    return await fn();
+    return await Promise.resolve(fn());
   } finally {
     for (const [key, value] of saved) {
-      if (value === undefined) Reflect.deleteProperty(process.env, key);
-      else process.env[key] = value;
+      if (value === undefined) {
+        Reflect.deleteProperty(process.env, key);
+      } else {
+        process.env[key] = value;
+      }
     }
   }
 }

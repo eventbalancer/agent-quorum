@@ -25,10 +25,10 @@ creator ──► plan.v0.md
                 ▼
 reference validator ──► fix pass ──► plan.final.md
                                            │
-                                           │  translate pass
+                                           │  locale pass (when requested)
                                            │
                                            ▼
-                                   plan.final.ru.md
+                              plan.final.<locale>.md
 ```
 
 Five roles — critic, creator, fixer, reviewer, translator — map onto three
@@ -61,8 +61,10 @@ plan-loop intervene --work <dir> "note"   # inject operator guidance mid-run
 ```
 
 Core-run flags: `--iters N`, `--effort {low,high,max}`, `--fix/--no-fix`,
-`--translate/--no-translate`, `--prompt <file>`. Full flag reference and exit
-codes live in [`docs/cli.md`](docs/cli.md).
+`--locale <tag>`, `--translate/--no-translate`, `--prompt <file>`. Full flag
+reference and exit codes live in [`docs/cli.md`](docs/cli.md).
+Locale defaults to `en`; non-English locales localize Telegram clarification
+questions and produce `plan.final.<locale>.md`.
 
 ## Library
 
@@ -96,6 +98,8 @@ variable and the override precedence — lives in
   environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
 - [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.
+- [`docs/development/conventions.md`](docs/development/conventions.md) — code,
+  git, and verification conventions.
 
 ## Development
 
@@ -104,6 +108,9 @@ corepack enable
 pnpm install --frozen-lockfile
 pnpm run check          # typecheck + lint + format check + tests with coverage
 ```
+
+Code style, git, and verification rules live in
+[`docs/development/conventions.md`](docs/development/conventions.md).
 
 ## License
 

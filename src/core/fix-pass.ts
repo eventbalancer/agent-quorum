@@ -26,7 +26,9 @@ function fixPassAcceptPlanCandidate(candidate: string, label: string): boolean {
     requirePlanDocumentShape(candidate);
     return true;
   } catch (error) {
-    if (!(error instanceof HaltError)) throw error;
+    if (!(error instanceof HaltError)) {
+      throw error;
+    }
   }
   err(`fix-pass: ${label} failed the plan-shape gate`);
   return false;
@@ -61,7 +63,9 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
   let findings: JsonObject = {};
   try {
     const parsed = JSON.parse(readFileSync(findingsFile, 'utf8')) as JsonValue;
-    if (isJsonObject(parsed)) findings = parsed;
+    if (isJsonObject(parsed)) {
+      findings = parsed;
+    }
   } catch {
     /* unreadable findings behave as zero */
   }

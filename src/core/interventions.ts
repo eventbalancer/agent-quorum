@@ -19,7 +19,9 @@ function jqToString(value: JsonValue): string {
 function parseJsonl(file: string): JsonValue[] | undefined {
   const entries: JsonValue[] = [];
   for (const line of readFileSync(file, 'utf8').split('\n')) {
-    if (line.trim() === '') continue;
+    if (line.trim() === '') {
+      continue;
+    }
     try {
       entries.push(JSON.parse(line) as JsonValue);
     } catch {
@@ -31,9 +33,13 @@ function parseJsonl(file: string): JsonValue[] | undefined {
 
 function loadMigratedIds(work: string): string[] {
   const file = operatorInterventionMigrationsFile(work);
-  if (!nonEmptyFile(file)) return [];
+  if (!nonEmptyFile(file)) {
+    return [];
+  }
   const entries = parseJsonl(file);
-  if (entries === undefined) return [];
+  if (entries === undefined) {
+    return [];
+  }
   const ids = new Set<string>();
   for (const entry of entries) {
     if (isJsonObject(entry) && typeof entry.intervention_id === 'string') {
@@ -77,7 +83,9 @@ function interventionItems(entries: JsonValue[]): InterventionItem[] {
 
 export function operatorInterventionsContext(work: string, role = 'all'): string {
   const file = operatorInterventionsFile(work);
-  if (!nonEmptyFile(file)) return '';
+  if (!nonEmptyFile(file)) {
+    return '';
+  }
 
   const entries = parseJsonl(file);
   if (entries === undefined) {
@@ -98,7 +106,9 @@ export function operatorInterventionsContext(work: string, role = 'all'): string
   const items = interventionItems(entries).filter(
     (item) => !migrated.has(item.id) && (item.target === 'all' || item.target === role),
   );
-  if (items.length === 0) return '';
+  if (items.length === 0) {
+    return '';
+  }
 
   const lines = items
     .map((item) => {
@@ -120,15 +130,23 @@ export function markOperatorInterventionsMigrated(
   planRef: string,
 ): void {
   const file = operatorInterventionsFile(work);
-  if (!nonEmptyFile(file)) return;
+  if (!nonEmptyFile(file)) {
+    return;
+  }
   const entries = parseJsonl(file);
-  if (entries === undefined) return;
+  if (entries === undefined) {
+    return;
+  }
   const migrated = new Set(loadMigratedIds(work));
   const ts = nowUtcStamp();
   let appended = '';
   for (const item of interventionItems(entries)) {
-    if (migrated.has(item.id)) continue;
-    if (!(item.target === 'all' || item.target === role)) continue;
+    if (migrated.has(item.id)) {
+      continue;
+    }
+    if (!(item.target === 'all' || item.target === role)) {
+      continue;
+    }
     const sourceTs = item.ts === 'unknown-time' ? null : item.ts;
     appended += `${JSON.stringify({
       ts,
@@ -139,7 +157,9 @@ export function markOperatorInterventionsMigrated(
       target: item.target,
     })}\n`;
   }
-  if (appended !== '') appendFileSync(operatorInterventionMigrationsFile(work), appended);
+  if (appended !== '') {
+    appendFileSync(operatorInterventionMigrationsFile(work), appended);
+  }
 }
 
 export interface InterventionsState {
@@ -150,9 +170,13 @@ export interface InterventionsState {
 
 export function operatorInterventionsState(work: string): InterventionsState {
   const file = operatorInterventionsFile(work);
-  if (!nonEmptyFile(file)) return { total: 0, active: 0, migrated: 0 };
+  if (!nonEmptyFile(file)) {
+    return { total: 0, active: 0, migrated: 0 };
+  }
   const entries = parseJsonl(file);
-  if (entries === undefined) return { total: 'invalid', active: 'invalid', migrated: 'invalid' };
+  if (entries === undefined) {
+    return { total: 'invalid', active: 'invalid', migrated: 'invalid' };
+  }
   const migrated = new Set(loadMigratedIds(work));
   const all = interventionItems(entries).map((item) => item.id);
   const done = all.filter((id) => migrated.has(id)).length;

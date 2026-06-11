@@ -14,6 +14,25 @@ import { captureStderr, withEnv } from '../helpers/harness.js';
 
 let tmp: string;
 
+interface SanitizedUpdateIssue {
+  verdict_reason: string;
+  duplicate_of: null;
+}
+
+interface SanitizedUpdate {
+  issues: SanitizedUpdateIssue[];
+  rejected_append: Record<string, unknown>[];
+}
+
+interface SanitizedCritiqueIssue {
+  id: string;
+  addresses: string | null;
+}
+
+interface SanitizedCritique {
+  issues: SanitizedCritiqueIssue[];
+}
+
 function writeJson(name: string, value: unknown): string {
   const file = path.join(tmp, name);
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -48,10 +67,7 @@ describe('sanitizers', () => {
     } finally {
       capture.restore();
     }
-    const result = readJson(file) as {
-      issues: { verdict_reason: string; duplicate_of: null }[];
-      rejected_append: Record<string, unknown>[];
-    } & Record<string, unknown>;
+    const result = readJson(file) as SanitizedUpdate & Record<string, unknown>;
     expect(Object.keys(result).sort()).toEqual([
       'applied',
       'issues',
@@ -128,7 +144,7 @@ describe('sanitizers', () => {
     } finally {
       capture.restore();
     }
-    const result = readJson(file) as { issues: { id: string; addresses: string | null }[] };
+    const result = readJson(file) as SanitizedCritique;
     expect(result.issues[0]?.id).toBe('C1');
     expect(result.issues[1]?.id).toBe('C2');
     expect(result.issues[1]?.addresses).toBe('v0.C1');

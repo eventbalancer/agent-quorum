@@ -35,6 +35,26 @@ import type { JsonObject } from '../../src/core/json.js';
 
 let tmp: string;
 
+interface SanitizedCritiqueIssue {
+  id: string;
+  claim: null;
+}
+
+interface SanitizedCritique {
+  summary: string;
+  issues: SanitizedCritiqueIssue[];
+}
+
+interface SanitizedMetaIssue {
+  verdict_reason: string;
+  verdict: null;
+}
+
+interface SanitizedMeta {
+  issues: SanitizedMetaIssue[];
+  applied: unknown[];
+}
+
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-branches.'));
   resetConfigCache();
@@ -149,10 +169,7 @@ describe('sanitizer warning branches', () => {
     } finally {
       capture.restore();
     }
-    const result = JSON.parse(readFileSync(file, 'utf8')) as {
-      summary: string;
-      issues: { id: string; claim: null }[];
-    };
+    const result = JSON.parse(readFileSync(file, 'utf8')) as SanitizedCritique;
     expect(result.summary).toBe('');
     expect(result.issues[0]?.id).toBe('C1');
     expect(result.issues[0]?.claim).toBeNull();
@@ -170,10 +187,7 @@ describe('sanitizer warning branches', () => {
     } finally {
       capture.restore();
     }
-    const sanitized = JSON.parse(readFileSync(meta, 'utf8')) as {
-      issues: { verdict_reason: string; verdict: null }[];
-      applied: unknown[];
-    };
+    const sanitized = JSON.parse(readFileSync(meta, 'utf8')) as SanitizedMeta;
     expect(sanitized.issues[0]?.verdict_reason).toBe('');
     expect(sanitized.issues[0]?.verdict).toBeNull();
     expect(sanitized.applied).toEqual([]);
@@ -329,9 +343,39 @@ describe('config and knob halts', () => {
         (config.settings as JsonObject).translate = 'on';
       });
       expect(resolveRunSettings({}, onOff).translatePass).toBe(1);
+      expect(resolveRunSettings({}, onOff).locale).toBe('ru');
       expect(
         withEnv({ PLAN_LOOP_TRANSLATE: 'off' }, () => resolveRunSettings({}, onOff)).translatePass,
       ).toBe(0);
+      resetConfigCache();
+      const localeOn = writeConfig('locale-on.json', (config) => {
+        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
+        (config.settings as JsonObject).locale = 'pt-BR';
+      });
+      const localeSettings = resolveRunSettings({}, localeOn);
+      expect(localeSettings.translatePass).toBe(1);
+      expect(localeSettings.locale).toBe('pt-BR');
+      resetConfigCache();
+      const defaultLocale = writeConfig('default-locale.json', (config) => {
+        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
+      });
+      const defaultLocaleSettings = resolveRunSettings({}, defaultLocale);
+      expect(defaultLocaleSettings.translatePass).toBe(0);
+      expect(defaultLocaleSettings.locale).toBe('en');
+      resetConfigCache();
+      const englishLocale = writeConfig('english-locale.json', (config) => {
+        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
+        (config.settings as JsonObject).locale = 'en';
+      });
+      const englishSettings = resolveRunSettings({}, englishLocale);
+      expect(englishSettings.translatePass).toBe(0);
+      expect(englishSettings.locale).toBe('en');
+      resetConfigCache();
+      const invalidLocale = writeConfig('invalid-locale.json', (config) => {
+        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
+        (config.settings as JsonObject).locale = '../ru';
+      });
+      expect(() => resolveRunSettings({}, invalidLocale)).toThrow(/settings\.locale/);
     } finally {
       capture.restore();
     }

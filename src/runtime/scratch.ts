@@ -17,7 +17,9 @@ export class Scratch {
         writeFileSync(candidate, '', { flag: 'wx' });
         return candidate;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
       }
     }
   }
