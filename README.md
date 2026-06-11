@@ -98,6 +98,8 @@ variable and the override precedence — lives in
   environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
 - [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.
+- [`docs/release.md`](docs/release.md) — release flow across git tags, GitHub
+  Actions, GitHub Releases, and npm.
 - [`docs/development/conventions.md`](docs/development/conventions.md) — code,
   git, and verification conventions.
 
