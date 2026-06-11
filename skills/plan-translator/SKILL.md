@@ -31,7 +31,7 @@ Localize everything a human reads as natural language:
 - **The Impact Graph (mermaid) and any other diagram labels.** Translate the human-readable node and edge **label text**, and adapt it semantically so a reader in the target locale follows the flow comfortably — a literal word-for-word label is wrong; render the meaning. Keep the mermaid syntax itself intact (see below).
 - Inline comments/annotations inside directory trees and code fences when they are prose (e.g. `# moved here` → `# relocated here`).
 
-The localized prose must read as if written by a senior engineer who naturally works in the target locale: correct orthography, natural technical phrasing, no calques or machine-literal constructions. If the target locale is Russian, use correct Russian orthography with all required letters, including ё where it disambiguates.
+The localized prose must read as if written by a senior engineer who naturally works in the target locale: correct orthography, natural technical phrasing, no calques or machine-literal constructions. For languages with locale-specific letters or diacritics, use them where they are required or disambiguating.
 
 ---
 
@@ -41,9 +41,9 @@ These are canonical tokens. Translating them breaks the plan:
 
 - File and directory paths, and `file:line` references (`services/js-svc-assistant-api/src/aggregator.ts:42`).
 - Code identifiers: function, variable, type, class, module, and field names.
-- Shell commands and CLI invocations (`bs build --layer packages`, `pnpm install`, `git status`).
+- Shell commands and CLI invocations (`pnpm run check`, `pnpm exec tsx scripts/plan-agent-quorum.ts`, `git status`).
 - Environment variable names, JSON/YAML keys, flags (`--no-fix`, `PLAN_LOOP_WORK_DIR`).
-- Package, repo, branch, region, port, and product/library/technology names (`@botscale/*`, `botscale-infra`, `pino`, `Prometheus`, `Docker`, `Mermaid`).
+- Package, repo, branch, region, port, and product/library/technology names (`agent-quorum`, `plan-loop`, `pino`, `Prometheus`, `Docker`, `Mermaid`).
 - Literal values, version strings, numbers, and anything inside backtick inline `code`.
 - The **code** inside fenced blocks: command listings, config snippets, and directory-tree node names stay byte-for-byte (translate only their prose comments, per above).
 

@@ -1,6 +1,6 @@
 # agent-quorum Development Conventions
 
-This document is the single source of truth for agent-quorum development conventions. It is adapted from the BotScale workspace conventions, keeping only what fits this project's stack (TypeScript, Node 24, ESM/NodeNext, pnpm, vitest, flat-config ESLint, Prettier, ajv) and architecture (a standalone CLI orchestrator, not a multi-repo workspace).
+This document is the single source of truth for agent-quorum development conventions. It covers this project's stack (TypeScript, Node 24, ESM/NodeNext, pnpm, vitest, flat-config ESLint, Prettier, ajv) and architecture (a standalone CLI orchestrator, not a multi-repo workspace).
 
 ## Authority
 

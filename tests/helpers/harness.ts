@@ -21,6 +21,11 @@ export function writeStructuredPlanFile(file: string, title: string): void {
   const body = [
     `# ${title}`,
     '',
+    '## At a Glance',
+    '- Outcome: fixture plan.',
+    '- Blast radius: fixture.',
+    '- Work Plan phases: 1.',
+    '',
     '## Context',
     '- Fixture context.',
     '',
@@ -288,11 +293,13 @@ export function writePlanLoopConfig(file: string, ...specs: string[]): void {
 }
 
 export interface StderrCapture {
-  text: () => string;
-  restore: () => void;
+  readonly text: () => string;
+  readonly restore: () => void;
 }
 
 type MaybePromise<T> = T | Promise<T>;
+type EnvOverrides = Readonly<Record<string, string | undefined>>;
+type EnvSnapshot = Map<string, string | undefined>;
 
 const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
@@ -314,8 +321,8 @@ export function captureStderr(): StderrCapture {
   };
 }
 
-export function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
-  const saved = new Map<string, string | undefined>();
+function snapshotEnv(vars: EnvOverrides): EnvSnapshot {
+  const saved: EnvSnapshot = new Map();
   for (const [key, value] of Object.entries(vars)) {
     saved.set(key, process.env[key]);
     if (value === undefined) {
@@ -324,47 +331,33 @@ export function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T
       process.env[key] = value;
     }
   }
-  const restore = () => {
-    for (const [key, value] of saved) {
-      if (value === undefined) {
-        Reflect.deleteProperty(process.env, key);
-      } else {
-        process.env[key] = value;
-      }
+  return saved;
+}
+
+function restoreEnv(saved: EnvSnapshot): void {
+  for (const [key, value] of saved) {
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, key);
+    } else {
+      process.env[key] = value;
     }
-  };
-  try {
-    const result = fn();
-    restore();
-    return result;
-  } catch (error) {
-    restore();
-    throw error;
   }
 }
 
-export async function withEnvAsync<T>(
-  vars: Record<string, string | undefined>,
-  fn: () => MaybePromise<T>,
-): Promise<T> {
-  const saved = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(vars)) {
-    saved.set(key, process.env[key]);
-    if (value === undefined) {
-      Reflect.deleteProperty(process.env, key);
-    } else {
-      process.env[key] = value;
-    }
+export function withEnv<T>(vars: EnvOverrides, fn: () => T): T {
+  const saved = snapshotEnv(vars);
+  try {
+    return fn();
+  } finally {
+    restoreEnv(saved);
   }
+}
+
+export async function withEnvAsync<T>(vars: EnvOverrides, fn: () => MaybePromise<T>): Promise<T> {
+  const saved = snapshotEnv(vars);
   try {
     return await Promise.resolve(fn());
   } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) {
-        Reflect.deleteProperty(process.env, key);
-      } else {
-        process.env[key] = value;
-      }
-    }
+    restoreEnv(saved);
   }
 }

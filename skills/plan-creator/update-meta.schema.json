@@ -66,7 +66,9 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(not_value_adding|conflicts_with: C[0-9]+|out_of_plan_scope|requires_external_decision)$",
+            "description": "Allowed values: not_value_adding | conflicts_with: C<id> | out_of_plan_scope | requires_external_decision"
           }
         }
       }

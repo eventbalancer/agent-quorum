@@ -4,6 +4,7 @@ import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
 
 export const PLAN_DOCUMENT_REQUIRED_SECTIONS = [
+  'At a Glance',
   'Context',
   'Verified Facts',
   'Target State',
@@ -54,8 +55,8 @@ function planHasImpactGraphMermaid(file: string): boolean {
 }
 
 export interface PlanShapeHealth {
-  missing: number;
-  graph: 0 | 1;
+  readonly missing: number;
+  readonly graph: 0 | 1;
 }
 
 export function planDocumentShapeHealth(file: string): PlanShapeHealth {
@@ -74,8 +75,6 @@ export function planDocumentShapeOk(file: string): boolean {
 }
 
 export function validatePlanDocumentShape(file: string): void {
-  let missing = 0;
-  let graph = 0;
   const title = planHasTitleHeading(file) ? 1 : 0;
   if (title === 0) {
     log('WARNING: plan document must start with a level-1 title');
@@ -83,14 +82,12 @@ export function validatePlanDocumentShape(file: string): void {
   for (const heading of PLAN_DOCUMENT_REQUIRED_SECTIONS) {
     if (!planHasHeading(file, heading)) {
       log(`WARNING: plan document missing section: ${heading}`);
-      missing += 1;
     }
   }
-  if (planHasImpactGraphMermaid(file)) {
-    graph = 1;
-  } else if (planHasHeading(file, 'Impact Graph')) {
+  if (!planHasImpactGraphMermaid(file) && planHasHeading(file, 'Impact Graph')) {
     log('WARNING: Impact Graph has no mermaid flowchart');
   }
+  const { missing, graph } = planDocumentShapeHealth(file);
   if (title === 1 && missing === 0 && graph === 1) {
     log('  → plan_shape=structured impact_graph=mermaid');
   } else {

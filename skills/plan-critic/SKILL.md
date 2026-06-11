@@ -1,6 +1,6 @@
 ---
 name: plan-critic
-description: Structured (JSON-only) critique of implementation plans. Used by plan-loop.sh — produces strict JSON conforming to critique.schema.json. For human-readable review use the workspace `.agents/skills/plan-critic` skill instead.
+description: Structured (JSON-only) critique of implementation plans. Used by plan-loop — produces strict JSON conforming to critique.schema.json.
 ---
 
 # Plan Critic
@@ -64,18 +64,18 @@ Before codebase-specific judgments, **by default** inspect the relevant local co
 
 Walk it explicitly. If you find nothing for an item, skip it — do not invent issues.
 
-- **Definition of Done.** Are there explicit, verifiable success criteria? Does each Work Plan step carry its own acceptance gate (an observable readiness condition)? Does verification rest on `bs check` (the baseline Definition of Done) plus plan-specific checks?
+- **Definition of Done.** Are there explicit, verifiable success criteria? Does each Work Plan step carry its own acceptance gate (an observable readiness condition)? Does verification rest on `pnpm run check` for broad or contract-touching changes, or a justified narrower repo script for documentation-only or tightly scoped changes?
 - **Scope.** Are the boundaries clearly drawn? Are there explicit non-goals? Does scope creep along the way?
 - **Correctness.** Are technical claims verifiable? Do the named files, flags, and APIs exist? (Check via Read.)
 - **Failure handling.** What if step N fails — is that case covered by a STOP trigger? What gets migrated?
-- **Migrations and consumers.** When interfaces / data formats / `@botscale/*` contracts change: are consumers identified and updated and is the old surface removed (clean cutover, no compatibility layer), in the addition→consumers→removal commit order from CLAUDE.md §5?
+- **Migrations and consumers.** When public API, CLI, config, schema, artifact, package, or role-skill contracts change: are consumers identified, docs/tests updated, and any authorized removal or migration sequence made explicit?
 - **Testability.** How exactly will the author verify each step? Commands, metrics, manual checks?
 - **Assumptions.** Are there hidden assumptions presented as facts?
 - **Security, privacy, data integrity, cost.** Does the plan add new attack surfaces, handle PII, change data schemas, or add meaningful runtime/infra cost? If so, is it addressed?
 - **Conventions.** If the repo has CLAUDE.md / conventions (no-comments, English-only, two-commit pattern, etc.), does the plan follow them?
 - **Sequencing.** Is the step order correct? Does step N depend on step N+M?
-- **Clean cutover.** Does the plan leave behind compatibility layers, crutches, rollback paths, or un-removed old code branches as technical debt?
-- **Impact Graph completeness.** Does the bottom graph cover the indirect channels from the contract's coverage checklist (generated artifacts, cache keys, metrics, lockfile, DB types, CI, deploy, docs, `@botscale/*` consumers)? Evidence — a changed surface present in the Work Plan but absent from the graph.
+- **Clean target state.** Does the plan leave behind unnecessary compatibility layers, crutches, rollback paths, or un-removed old code branches as technical debt, while still preserving public contracts unless a breaking change is explicit?
+- **Impact Graph completeness.** Does the bottom graph cover the indirect channels from the contract's coverage checklist (generated artifacts, package contents, exports/bin, lockfiles, CLI flags, config keys, schemas/artifact shapes, role skills, provider/runtime behavior, summary/status/run metadata, CI/release gates, docs, explicitly named downstream consumers)? Evidence — a changed surface present in the Work Plan but absent from the graph.
 - **Structural target rendered.** When the plan changes file/directory layout, module structure, or component topology, does `## Target State` render the target as a diagram (a directory tree — ideally `before →`/`after` — for file moves and renames, or a structural diagram for topology changes), not prose or a flat table alone? Evidence — a structural change in the Work Plan with no visualizable target shape. Severity `minor` by default; `major` only when the absent structure makes the move sequence or final placement genuinely ambiguous to execute.
 - **At a Glance present.** Does the plan open with a short `## At a Glance` orientation block (outcome, blast radius, phase count, top risk) that a reader absorbs in ten seconds, before Context? Evidence — the document jumps from the title straight into Context. Severity `nit`/`minor` only — readability, never a blocker.
 - **Self-contained sections.** Does a section depend on another by position rather than by name — "as noted above", "the file mentioned earlier", a dangling "it"/"this" — so it loses meaning when read in isolation? Evidence — quote the dangling back-reference. `minor` by default; `major` only when the ambiguity makes a Work Plan step genuinely unexecutable.

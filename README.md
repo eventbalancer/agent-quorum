@@ -60,11 +60,27 @@ plan-loop status [PID]                    # run snapshot (any PID in the tree)
 plan-loop intervene --work <dir> "note"   # inject operator guidance mid-run
 ```
 
-Core-run flags: `--iters N`, `--effort {low,high,max}`, `--fix/--no-fix`,
-`--locale <tag>`, `--translate/--no-translate`, `--prompt <file>`. Full flag
-reference and exit codes live in [`docs/cli.md`](docs/cli.md).
-Locale defaults to `en`; non-English locales localize Telegram clarification
-questions and produce `plan.final.<locale>.md`.
+Core-run flags:
+
+| Flag                             | Purpose                                                 |
+| -------------------------------- | ------------------------------------------------------- |
+| `--iters N`                      | Set the iteration cap.                                  |
+| `--effort {low,high,max}`        | Select the role-call topology and session behavior.     |
+| `--fix` / `--no-fix`             | Enable or skip the post-convergence reference fix pass. |
+| `--locale <tag>`                 | Set the human-interaction locale; defaults to `en`.     |
+| `--translate` / `--no-translate` | Enable or skip the companion final-plan localization.   |
+| `--prompt <file>`                | Create `plan.v0` from a prompt before the loop starts.  |
+
+Full flag reference and exit codes live in [`docs/cli.md`](docs/cli.md).
+Non-English locales localize Telegram clarification questions and produce
+`plan.final.<locale>.md`.
+
+Existing plan inputs are expected to be complete implementation plans, not
+summaries or external pointers. The shape gate requires a top-level title,
+`## At a Glance`, Context, Verified Facts, Target State, Scope, Work Plan, Files
+and Interfaces, Verification, STOP Triggers, and a final `## Impact Graph` with
+a Mermaid flowchart. Prompt-created and revised plans are normalized to the same
+contract by the packaged role skills.
 
 ## Library
 
@@ -84,10 +100,34 @@ returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
 
 ## Configuration
 
-A single `plan-loop.json` (packaged default; override with
-`PLAN_LOOP_CONFIG_FILE`) declares loop settings and the per-role
-runner/model/reasoning/tool matrix. The full reference — every `PLAN_LOOP_*`
-variable and the override precedence — lives in
+agent-quorum reads one config file: the packaged `plan-loop.json`, or the file
+pointed at by `PLAN_LOOP_CONFIG_FILE`. There is no search chain.
+
+`plan-loop.json` has two main sections:
+
+| Section    | Controls                                                          |
+| ---------- | ----------------------------------------------------------------- |
+| `settings` | Iteration cap, effort, fix pass, locale, translation, retries.    |
+| `roles`    | Per-role runner, model, reasoning level, tools, disallowed tools. |
+
+Supported runners are `codex`, `claude`, and `cursor`. Tool permissions stay in
+the file so role capabilities are reviewable alongside the role matrix.
+
+Override precedence:
+
+| Surface                          | Precedence                   |
+| -------------------------------- | ---------------------------- |
+| Loop settings                    | CLI > env > file             |
+| Role runner/model/reasoning      | env > file                   |
+| Tool permissions                 | file only                    |
+| Library `workDir` / `configFile` | typed option > env > default |
+
+A gitignored package-root `.env` is loaded before config resolution, with real
+environment variables winning. It is intended for secrets such as Telegram bot
+credentials.
+
+The full reference — every `PLAN_LOOP_*` variable, watchdog knob, Telegram
+setting, status/launch toggle, and exact override behavior — lives in
 [`docs/configuration.md`](docs/configuration.md).
 
 ## Documentation
@@ -102,6 +142,9 @@ variable and the override precedence — lives in
   Actions, GitHub Releases, and npm.
 - [`docs/development/conventions.md`](docs/development/conventions.md) — code,
   git, and verification conventions.
+- [`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)
+  — repository-local requirements, handoff, prompt architecture, execution, and
+  self-planning workflow.
 
 ## Development
 
@@ -113,6 +156,32 @@ pnpm run check          # typecheck + lint + format check + tests with coverage
 
 Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).
+
+For changes that should be designed by `agent-quorum` itself, build the package
+and run the repository-local dogfood harness:
+
+```sh
+pnpm run build
+pnpm exec tsx scripts/plan-agent-quorum.ts --prompt .agents/prompts/<slug>.md
+```
+
+Harness contract:
+
+- imports the public `agent-quorum` package name;
+- writes plan-loop workdirs under `.agents/plans/`;
+- accepts `--work`, `--effort`, `--iters`, `--locale`, `--translate`, and
+  `--fix` / `--no-fix`.
+
+Artifact ownership:
+
+| Path                          | Role                                 |
+| ----------------------------- | ------------------------------------ |
+| `.agents/plans/`              | Generated run artifacts; ignored.    |
+| `.agents/prompts/`            | Generated prompts; ignored.          |
+| `.agents/requirements/`       | Generated requirements; ignored.     |
+| `.agents/execution-journals/` | Generated execute journals; ignored. |
+| `.agents/skills/`             | Repository-local skill source.       |
+| `.claude/commands/`           | Mirrored Claude command source.      |
 
 ## License
 

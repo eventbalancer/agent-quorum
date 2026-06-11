@@ -1,6 +1,14 @@
 node_modules/
 dist/
 coverage/
+.agents/plans/**
+!.agents/plans/.gitkeep
+.agents/prompts/**
+!.agents/prompts/.gitkeep
+.agents/requirements/**
+!.agents/requirements/.gitkeep
+.agents/execution-journals/**
+!.agents/execution-journals/.gitkeep
 *.tgz
 .env
 .DS_Store

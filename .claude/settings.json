@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Agent",
+      "Skill",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskGet",
+      "TaskList",
+      "TaskOutput",
+      "TaskStop",
+      "NotebookEdit",
+      "WebSearch",
+      "WebFetch",
+      "ToolSearch",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "EnterWorktree",
+      "ExitWorktree",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "RemoteTrigger",
+      "AskUserQuestion"
+    ],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf /*:*)",
+      "Bash(rm -rf .:*)",
+      "Bash(rm -rf *:*)",
+      "Bash(sudo:*)",
+      "Bash(npx:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push origin --delete:*)",
+      "Bash(git push origin ::*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git clean -fx:*)",
+      "Bash(git clean -fdx:*)",
+      "Bash(git checkout .:*)",
+      "Bash(git restore .:*)",
+      "Bash(git stash drop:*)",
+      "Bash(git stash clear:*)",
+      "Bash(dd :*)",
+      "Bash(mkfs:*)",
+      "Bash(chmod -R:*)",
+      "Bash(chown -R:*)"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "autoMode": {
+    "allow": [
+      "Project-local pnpm commands from the agent-quorum repository root are authorized: pnpm install --frozen-lockfile, pnpm run build, pnpm run typecheck, pnpm run lint, pnpm run format-check, pnpm run test, pnpm run check, pnpm run dev, and pnpm exec <repo-local-bin>.",
+      "Read-only git inspection in this repository is authorized: git status, git diff, git show, git log, and git branch --show-current.",
+      "Local self-planning dogfood through scripts/plan-agent-quorum.ts is authorized after pnpm run build."
+    ]
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  },
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}

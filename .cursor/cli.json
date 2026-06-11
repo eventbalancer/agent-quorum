@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Shell(rm -rf /:*)",
+      "Shell(rm -rf /*:*)",
+      "Shell(rm -rf .:*)",
+      "Shell(rm -rf *:*)",
+      "Shell(sudo:*)",
+      "Shell(npx:*)",
+      "Shell(git push --force:*)",
+      "Shell(git push -f:*)",
+      "Shell(git push --force-with-lease:*)",
+      "Shell(git push origin --delete:*)",
+      "Shell(git push origin ::*)",
+      "Shell(git reset --hard:*)",
+      "Shell(git branch -D:*)",
+      "Shell(git clean -f:*)",
+      "Shell(git clean -fd:*)",
+      "Shell(git clean -fx:*)",
+      "Shell(git clean -fdx:*)",
+      "Shell(git checkout .:*)",
+      "Shell(git restore .:*)",
+      "Shell(git stash drop:*)",
+      "Shell(git stash clear:*)",
+      "Shell(dd :*)",
+      "Shell(mkfs:*)",
+      "Shell(chmod -R:*)",
+      "Shell(chown -R:*)"
+    ]
+  }
+}
