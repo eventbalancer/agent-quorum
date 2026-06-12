@@ -87,6 +87,11 @@ environment. (The package-root `.env` loader keeps its reference semantics
 and still fills missing keys; see
 [configuration.md](configuration.md).)
 
+If `PLAN_LOOP_TELEGRAM_BOT_TOKEN` and `PLAN_LOOP_TELEGRAM_CHAT_ID` are present,
+`runPlanLoop` also sends the same best-effort completion notification as the
+CLI. Notification failures are logged and do not alter the returned
+`RunResult`.
+
 ## launchPlanLoop(options)
 
 Detaches a run into its own process group with `run.log` redirection.
@@ -105,6 +110,9 @@ construction — once the run finishes, read the artifacts in `workDir`
 (`summary.md`, `plan.final.md`). `workDir`/`configFile` options are forwarded
 to the detached child through its environment copy; the parent `process.env`
 is left untouched.
+
+When Telegram credentials are present, completion notifications are sent by
+the detached child run, not by the launch parent.
 
 ## getRunStatus(query?)
 

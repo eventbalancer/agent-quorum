@@ -48,7 +48,7 @@ string or a non-empty string array (joined with commas).
 A gitignored `.env` at the **package root** loads unconditionally before any
 config resolution, with real-environment-wins semantics. A `.env` sitting next
 to a `PLAN_LOOP_CONFIG_FILE` override is never read. Intended for the Telegram
-secrets.
+secrets and other local credentials.
 
 ## Environment variables
 
@@ -96,6 +96,12 @@ Passes: `PLAN_LOOP_FIX_PASS_TIMEOUT_SECONDS` (900),
 equivalents.
 
 ### Clarification gate / Telegram
+
+`PLAN_LOOP_TELEGRAM_BOT_TOKEN` plus `PLAN_LOOP_TELEGRAM_CHAT_ID` enable
+best-effort final completion notifications for core runs automatically. The
+same credentials also enable the prompt-mode clarification gate unless
+`PLAN_LOOP_CLARIFY=0` disables that gate; setting `PLAN_LOOP_CLARIFY=0` does
+not disable completion notifications.
 
 | Variable                             | Meaning                                                                       |
 | ------------------------------------ | ----------------------------------------------------------------------------- |

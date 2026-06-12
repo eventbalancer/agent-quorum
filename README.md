@@ -111,7 +111,8 @@ Core-run flags:
 
 Full flag reference and exit codes live in [`docs/cli.md`](docs/cli.md).
 Non-English locales localize Telegram clarification questions and produce
-`plan.final.<locale>.md`.
+`plan.final.<locale>.md`. Telegram credentials also enable concise final
+completion notifications for core runs.
 
 Existing plan inputs are expected to be complete implementation plans, not
 summaries or external pointers. The shape gate requires a top-level title,
@@ -162,7 +163,9 @@ Override precedence:
 
 A gitignored package-root `.env` is loaded before config resolution, with real
 environment variables winning. It is intended for secrets such as Telegram bot
-credentials.
+credentials. Those credentials enable final completion notifications
+automatically; set `PLAN_LOOP_CLARIFY=0` when you want notifications without the
+prompt-mode question gate.
 
 The full reference — every `PLAN_LOOP_*` variable, watchdog knob, Telegram
 setting, status/launch toggle, and exact override behavior — lives in

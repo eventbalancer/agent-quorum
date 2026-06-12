@@ -42,6 +42,14 @@ all three runners are active. An unauthenticated runner exits 1 with a remedy
 hint before the first provider call; an indeterminate probe (missing
 subcommand, timeout) only warns and never blocks the run.
 
+When Telegram credentials are configured, the core run sends one best-effort
+completion notification after success or failure. Exit code 0 is reported as
+success, including `needs-review`; non-zero exits report failure with the exit
+code and a compact reason. Notification delivery failures are logged as a
+warning and do not change the run exit code. `status`, `intervene`, and
+launch-parent failures do not send completion notifications; a detached launch
+run notifies from its child core run.
+
 Exit codes:
 
 | Code | Meaning                                              |

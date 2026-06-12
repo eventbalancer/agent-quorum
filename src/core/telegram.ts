@@ -1,4 +1,8 @@
+import path from 'node:path';
+import { log } from '../runtime/log.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
+
+const COMPLETION_REASON_MAX_LENGTH = 180;
 
 export function telegramApiBase(): string {
   return process.env.PLAN_LOOP_TELEGRAM_API_BASE ?? 'https://api.telegram.org';
@@ -65,6 +69,69 @@ export async function telegramSend(text: string): Promise<string | undefined> {
     return '';
   }
   return typeof messageId === 'string' ? messageId : JSON.stringify(messageId);
+}
+
+export interface TelegramCompletionNotification {
+  readonly inputPath: string;
+  readonly exitCode: number;
+  readonly status?: string;
+  readonly reason?: string;
+  readonly iterations?: number;
+  readonly summaryPath?: string;
+  readonly workDir?: string;
+}
+
+function compactCompletionReason(reason: string | undefined): string | undefined {
+  const compact = reason?.replace(/\s+/g, ' ').trim();
+  if (compact === undefined || compact === '') {
+    return undefined;
+  }
+  if (compact.length <= COMPLETION_REASON_MAX_LENGTH) {
+    return compact;
+  }
+  return `${compact.slice(0, COMPLETION_REASON_MAX_LENGTH - 3).trimEnd()}...`;
+}
+
+export function renderTelegramCompletionNotification(
+  notification: TelegramCompletionNotification,
+): string {
+  const isSuccess = notification.exitCode === 0;
+  const lines = [
+    `plan-loop finished: ${isSuccess ? 'SUCCESS' : `FAILED (exit ${notification.exitCode})`}`,
+    `input: ${path.basename(notification.inputPath)}`,
+  ];
+
+  if (notification.status !== undefined && notification.status !== '') {
+    lines.push(`status: ${notification.status}`);
+  }
+  if (isSuccess && notification.iterations !== undefined) {
+    lines.push(`iterations: ${notification.iterations}`);
+  }
+
+  const reason = compactCompletionReason(notification.reason);
+  if ((!isSuccess || notification.status === 'needs-review') && reason !== undefined) {
+    lines.push(`reason: ${reason}`);
+  }
+
+  if (notification.summaryPath !== undefined && notification.summaryPath !== '') {
+    lines.push(`summary: ${notification.summaryPath}`);
+  } else if (!isSuccess && notification.workDir !== undefined && notification.workDir !== '') {
+    lines.push(`workdir: ${notification.workDir}`);
+  }
+
+  return lines.join('\n');
+}
+
+export async function telegramNotifyCompletion(
+  notification: TelegramCompletionNotification,
+): Promise<void> {
+  if (!telegramConfigured()) {
+    return;
+  }
+  const messageId = await telegramSend(renderTelegramCompletionNotification(notification));
+  if (messageId === undefined) {
+    log('WARNING: failed to send Telegram completion notification');
+  }
 }
 
 export interface TelegramUpdate {

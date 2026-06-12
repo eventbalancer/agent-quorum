@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,6 +37,19 @@ function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     ...extra,
   };
+}
+
+function telegramEnv(stub: TelegramStub, extra: EnvOverrides = {}): EnvOverrides {
+  return baseEnv({
+    PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
+    PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
+    PLAN_LOOP_TELEGRAM_API_BASE: stub.baseUrl,
+    ...extra,
+  });
+}
+
+function canonicalWorkPath(...segments: string[]): string {
+  return path.join(realpathSync(work), ...segments);
 }
 
 beforeEach(() => {
@@ -69,6 +90,38 @@ describe('exit-code matrix (AC-3)', () => {
     expect(result.stderr).toContain('done. summary:');
   });
 
+  it('sends a Telegram completion notification for clean runs', async () => {
+    const stub: TelegramStub = await startTelegramStub();
+    try {
+      const result = await runCliAsync(
+        [
+          '--effort',
+          'low',
+          '--iters',
+          '1',
+          path.join(tmp, 'input.md'),
+          '--no-fix',
+          '--no-translate',
+        ],
+        telegramEnv(stub, {
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        }),
+      );
+
+      expect(result.status).toBe(0);
+      expect(stub.sent).toHaveLength(1);
+      const message = stub.sent[0] ?? '';
+      expect(message).toContain('plan-loop finished: SUCCESS');
+      expect(message).toContain('input: input.md');
+      expect(message).toContain('status: clean');
+      expect(message).toContain('iterations: 0');
+      expect(message).toContain(`summary: ${canonicalWorkPath('summary.md')}`);
+      expect(message).not.toContain(path.join(tmp, 'input.md'));
+    } finally {
+      await stub.close();
+    }
+  }, 60_000);
+
   it('usage errors exit 1', () => {
     const bogus = runCli(['--bogus', path.join(tmp, 'input.md')], baseEnv());
     expect(bogus.status).toBe(1);
@@ -90,6 +143,39 @@ describe('exit-code matrix (AC-3)', () => {
     expect(result.status).toBe(3);
     expect(result.stderr).toContain('schema validation failed');
   });
+
+  it('sends a Telegram failure notification for schema-invalid critiques', async () => {
+    const stub: TelegramStub = await startTelegramStub();
+    try {
+      const invalid = path.join(tmp, 'invalid-critique.json');
+      writeCritique(invalid, [{ id: 'BAD' }]);
+      const result = await runCliAsync(
+        [
+          '--effort',
+          'low',
+          '--iters',
+          '1',
+          path.join(tmp, 'input.md'),
+          '--no-fix',
+          '--no-translate',
+        ],
+        telegramEnv(stub, {
+          FAKE_CODEX_OUTPUT: invalid,
+        }),
+      );
+
+      expect(result.status).toBe(3);
+      expect(stub.sent).toHaveLength(1);
+      const message = stub.sent[0] ?? '';
+      expect(message).toContain('plan-loop finished: FAILED (exit 3)');
+      expect(message).toContain('input: input.md');
+      expect(message).toContain('reason: critique failed schema validation');
+      expect(message).toContain(`workdir: ${canonicalWorkPath()}`);
+      expect(message).not.toContain('summary:');
+    } finally {
+      await stub.close();
+    }
+  }, 60_000);
 
   it('an empty creator output in prompt mode exits 4', () => {
     const prompt = path.join(tmp, 'prompt.md');
@@ -128,6 +214,31 @@ describe('exit-code matrix (AC-3)', () => {
     expect(result.status).toBe(6);
     expect(result.stderr).toContain('FINAL: blocked');
   });
+
+  it('sends a Telegram failure notification for blocked final plans', async () => {
+    const stub: TelegramStub = await startTelegramStub();
+    try {
+      const broken = path.join(tmp, 'broken.md');
+      writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
+      const result = await runCliAsync(
+        ['--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
+        telegramEnv(stub, {
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        }),
+      );
+
+      expect(result.status).toBe(6);
+      expect(stub.sent).toHaveLength(1);
+      const message = stub.sent[0] ?? '';
+      expect(message).toContain('plan-loop finished: FAILED (exit 6)');
+      expect(message).toContain('input: broken.md');
+      expect(message).toContain('status: blocked');
+      expect(message).toContain('reason: plan shape broken');
+      expect(message).toContain(`summary: ${canonicalWorkPath('summary.md')}`);
+    } finally {
+      await stub.close();
+    }
+  }, 60_000);
 
   it('a clarify /cancel exits 7', async () => {
     const stub: TelegramStub = await startTelegramStub();
