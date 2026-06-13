@@ -70,6 +70,15 @@ gains write tools (the orchestrator writes the package) and the split decision
 is reproducible for the same plan + config + workspace. See
 [plan-package contract](configuration.md) for the policy knobs.
 
+## Plan shape contract
+
+Existing plan inputs are expected to be complete implementation plans, not
+summaries or external pointers. The shape gate requires a top-level title,
+`## At a Glance`, Context, Verified Facts, Target State, Scope, Work Plan, Files
+and Interfaces, Verification, STOP Triggers, and a final `## Impact Graph` with
+a Mermaid flowchart. Prompt-created and revised plans are normalized to the same
+contract by the packaged role skills.
+
 ## Artifact contract ($WORK)
 
 `plan.vN.md`, `critique.vN.json`, `update.vN.json`, `update-meta.vN.json`,

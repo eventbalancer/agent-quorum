@@ -18,7 +18,8 @@ future product flow, never a spec and never a solution.
   `/solution-handoff` -> `/prompt-architect` -> confirmed self-planning run.
 
 This skill never starts `agent-quorum` and never edits the checkout. Its only
-side effect is creating GitHub issues, and only after the operator confirms.
+side effects are creating GitHub issues and adding them to the repository's
+project board, and both happen only after the operator confirms.
 
 Follow the repository-root `AGENTS.md` / `CLAUDE.md` operating rules and
 `docs/development/conventions.md`.
@@ -116,7 +117,7 @@ Do not create any issue before the operator confirms. If the structured tool is
 unavailable, ask in plain chat and treat creation as pending until explicit
 approval.
 
-### Step 6 — Create and report
+### Step 6 — Create, add to the board, and report
 
 On approval, create each confirmed issue:
 
@@ -124,9 +125,44 @@ On approval, create each confirmed issue:
 gh issue create --title "<title>" --label <label> --body "<body>"
 ```
 
-Report the created issue URLs (and any skipped/duplicate clusters) in the
-operator's conversation language. Do not stage, commit, push, open PRs, or start
-`agent-quorum`.
+Then add every created issue to the repository's kanban board so it enters the
+delivery cycle in the backlog column. First discover the project linked to the
+repo:
+
+```bash
+gh api graphql -f query='
+query($owner:String!,$name:String!){
+  repository(owner:$owner,name:$name){
+    projectsV2(first:10){nodes{id number title}}
+  }
+}' -F owner=<owner> -F name=<repo>
+```
+
+Board placement rules:
+
+- If exactly one project is linked, use it. If several are linked, ask the
+  operator which board to use. If none is linked, skip the board step, note it
+  in the report, and suggest creating a project — do not fail the issue
+  creation.
+
+For each created issue, add the item and move it to the backlog column:
+
+```bash
+gh project item-add <number> --owner <owner> --url <issue-url>
+gh project field-list <number> --owner <owner> --format json
+gh project item-edit --id <item-id> --project-id <project-id> \
+  --field-id <status-field-id> --single-select-option-id <backlog-option-id>
+```
+
+Resolve `<item-id>` from `gh project item-list <number> --owner <owner>
+--format json`, and `<status-field-id>` / `<backlog-option-id>` from the
+`Status` single-select field returned by `field-list` (the backlog option is
+commonly named `Todo`). If the board has no such `Status` field, add the item
+without setting a column and note it in the report.
+
+Report the created issue URLs, their board placement, and any skipped/duplicate
+clusters in the operator's conversation language. Do not stage, commit, push,
+open PRs, or start `agent-quorum`.
 
 ## Issue contract
 
@@ -172,7 +208,8 @@ Use the shortest chain that still preserves the needed decision boundary.
 - Do not create issues before the operator confirms.
 - Do not invent labels; reuse the repository's existing set.
 - Do not edit the checkout, stage, commit, push, open PRs, or start
-  `agent-quorum`. The only side effect is `gh issue create` after confirmation.
+  `agent-quorum`. The only side effects after confirmation are `gh issue create`
+  and adding the created issues to the linked project board.
 
 ## Output
 
@@ -183,12 +220,12 @@ Harvested: <n> candidate directions from this session
 Clustered into: <m> prospective issues
 
 Created:
-  - #<n> <title> (<label>) -> <url>
+  - #<n> <title> (<label>) -> <url> [board: <project> / <column>]
 
 Skipped:
   - <cluster> -> duplicate of #<n>
   - <cluster> -> out of scope: <reason>
 
 Not run:
-  - <reason, e.g. gh unavailable / operator created none>
+  - <reason, e.g. gh unavailable / no project linked / operator created none>
 ```

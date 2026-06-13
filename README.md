@@ -2,12 +2,40 @@
 
 [![npm version](https://img.shields.io/npm/v/agent-quorum.svg?logo=npm&label=npm)](https://www.npmjs.com/package/agent-quorum)
 
-Iterative **plan → critique → update** orchestrator. It drives the Codex,
-Claude Code, and Cursor Agent CLIs to turn a prompt or a rough plan into a
-converged implementation plan — every artifact schema-validated, every provider
-call watchdogged, and no role ever granted a write tool.
+## What it does
 
-## How it works
+Turning a rough idea into an implementation plan a coding agent can actually
+execute is hard: a single agent asked to "write the plan" tends to be confident,
+shallow, and unchecked — it never argues with itself, and nothing validates that
+the result is complete or that the file references it cites are real.
+
+agent-quorum closes that gap. Instead of prompting one agent once, it runs a
+panel of agents in an iterative **plan → critique → update** loop: one drafts a
+plan, another tears it apart, the draft is revised against that critique, and
+the cycle repeats until the criticism runs out. The output is a plan that has
+survived adversarial review, has every `file:line` reference checked against
+your workspace, and is schema-validated at every step — produced without any
+agent ever being granted a tool that can write to disk.
+
+Use it when you want a thorough, self-reviewed plan rather than a first draft,
+and you would rather have several agents disagree their way to a good answer
+than trust a single pass.
+
+## How the loop works
+
+You hand agent-quorum a prompt or a rough plan. A **creator** writes the first
+draft. A **critic** then reviews it and reports concrete issues; the creator
+revises the draft to address them. That review-and-revise cycle repeats until
+the critic finds nothing left to fix — the point of **convergence** — at which a
+reference validator and an optional fix pass clean up the final plan. If the
+converged plan is large or has many phases, agent-quorum performs a **split**:
+it emits a self-contained `plan.package/` directory so a weaker model can
+execute one phase at a time.
+
+Five roles drive that loop: the **critic** finds issues, the **creator** drafts
+and revises, the **fixer** proposes reference fixes after convergence, the
+**reviewer** checks the fixer's proposal, and the **translator** renders a
+localized companion plan when you ask for one.
 
 ```text
 prompt.md
@@ -32,68 +60,49 @@ reference validator ──► fix pass ──► plan.final.md
                               plan.final.<locale>.md
 ```
 
-Five roles — critic, creator, fixer, reviewer, translator — map onto three
-providers (`codex`, `claude`, `cursor-agent`) through a single declarative
-config. Every provider call runs in its own process group under a byte-idle /
-semantic-idle / wall-clock watchdog.
+Those five roles map onto three providers (`codex`, `claude`, `cursor-agent`)
+through a single declarative config, and every provider call runs in its own
+process group under a byte-idle / semantic-idle / wall-clock watchdog.
 
-`plan.final.md` is always the entry point. When a deterministic split policy
-fires — a plan over `PLAN_LOOP_MAX_PLAN_LINES` or with enough Work Plan phases —
-the orchestrator additionally emits a self-contained `plan.package/` (index,
-master plan, per-phase docs, journal, runbook, debt ledger) so a weaker model
-can execute one phase at a time; small plans stay a single file. The decision is
-recorded in `plan.split.json` every run. See
-[docs/configuration.md](docs/configuration.md) for the `PLAN_LOOP_SPLIT` knobs.
+## Glossary
 
-## Install
+- **role** — one job in the loop (critic, creator, fixer, reviewer, translator),
+  each bound to a provider and a prompt skill.
+- **runner** — the provider CLI a role calls: `codex`, `claude`, or `cursor`.
+- **effort** — a preset (`low`, `high`, `max`) that selects the role-call
+  topology and how aggressively provider sessions are reused.
+- **convergence** — the point where the critic finds no remaining blocking
+  issues, so the loop stops and finalizes the plan.
+- **split** — emitting the converged plan as a multi-file `plan.package/` when it
+  is large or has enough phases, so it can be executed one phase at a time.
 
-```sh
-npm install -g agent-quorum   # CLI
-npm install agent-quorum      # library
-```
+## Quickstart
 
-Requires Node ≥ 24 and whichever provider CLIs your config selects (`codex`,
-`claude`, `cursor-agent`) — installed **and authenticated**. Each selected
-runner is preflighted before the loop starts, so a missing login fails fast with
-a remedy hint instead of stalling mid-iteration.
-
-## Platform support
-
-| OS            | Status        | CI              |
-| ------------- | ------------- | --------------- |
-| macOS 13+     | Supported     | `macos-latest`  |
-| Linux (glibc) | Supported     | `ubuntu-latest` |
-| Windows       | Not supported | —               |
-
-Both macOS and Linux are tested on every push and pull request via the full
-`pnpm run check` matrix (build · typecheck · lint · format · tests).
-
-**Provider CLIs on Linux.** The installer commands below apply to most glibc
-Linux distros (Ubuntu, Debian, Fedora, Arch). Install each CLI you plan to use:
+Install the CLI globally:
 
 ```sh
-npm install -g @anthropic-ai/claude-code   # claude
-npm install -g @openai/codex               # codex
+npm install -g agent-quorum
 ```
 
-`cursor-agent` does not have an official Linux package yet. Set
-`PLAN_LOOP_CURSOR_BIN` to the path of your Cursor headless binary if you need
-the `cursor` runner on Linux:
+Prerequisites: Node ≥ 24 and at least one provider CLI (`codex`, `claude`, or
+`cursor-agent`) installed **and authenticated** — each selected runner is
+preflighted before the loop starts, so a missing login fails fast with a remedy
+hint instead of stalling mid-run.
+
+Create a task prompt and run the loop:
 
 ```sh
-export PLAN_LOOP_CURSOR_BIN=/path/to/cursor-agent
+plan-loop --prompt my-task.md
 ```
 
-After installation, authenticate each provider with its own auth command
-(`claude auth login`, `codex login`, etc.) — agent-quorum runs a preflight
-check before the loop starts and will report a remedy hint for any missing login.
+By default the run writes its artifacts to `~/.claude/plans/loop-<base>/` (where
+`<base>` is the input filename). The files you care about are:
 
-**Optional system dependency.** `plan-loop status` uses `lsof` to resolve the
-working directory of a running session when `--work` is not specified. On
-minimal Linux environments where `lsof` is absent the command falls back to the
-run registry, but workdir detection may be less reliable. Install `lsof` via
-your package manager (`apt install lsof`, `dnf install lsof`, etc.) to get the
-full experience.
+- `plan.final.md` — the converged plan; always the entry point.
+- `summary.md` — a one-page run summary (iterations, health, artifact paths).
+- `plan.package/` — present only when the split policy fires; a self-contained
+  directory (index, master plan, per-phase docs, journal, runbook, debt ledger)
+  for phase-by-phase execution.
 
 ## CLI
 
@@ -107,28 +116,12 @@ plan-loop status [PID]                    # run snapshot (any PID in the tree)
 plan-loop intervene --work <dir> "note"   # inject operator guidance mid-run
 ```
 
-Core-run flags:
-
-| Flag                             | Purpose                                                 |
-| -------------------------------- | ------------------------------------------------------- |
-| `--iters N`                      | Set the iteration cap.                                  |
-| `--effort {low,high,max}`        | Select the role-call topology and session behavior.     |
-| `--fix` / `--no-fix`             | Enable or skip the post-convergence reference fix pass. |
-| `--locale <tag>`                 | Set the human-interaction locale; defaults to `en`.     |
-| `--translate` / `--no-translate` | Enable or skip the companion final-plan localization.   |
-| `--prompt <file>`                | Create `plan.v0` from a prompt before the loop starts.  |
-
-Full flag reference and exit codes live in [`docs/cli.md`](docs/cli.md).
+The full flag reference and exit codes live in [`docs/cli.md`](docs/cli.md), and
+the plan shape gate that existing plan inputs must satisfy is documented in
+[`docs/architecture.md#plan-shape-contract`](docs/architecture.md#plan-shape-contract).
 Non-English locales localize Telegram clarification questions and produce
-`plan.final.<locale>.md`. Telegram credentials also enable concise final
+`plan.final.<locale>.md`; Telegram credentials also enable concise final
 completion notifications for core runs.
-
-Existing plan inputs are expected to be complete implementation plans, not
-summaries or external pointers. The shape gate requires a top-level title,
-`## At a Glance`, Context, Verified Facts, Target State, Scope, Work Plan, Files
-and Interfaces, Verification, STOP Triggers, and a final `## Impact Graph` with
-a Mermaid flowchart. Prompt-created and revised plans are normalized to the same
-contract by the packaged role skills.
 
 ## Library
 
@@ -149,36 +142,38 @@ returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
 ## Configuration
 
 agent-quorum reads one config file: the packaged `plan-loop.json`, or the file
-pointed at by `PLAN_LOOP_CONFIG_FILE`. There is no search chain.
-
-`plan-loop.json` has two main sections:
-
-| Section    | Controls                                                          |
-| ---------- | ----------------------------------------------------------------- |
-| `settings` | Iteration cap, effort, fix pass, locale, translation, retries.    |
-| `roles`    | Per-role runner, model, reasoning level, tools, disallowed tools. |
-
-Supported runners are `codex`, `claude`, and `cursor`. Tool permissions stay in
-the file so role capabilities are reviewable alongside the role matrix.
-
-Override precedence:
-
-| Surface                          | Precedence                   |
-| -------------------------------- | ---------------------------- |
-| Loop settings                    | CLI > env > file             |
-| Role runner/model/reasoning      | env > file                   |
-| Tool permissions                 | file only                    |
-| Library `workDir` / `configFile` | typed option > env > default |
+pointed at by `PLAN_LOOP_CONFIG_FILE`. There is no search chain. It has two main
+sections: `settings` (iteration cap, effort, fix pass, locale, translation,
+retries) and `roles` (per-role runner, model, reasoning level, and tool
+permissions). Supported runners are `codex`, `claude`, and `cursor`.
 
 A gitignored package-root `.env` is loaded before config resolution, with real
 environment variables winning. It is intended for secrets such as Telegram bot
-credentials. Those credentials enable final completion notifications
-automatically; set `PLAN_LOOP_CLARIFY=0` when you want notifications without the
-prompt-mode question gate.
+credentials, which enable final completion notifications automatically; set
+`PLAN_LOOP_CLARIFY=0` for notifications without the prompt-mode question gate.
 
 The full reference — every `PLAN_LOOP_*` variable, watchdog knob, Telegram
-setting, status/launch toggle, and exact override behavior — lives in
+setting, status/launch toggle, and the exact CLI > env > file
+[override precedence](docs/configuration.md#precedence) — lives in
 [`docs/configuration.md`](docs/configuration.md).
+
+## Platform support
+
+| OS            | Status        | CI              |
+| ------------- | ------------- | --------------- |
+| macOS 13+     | Supported     | `macos-latest`  |
+| Linux (glibc) | Supported     | `ubuntu-latest` |
+| Windows       | Not supported | —               |
+
+Both macOS and Linux are tested on every push and pull request via the full
+`pnpm run check` matrix (build · typecheck · lint · format · tests). Install the
+provider CLIs you plan to use (`npm install -g @anthropic-ai/claude-code`,
+`npm install -g @openai/codex`) and authenticate each. `cursor-agent` has no
+official Linux package yet; point `PLAN_LOOP_CURSOR_BIN` at your Cursor headless
+binary to use the `cursor` runner there (see
+[`docs/configuration.md`](docs/configuration.md)). `plan-loop status` uses
+`lsof` to resolve a running session's workdir when `--work` is omitted and
+degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 
 ## Documentation
 
@@ -206,6 +201,12 @@ pnpm run check          # typecheck + lint + format check + tests with coverage
 
 Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).
+
+Work is tracked on the public
+[**agent-quorum delivery** board](https://github.com/users/sensiloles/projects/2):
+`Backlog → Todo → In Progress → Done`. The `/issues` skill files session
+follow-ups straight into the backlog, where they enter the delivery flow
+([`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)).
 
 For changes that should be designed by `agent-quorum` itself, build the package
 and run the repository-local dogfood harness:

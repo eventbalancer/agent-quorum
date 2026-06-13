@@ -32,6 +32,15 @@ plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--
 plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
 ```
 
+| Flag                             | Purpose                                                 |
+| -------------------------------- | ------------------------------------------------------- |
+| `--iters N` / `--max-iters N`    | Set the iteration cap.                                  |
+| `--effort {low,high,max}`        | Select the role-call topology and session behavior.     |
+| `--fix` / `--no-fix`             | Enable or skip the post-convergence reference fix pass. |
+| `--locale <tag>`                 | Set the human-interaction locale; defaults to `en`.     |
+| `--translate` / `--no-translate` | Enable or skip the companion final-plan localization.   |
+| `--prompt <file>`                | Create `plan.v0` from a prompt before the loop starts.  |
+
 Flags accept both `--flag value` and `--flag=value` forms for `--iters` /
 `--max-iters`, `--effort`, and `--locale`. `--locale <tag>` selects the
 human-interaction locale; when omitted, the locale is `en`. Clarification

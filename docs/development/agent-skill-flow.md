@@ -29,6 +29,7 @@ The workflow Claude commands and Codex skills are mirrored byte-for-byte:
 .claude/commands/solution-handoff.md    <-> .agents/skills/solution-handoff/SKILL.md
 .claude/commands/prompt-architect.md    <-> .agents/skills/prompt-architect/SKILL.md
 .claude/commands/execute.md             <-> .agents/skills/execute/SKILL.md
+.claude/commands/tidy.md                <-> .agents/skills/tidy/SKILL.md
 .claude/commands/ship.md                <-> .agents/skills/ship/SKILL.md
 ```
 
@@ -66,6 +67,9 @@ Completed investigation:
 
 Already clear prompt task:
   /prompt-architect -> confirmed run
+
+After implementation (a confirmed run, /execute, or a direct edit):
+  /tidy -> /ship
 ```
 
 `/requirements` and `/solution-handoff` never start `agent-quorum`. They prepare
@@ -85,6 +89,8 @@ Outputs:
 
 - one proposal-level GitHub issue per cluster, created only after operator
   confirmation;
+- each created issue added to the repository's linked project board in its
+  backlog column;
 - no implementation details, no chosen solution, no checkout edits.
 
 Rules:
@@ -92,6 +98,8 @@ Rules:
 - ground every candidate in the current conversation;
 - cluster related directions and de-duplicate against open issues;
 - keep issue bodies outcome-level and solution-free;
+- file into the board backlog; skip the board step and report it if no project
+  is linked;
 - point each issue at the downstream flow; never start `agent-quorum`.
 
 ### requirements
@@ -168,6 +176,44 @@ Rules:
 - stop on ambiguous gaps or blockers;
 - never stage, commit, push, or open PRs.
 
+### tidy
+
+Use after a change is implemented and before any commit, to refactor the dirty
+change set without altering behavior.
+
+Outputs:
+
+- readability, structure, and convention fixes confined to the dirty set;
+- reconciled mirror pairs and related documentation;
+- verification results reported to the operator.
+
+Rules:
+
+- work only inside the dirty set plus documented mirror counterparts;
+- preserve behavior; surface anything needing wider edits as separate work;
+- reconcile mirror pairs and docs when names, paths, or contracts change;
+- never stage, commit, push, or open PRs.
+
+### ship
+
+Use to deliver the change set through the repository's git, verification, and
+release boundaries. The terminal step of the flow and the only skill that
+commits, pushes, or publishes.
+
+Outputs:
+
+- a change-set flow that verifies, commits, and optionally pushes dirty changes;
+- a release flow following `docs/release.md` for version bump, tag, publish
+  approval, and GitHub Release.
+
+Rules:
+
+- act only in the `agent-quorum` checkout; keep unrelated dirt out of scope;
+- show the exact irreversible plan before staging, committing, pushing, tagging,
+  or triggering publish workflows;
+- run the verification floor before delivery;
+- commit, push, and publish only on explicit operator instruction.
+
 ## Running agent-quorum
 
 The self-planning harness dogfoods the public package API:
@@ -209,6 +255,7 @@ cmp -s .claude/commands/requirements.md .agents/skills/requirements/SKILL.md
 cmp -s .claude/commands/solution-handoff.md .agents/skills/solution-handoff/SKILL.md
 cmp -s .claude/commands/prompt-architect.md .agents/skills/prompt-architect/SKILL.md
 cmp -s .claude/commands/execute.md .agents/skills/execute/SKILL.md
+cmp -s .claude/commands/tidy.md .agents/skills/tidy/SKILL.md
 cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
 ```
 
@@ -224,5 +271,9 @@ cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
   a confirmed `agent-quorum` run.
 - Use `/execute` when an already approved or implementation-ready plan should
   be carried out with a lightweight deviation journal.
+- Use `/tidy` after implementation and before commit to refactor the dirty
+  change set without changing behavior.
+- Use `/ship` to commit, push, or release the change set through the
+  repository's delivery boundaries.
 - Skip the chain for small, obvious edits where direct implementation is safer
   and cheaper than ceremony.
