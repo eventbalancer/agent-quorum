@@ -1,7 +1,7 @@
 {
   "name": "agent-quorum",
   "version": "0.4.0",
-  "description": "Iterative plan → critique → update orchestrator driving the Codex, Claude Code, and Cursor Agent CLIs",
+  "description": "Quality planning through agent consensus",
   "license": "MIT",
   "author": "Aleksei Filippov <sensiloles@gmail.com>",
   "repository": {
