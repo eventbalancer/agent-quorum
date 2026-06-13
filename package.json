@@ -6,7 +6,7 @@
   "author": "Aleksei Filippov <sensiloles@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sensiloles/agent-quorum.git"
+    "url": "git+https://github.com/eventbalancer/agent-quorum.git"
   },
   "keywords": [
     "plan",

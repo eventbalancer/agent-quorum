@@ -211,7 +211,7 @@ Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).
 
 Work is tracked on the public
-[**agent-quorum delivery** board](https://github.com/users/sensiloles/projects/2):
+[**agent-quorum delivery** board](https://github.com/users/eventbalancer/projects/2):
 `Backlog → Todo → In Progress → Done`. The `/issues` skill files session
 follow-ups straight into the backlog, where they enter the delivery flow
 ([`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)).
