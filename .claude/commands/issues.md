@@ -42,11 +42,19 @@ do it**. It is the seed of the product flow, so it must survive being read by
 someone who was not in this conversation and must not bias the later
 `/requirements` step toward any approach.
 
-Each issue therefore states the opportunity or problem in outcome terms and
-stops there. The clustering follows `/solution-handoff` discipline: merge
-related directions into the smallest useful set, strip candidate edits and
-future entity names, and route product-level ambiguity to the later flow rather
-than resolving it inline.
+Each issue therefore describes the opportunity or problem in full — in outcome
+terms — and stops short of prescribing how to solve it. The clustering follows
+`/solution-handoff` discipline: merge related directions into the smallest
+useful set, strip candidate edits and future entity names, and route
+product-level ambiguity to the later flow rather than resolving it inline.
+
+The line to hold is **problem vs. solution, not brief vs. detailed**. Carry
+forward as much problem-side detail as the session produced — the current
+behavior, the evidence that makes it a problem, the constraints any future work
+must respect, and the decision boundary deferred downstream — so the issue is
+self-contained for a reader who was not present. Detail is encouraged; only
+solution-side content (a chosen approach, candidate edits, named future
+entities) is withheld, because that is what would bias `/requirements`.
 
 The operator decides what gets filed. The agent proposes the clustered set; it
 does not create issues unprompted.
@@ -68,6 +76,13 @@ improvement or fix, including:
 Ground every candidate in something actually said or found in this session. Do
 not invent directions the conversation does not support. If a focus argument was
 given, keep only candidates matching it.
+
+For each candidate, capture not just the direction but the supporting detail the
+session produced: the current behavior that makes it a problem, the concrete
+facts or evidence observed, the constraints or invariants mentioned, and any
+product-level question the conversation deliberately left open. This detail
+travels with the candidate into the draft so the resulting issue can stand on
+its own — without leaking a chosen solution.
 
 ### Step 2 — Cluster
 
@@ -93,10 +108,14 @@ remote, stop and report that to the operator instead of guessing.
 
 ### Step 4 — Draft each issue
 
-Draft every surviving cluster against the **Issue contract** below. Keep each
-issue proposal-level and solution-free. Pick one label per issue from the
-repository's existing label set (commonly `enhancement`, `bug`,
-`documentation`, `question`); do not create new labels.
+Draft every surviving cluster against the **Issue contract** below. Fill every
+section the session actually supports with concrete, sourced detail, and omit a
+section entirely when the conversation offers nothing real for it — never pad a
+section to fill it. Be exhaustive about the problem and silent about the
+solution: keep each issue proposal-level and solution-free while still carrying
+the evidence, constraints, and open questions a later reader needs. Pick one
+label per issue from the repository's existing label set (commonly
+`enhancement`, `bug`, `documentation`, `question`); do not create new labels.
 
 ### Step 5 — Propose and confirm
 
@@ -179,6 +198,26 @@ concise outcome statements, lowercase after the first word, no trailing period.
 
 <why this is worth revisiting: the value if addressed or the cost if ignored>
 
+## Current behavior and evidence
+
+<what exists today that makes this a problem, as observed facts from the
+session: current behavior, scope, and the concrete pain points. Describe the
+present state precisely; do not describe a future one. Omit this section if the
+session produced nothing concrete.>
+
+## Constraints and considerations
+
+<invariants, compatibility requirements, and properties any future work must
+respect — existing contracts to preserve, environments or consumers to support,
+behavior that must not regress. These bound the problem; they do not pick a
+design. Omit if none surfaced.>
+
+## Open questions
+
+<the product-level ambiguities the session surfaced and deliberately left for
+the delivery flow — the axes still to decide, stated as questions, not answers.
+Records the decision boundary without resolving it. Omit if none.>
+
 ## Context
 
 Surfaced during an agent session on <YYYY-MM-DD>. <one line on what prompted it>.
@@ -200,9 +239,14 @@ Use the shortest chain that still preserves the needed decision boundary.
 
 ## Boundaries
 
-- The issue body contains **no implementation details**: no chosen approach, no
+- The dividing line is **problem vs. solution, not brief vs. detailed**. Carry
+  every problem-side detail the session supports: observed current behavior, the
+  evidence that makes it a problem, constraints and invariants any future work
+  must respect, and the open questions that mark the decision boundary.
+- The issue body contains **no solution-side content**: no chosen approach, no
   candidate edits, no code snippets, no `file:line` references, no named future
-  entities, no effort or time estimates.
+  entities, no effort or time estimates, and no resolved answers to the open
+  questions it records.
 - Do not file directions the session does not actually support.
 - Do not duplicate an existing open issue; reference it instead.
 - Do not create issues before the operator confirms.
