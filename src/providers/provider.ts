@@ -7,12 +7,13 @@ import type { Role } from '../types.js';
 import { codexRun } from './codex.js';
 import { claudeInvoke } from './claude.js';
 import { cursorInvoke } from './cursor.js';
+import { createDiagnosticSink, type DiagnosticSink, type TraceContext } from './trace.js';
 import { roleSessionFile, stripTrailingNewlines, type ProviderRuntime } from './runtime.js';
 
 export type ProviderMode = 'json' | 'markdown';
 
 async function providerRunCodex(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: ProviderMode,
   outFile: string,
   skillFile: string,
@@ -20,21 +21,39 @@ async function providerRunCodex(
   model: string,
   reasoning: string,
   promptText: string,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
   const skill = stripTrailingNewlines(readFileSync(skillFile, 'utf8'));
   const fullPrompt = `${skill}\n\n${stripTrailingNewlines(promptText)}`;
   if (mode === 'json') {
-    return codexRun(rt, model, reasoning, schemaFile, outFile, fullPrompt);
+    return codexRun(
+      providerRuntime,
+      model,
+      reasoning,
+      schemaFile,
+      outFile,
+      fullPrompt,
+      traceContext,
+      diagnosticSink,
+    );
   }
 
-  const wrap = rt.scratch.file();
-  const status = await codexRun(rt, model, reasoning, rt.markdownSchemaPath, wrap, fullPrompt);
+  const wrap = providerRuntime.scratch.file();
+  const status = await codexRun(
+    providerRuntime,
+    model,
+    reasoning,
+    providerRuntime.markdownSchemaPath,
+    wrap,
+    fullPrompt,
+    traceContext,
+    diagnosticSink,
+  );
   if (status !== 0) {
     rmSync(wrap, { force: true });
     return status;
   }
-  // jq -r '.plan_markdown' over the wrapper: a string renders raw, anything
-  // else renders as JSON, parse failure leaves the output empty.
   let rendered: string;
   try {
     const parsed = JSON.parse(readFileSync(wrap, 'utf8')) as JsonValue;
@@ -53,7 +72,7 @@ async function providerRunCodex(
 }
 
 async function providerRunOnce(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   role: Role,
   mode: ProviderMode,
   outFile: string,
@@ -63,58 +82,80 @@ async function providerRunOnce(
   disallowedTools: string,
   promptText: string,
 ): Promise<number> {
-  const entry = rt.matrix[role];
-  const sessionFile = roleSessionFile(rt, role);
-  switch (entry.runner) {
-    case 'codex':
-      return providerRunCodex(
-        rt,
-        mode,
-        outFile,
-        skillFile,
-        schemaFile,
-        entry.model,
-        entry.reasoning,
-        promptText,
-      );
-    case 'claude':
-      return claudeInvoke(
-        rt,
-        mode,
-        outFile,
-        skillFile,
-        tools,
-        disallowedTools,
-        entry.model,
-        entry.reasoning,
-        sessionFile,
-        mode === 'json' ? schemaFile : undefined,
-        promptText,
-      );
-    case 'cursor': {
-      if (entry.reasoning !== '') {
-        log(`WARNING: cursor runner ignores reasoning/effort field (reasoning=${entry.reasoning})`);
+  const entry = providerRuntime.matrix[role];
+  const sessionFile = roleSessionFile(providerRuntime, role);
+  const traceContext: TraceContext = { role, provider: entry.runner, model: entry.model };
+  const diagnosticSink =
+    providerRuntime.diagnosticsDir !== undefined
+      ? createDiagnosticSink(providerRuntime.diagnosticsDir, traceContext)
+      : undefined;
+  try {
+    switch (entry.runner) {
+      case 'codex':
+        return await providerRunCodex(
+          providerRuntime,
+          mode,
+          outFile,
+          skillFile,
+          schemaFile,
+          entry.model,
+          entry.reasoning,
+          promptText,
+          traceContext,
+          diagnosticSink,
+        );
+      case 'claude':
+        return await claudeInvoke(
+          providerRuntime,
+          mode,
+          outFile,
+          skillFile,
+          tools,
+          disallowedTools,
+          entry.model,
+          entry.reasoning,
+          sessionFile,
+          mode === 'json' ? schemaFile : undefined,
+          promptText,
+          traceContext,
+          diagnosticSink,
+        );
+      case 'cursor': {
+        if (entry.reasoning !== '') {
+          log(
+            `WARNING: cursor runner ignores reasoning/effort field (reasoning=${entry.reasoning})`,
+          );
+        }
+        return await cursorInvoke(
+          providerRuntime,
+          mode,
+          outFile,
+          {
+            skillFile,
+            tools,
+            disallowedTools,
+            model: entry.model,
+            sessionFile,
+            schemaFile: mode === 'json' ? schemaFile : '',
+            promptBody: promptText,
+          },
+          traceContext,
+          diagnosticSink,
+        );
       }
-      return cursorInvoke(rt, mode, outFile, {
-        skillFile,
-        tools,
-        disallowedTools,
-        model: entry.model,
-        sessionFile,
-        schemaFile: mode === 'json' ? schemaFile : '',
-        promptBody: promptText,
-      });
+      default: {
+        const unknownRunner: never = entry.runner;
+        err(`provider_run: unknown runner '${unknownRunner as string}'`);
+        return 2;
+      }
     }
-    default:
-      err(`provider_run: unknown runner '${entry.runner as string}'`);
-      return 2;
+  } finally {
+    diagnosticSink?.close();
   }
 }
 
-// The single adapter every role uses to call its runner; owns the one and only
-// retry wrapper.
 export async function providerRun(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   role: Role,
   mode: ProviderMode,
   outFile: string,
@@ -124,10 +165,10 @@ export async function providerRun(
   disallowedTools: string,
   promptText: string,
 ): Promise<number> {
-  const runner = rt.matrix[role].runner;
-  return runWithRetries(`${runner} call`, rt.retry, () =>
-    providerRunOnce(
-      rt,
+  const runner = providerRuntime.matrix[role].runner;
+  return runWithRetries(`${runner} call`, providerRuntime.retry, () => {
+    return providerRunOnce(
+      providerRuntime,
       role,
       mode,
       outFile,
@@ -136,6 +177,6 @@ export async function providerRun(
       tools,
       disallowedTools,
       promptText,
-    ),
-  );
+    );
+  });
 }

@@ -89,22 +89,22 @@ describe('stream renderers', () => {
     const colored = withTty(true, () =>
       withEnv({ NO_COLOR: undefined }, () => streamJsonEvent(TOOL_USE_EVENT)),
     );
-    expect(colored[0]).toBe('    \x1b[33mRead\x1b[0m {}');
+    expect(colored[0]).toBe('    \x1b[33mRead (0 keys, 2 chars)\x1b[0m');
 
     const plain = withTty(true, () =>
       withEnv({ NO_COLOR: '1' }, () => streamJsonEvent(TOOL_USE_EVENT)),
     );
-    expect(plain[0]).toBe('    Read {}');
+    expect(plain[0]).toBe('    Read (0 keys, 2 chars)');
 
     const emptyNoColor = withTty(true, () =>
       withEnv({ NO_COLOR: '' }, () => streamJsonEvent(TOOL_USE_EVENT)),
     );
-    expect(emptyNoColor[0]).toBe('    \x1b[33mRead\x1b[0m {}');
+    expect(emptyNoColor[0]).toBe('    \x1b[33mRead (0 keys, 2 chars)\x1b[0m');
 
     const noTty = withTty(undefined, () =>
       withEnv({ NO_COLOR: undefined }, () => streamJsonEvent(TOOL_USE_EVENT)),
     );
-    expect(noTty[0]).toBe('    Read {}');
+    expect(noTty[0]).toBe('    Read (0 keys, 2 chars)');
 
     expect(stripAnsi(colored[0] ?? '')).toBe(plain[0]);
   });

@@ -1,15 +1,14 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractJsonPayload, extractResultField } from '../../src/providers/stream-runner.js';
+import {
+  extractJsonPayload,
+  extractResultField,
+  defaultJsonExtractionContext,
+} from '../../src/providers/stream-runner.js';
 import { StreamLogFilter, streamJsonEvent } from '../../src/providers/stream-log.js';
 import { captureStderr, stripAnsi } from '../helpers/harness.js';
-
-const fsCtx = {
-  existsFile: (p: string) => existsSync(p),
-  readFile: (p: string) => readFileSync(p, 'utf8'),
-};
 
 let tmp: string;
 
@@ -35,20 +34,24 @@ describe('extractResultField', () => {
 
 describe('extractJsonPayload', () => {
   it('uses valid JSON as-is', () => {
-    expect(extractJsonPayload('{"a":1}', fsCtx).content).toBe('{"a":1}');
+    expect(extractJsonPayload('{"a":1}', defaultJsonExtractionContext).content).toBe('{"a":1}');
   });
 
   it('unwraps a {result} envelope', () => {
     const raw = JSON.stringify({ result: '{"a":1}' });
-    expect(extractJsonPayload(raw, fsCtx).content).toBe('{"a":1}');
+    expect(extractJsonPayload(raw, defaultJsonExtractionContext).content).toBe('{"a":1}');
   });
 
   it('strips markdown fences', () => {
-    expect(extractJsonPayload('```json\n{"a":1}\n```', fsCtx).content).toBe('\n{"a":1}\n');
+    expect(extractJsonPayload('```json\n{"a":1}\n```', defaultJsonExtractionContext).content).toBe(
+      '\n{"a":1}\n',
+    );
   });
 
   it('strips prose before the first JSON line', () => {
-    expect(extractJsonPayload('Here is the JSON:\n{"a":1}', fsCtx).content).toBe('{"a":1}');
+    expect(
+      extractJsonPayload('Here is the JSON:\n{"a":1}', defaultJsonExtractionContext).content,
+    ).toBe('{"a":1}');
   });
 
   it('falls back to a referenced temp file', () => {
@@ -58,7 +61,7 @@ describe('extractJsonPayload', () => {
     try {
       const extracted = extractJsonPayload(
         `Result:\n{"truncated": tru\nWrote the full JSON to ${ref} instead`,
-        fsCtx,
+        defaultJsonExtractionContext,
       );
       expect(extracted.content).toBe('{"a":1}');
       expect(extracted.fromFile).toBe(ref);
@@ -70,23 +73,25 @@ describe('extractJsonPayload', () => {
   });
 
   it('returns the prose-stripped remainder when nothing parses', () => {
-    expect(extractJsonPayload('no json here at all', fsCtx).content).toBe('');
+    expect(extractJsonPayload('no json here at all', defaultJsonExtractionContext).content).toBe(
+      '',
+    );
   });
 });
 
 describe('stream log filters', () => {
-  it('renders assistant tool_use and text events', () => {
+  it('renders assistant tool_use and text events as metadata only', () => {
     const rendered = streamJsonEvent(
       '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"f":1}},{"type":"text","text":"line one\\nline two"}]}}',
     ).map(stripAnsi);
-    expect(rendered).toEqual(['    Read {"f":1}', '    line one']);
+    expect(rendered).toEqual(['    Read [f] (1 keys, 7 chars)', '    text (17 chars)']);
   });
 
-  it('renders the exec/tokens plain-line protocol', () => {
+  it('renders the exec/tokens plain-line protocol with a command descriptor', () => {
     const filter = new StreamLogFilter(25);
     expect(filter.line('exec')).toEqual([]);
     expect(filter.line('/bin/zsh -lc "echo hello" in /repo').map(stripAnsi)).toEqual([
-      '    exec echo hello',
+      '    exec echo (1 args, 10 chars)',
     ]);
     expect(filter.line('tokens used')).toEqual([]);
     expect(filter.line('1234').map(stripAnsi)).toEqual(['    tokens: 1234']);
@@ -102,10 +107,10 @@ describe('stream log filters', () => {
     expect(third).toEqual(['    thinking... (3 heartbeats)']);
   });
 
-  it('renders api retry events', () => {
+  it('renders provider-neutral api retry events with a classified reason', () => {
     const rendered = streamJsonEvent(
       '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172,"error":"overloaded"}',
-    );
-    expect(rendered).toEqual(['    claude api retry 2/10 after 1172ms: overloaded']);
+    ).map(stripAnsi);
+    expect(rendered).toEqual(['    api retry 2/10 after 1172ms: overloaded']);
   });
 });

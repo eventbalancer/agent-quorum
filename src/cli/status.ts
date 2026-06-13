@@ -632,10 +632,12 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
     /* no mtime */
   }
   const recent = readFileSync(logPath, 'utf8').split('\n').slice(-25).join('\n');
-  if (recent.includes('claude stream stalled:')) {
-    write(`  ${pal.YEL}(watchdog terminated a recent claude call, see run.log)${pal.R}\n`);
-  } else if (recent.includes('claude api retry')) {
-    write(`  ${pal.YEL}(claude is retrying API calls, waiting not progressing)${pal.R}\n`);
+  const stallMatch = [...recent.matchAll(/(\w+) stream stalled:/g)].pop();
+  if (stallMatch !== undefined) {
+    const provider = stallMatch[1] ?? 'provider';
+    write(`  ${pal.YEL}(watchdog terminated a recent ${provider} call, see run.log)${pal.R}\n`);
+  } else if (recent.includes('api retry')) {
+    write(`  ${pal.YEL}(a provider is retrying API calls, waiting not progressing)${pal.R}\n`);
   }
 
   if (existsSync(path.join(work, 'plan.final.md'))) {

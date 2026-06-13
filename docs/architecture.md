@@ -27,6 +27,17 @@ single retry wrapper:
   capability-probed `--trust/--approve-mcps`; tool and schema constraints are
   injected as prompt hints; the session id is captured from the result event.
 
+Provider stdout streams are rendered through a shared metadata-only trace:
+tool names, target paths, command/text sizes, retry markers, and status
+metadata are logged, while prompt, plan, source, tool-argument, and raw provider
+stderr bodies are omitted from normal logs. Provider stderr is captured and
+bounded rather than inherited directly; non-zero exits produce one
+`<role>/<provider> call failed` summary with status, stderr line count, and a
+classified reason when recognized. Raw stdout and stderr are dropped from normal
+logs by default; `PLAN_LOOP_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
+`$WORK/diagnostics/` directory that captures each call's raw streams chunk-wise
+through a best-effort sink that never fails or alters the call.
+
 Write prevention: no role is ever granted Write/Edit/NotebookEdit. Shell access
 exists only where the packaged config grants it — creator create mode — under
 claude's plan permission mode.
@@ -73,8 +84,9 @@ split policy fires: `README.md`, `plan.md`, `run.md`, `journal.md`,
 `rejected-log.jsonl`, `operator-interventions.jsonl`,
 `operator-intervention-migrations.jsonl`, `clarify-questions.json`,
 `clarify-answers.jsonl`, `clarify.offset`, `clarify.done`, `prompt.md`,
-`run.meta.tsv`, `run.log`, `creator.session-id`, and `stale.<timestamp>/`
-archives on resume (which now also archive `plan.split.json`,
+`run.meta.tsv`, `run.log`, the opt-in `diagnostics/<seq>-<role>-<provider>.log`
+artifacts (only when `PLAN_LOOP_PROVIDER_DIAGNOSTICS=1`), `creator.session-id`,
+and `stale.<timestamp>/` archives on resume (which now also archive `plan.split.json`,
 `package-findings.json`, and `plan.package/`). A registry copy of
 `run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
 

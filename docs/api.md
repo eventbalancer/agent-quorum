@@ -22,7 +22,9 @@ import {
 
 The API is a thin, semver-deliberate surface over the same engine the CLI
 uses. Functions return results; only the CLI calls `process.exit`. Operational
-logging still goes to stderr.
+logging still goes to stderr and follows the CLI's metadata-only provider log
+contract: normal logs omit prompt, plan, source, tool-argument, and raw provider
+stderr bodies.
 
 ## Importing from CommonJS
 

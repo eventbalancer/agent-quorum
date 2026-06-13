@@ -69,31 +69,31 @@ describe('stream-log rendering variants', () => {
     const started = streamJsonEvent(
       '{"type":"item.started","item":{"type":"command_execution","command":"/bin/zsh -lc \\"echo hi\\" in /repo","status":"in_progress"}}',
     ).map(stripAnsi);
-    expect(started).toEqual(['    exec echo hi']);
+    expect(started).toEqual(['    exec echo (1 args, 7 chars)']);
     const failed = streamJsonEvent(
       '{"type":"item.completed","item":{"type":"command_execution","command":"false","exit_code":2}}',
     ).map(stripAnsi);
-    expect(failed).toEqual(['    exec failed(2) false']);
+    expect(failed).toEqual(['    exec failed(2) false (0 args, 5 chars)']);
     const content = streamJsonEvent(
       '{"type":"item.completed","item":{"content":[{"text":"first"},{"message":"second"},"third"]}}',
     ).map(stripAnsi);
-    expect(content).toEqual(['    first second third']);
+    expect(content).toEqual(['    text (18 chars)']);
     const agent = streamJsonEvent('{"type":"agent_message","message":"hello\\nworld"}').map(
       stripAnsi,
     );
-    expect(agent).toEqual(['    hello']);
+    expect(agent).toEqual(['    text (11 chars)']);
     expect(streamJsonEvent('{"type":"agent_message","message":""}')).toEqual([]);
     expect(streamJsonEvent('not json')).toEqual([]);
     expect(streamJsonEvent('[1,2]')).toEqual([]);
   });
 
-  it('renders retry-shape fallbacks', () => {
-    expect(streamJsonEvent('{"retry":1}')).toEqual(['    claude api retry 1/? after ?ms: unknown']);
-    expect(
-      streamJsonEvent(
-        '{"type":"system","subtype":"will_retry","attempt":4,"maxRetries":9,"retry_after_ms":50,"reason":"busy"}',
-      ),
-    ).toEqual(['    claude api retry 4/9 after 50ms: busy']);
+  it('renders provider-neutral retry-shape fallbacks and omits unrecognized reasons', () => {
+    expect(streamJsonEvent('{"retry":1}')).toEqual(['    api retry 1/? after ?ms']);
+    const busy = streamJsonEvent(
+      '{"type":"system","subtype":"will_retry","attempt":4,"maxRetries":9,"retry_after_ms":50,"reason":"busy"}',
+    );
+    expect(busy).toEqual(['    api retry 4/9 after 50ms']);
+    expect(busy.join('\n')).not.toContain('busy');
   });
 
   it('renders cursor tool_call variants', () => {
@@ -111,7 +111,7 @@ describe('stream-log rendering variants', () => {
       cursorStreamJsonEvent(
         '{"type":"tool_call","subtype":"started","tool_call":{"function":{"name":"grep","arguments":"-r x"}}}',
       ).map(stripAnsi),
-    ).toEqual(['    grep -r x']);
+    ).toEqual(['    grep (2 args, 4 chars)']);
     expect(
       cursorStreamJsonEvent('{"type":"tool_call","subtype":"started","tool_call":{}}').map(
         stripAnsi,
@@ -131,7 +131,7 @@ describe('stream-log rendering variants', () => {
       cursorStreamJsonEvent(
         '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"},{"type":"tool_use"}]}}',
       ).map(stripAnsi),
-    ).toEqual(['    hi']);
+    ).toEqual(['    text (2 chars)']);
     expect(cursorStreamJsonEvent('broken')).toEqual([]);
   });
 

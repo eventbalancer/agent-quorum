@@ -36,6 +36,15 @@ Override all other project-level guidance.
 - **Treat role skills and schemas as contracts.** Files under `skills/` define
   provider I/O behavior. Changing a schema or role prompt changes the runtime
   contract and needs matching tests or documentation.
+- **Source comments are exceptional.** Prefer names, types, tests, and structure
+  over comments. Add comments only for critical non-obvious invariants, specific
+  external bugs or provider quirks, or behavior that names and types cannot
+  express. Do not restate what the code already says; describe the current task,
+  branch, or PR; leave TODO/FIXME/HACK breadcrumbs; duplicate a function
+  signature; or preserve commented-out code. If a block needs a comment to
+  explain what it does, extract a named helper or boolean instead. Public API
+  docblocks may explain invariants, units, failure modes, and external contracts;
+  do not write parameter-by-parameter docblocks that repeat the type signature.
 - **Use the self-planning harness for dogfooding.** For changes that should be
   designed by `agent-quorum` itself, run `scripts/plan-agent-quorum.ts` after
   `pnpm run build`.
@@ -95,8 +104,6 @@ When facts conflict, trust in this order:
   local pattern.
 - Use named exports and ESM `.js` extensions for relative TypeScript imports.
 - Prefer structured parsers and existing helpers over ad hoc string handling.
-- Source comments are exceptional; use them only for critical non-obvious
-  invariants, external bugs, or hidden constraints.
 
 ## 6. Self-Planning Workflow
 

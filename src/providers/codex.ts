@@ -3,10 +3,15 @@ import { nonEmptyFile } from '../runtime/files.js';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { StreamLogFilter } from './stream-log.js';
+import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
 import type { ProviderRuntime } from './runtime.js';
 
-// codex runs every role statelessly with --sandbox read-only on every call, so
-// the read-only posture is provable from argv. model/reasoning are per call.
+function writeFilterLines(filter: StreamLogFilter, line: string): void {
+  for (const rendered of filter.line(line)) {
+    process.stderr.write(`${rendered}\n`);
+  }
+}
+
 function codexArgs(
   model: string,
   reasoning: string,
@@ -35,40 +40,48 @@ function codexArgs(
 }
 
 export async function codexRun(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   model: string,
   reasoning: string,
   schemaPath: string,
   outPath: string,
   prompt: string,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
   rmSync(outPath, { force: true });
 
   const child = spawnDetached('codex', codexArgs(model, reasoning, schemaPath, outPath, prompt), {
-    cwd: rt.projectRoot,
-    stdio: ['ignore', 'pipe', 'inherit'],
+    cwd: providerRuntime.projectRoot,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   const filter = new StreamLogFilter();
   let pending = '';
   child.stdout?.on('data', (chunk: Buffer) => {
+    if (diagnosticSink !== undefined) {
+      diagnosticSink.write(chunk);
+    }
     pending += chunk.toString();
     for (;;) {
-      const nl = pending.indexOf('\n');
-      if (nl === -1) {
+      const newlineIndex = pending.indexOf('\n');
+      if (newlineIndex === -1) {
         break;
       }
-      for (const rendered of filter.line(pending.slice(0, nl))) {
-        process.stderr.write(`${rendered}\n`);
-      }
-      pending = pending.slice(nl + 1);
+      writeFilterLines(filter, pending.slice(0, newlineIndex));
+      pending = pending.slice(newlineIndex + 1);
     }
   });
+
+  // Always drain so the child never blocks on a full stderr buffer.
+  const stderr = new ProviderStderr(traceContext, diagnosticSink);
+  const stderrDrained = drainStderr(child.stderr, stderr);
+
   const status = await waitForExit(child);
   if (pending !== '') {
-    for (const rendered of filter.line(pending)) {
-      process.stderr.write(`${rendered}\n`);
-    }
+    writeFilterLines(filter, pending);
   }
+  await stderrDrained;
+  stderr.failureSummary(status);
 
   if (status !== 0) {
     return status;

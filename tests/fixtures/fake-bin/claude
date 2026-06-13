@@ -22,6 +22,14 @@ prompt="$(cat)"
 if [[ -n "${FAKE_CLAUDE_PROMPT:-}" ]]; then
   printf '%s' "$prompt" > "$FAKE_CLAUDE_PROMPT"
 fi
+# Raw-stderr injection: a multi-line blob plus one ~2 MB line with no trailing
+# newline, then a non-zero exit. Exercises bounded capture + default-drop.
+if [[ -n "${FAKE_CLAUDE_STDERR:-}" ]]; then
+  printf 'raw claude stderr alpha: %s\n' "$FAKE_CLAUDE_STDERR" >&2
+  printf 'raw claude stderr beta: overloaded request\n' >&2
+  head -c 2000000 /dev/zero | tr '\0' 'x' >&2
+  exit "${FAKE_CLAUDE_STDERR_EXIT:-1}"
+fi
 if [[ -n "${FAKE_CLAUDE_ATTEMPTS:-}" ]]; then
   attempts=0
   [[ -f "$FAKE_CLAUDE_ATTEMPTS" ]] && attempts="$(cat "$FAKE_CLAUDE_ATTEMPTS")"

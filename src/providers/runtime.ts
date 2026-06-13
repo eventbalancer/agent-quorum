@@ -5,28 +5,29 @@ import type { Role } from '../types.js';
 import type { StreamKnobs } from './watchdog.js';
 
 export interface ProviderRuntime {
-  scratch: Scratch;
-  projectRoot: string;
-  retry: RetryPolicy;
-  claudeKnobs: StreamKnobs;
-  cursorKnobs: StreamKnobs;
-  matrix: RoleMatrix;
-  sessionMode: 0 | 1;
-  creatorSessionFile: string;
-  markdownSchemaPath: string;
-  cursorBin: string;
-  claudePermissionMode?: string;
+  readonly scratch: Scratch;
+  readonly projectRoot: string;
+  readonly retry: RetryPolicy;
+  readonly claudeKnobs: StreamKnobs;
+  readonly cursorKnobs: StreamKnobs;
+  readonly matrix: RoleMatrix;
+  readonly sessionMode: 0 | 1;
+  readonly creatorSessionFile: string;
+  readonly markdownSchemaPath: string;
+  readonly cursorBin: string;
+  readonly claudePermissionMode?: string;
+  // Opt-in raw-diagnostics directory. Unset means raw stderr/stdout is dropped
+  // after classification (default-off).
+  readonly diagnosticsDir?: string;
 }
 
-// The session-capable combos are (creator, claude) and (creator, cursor) under
-// SESSION_MODE; every other (role, runner) runs stateless.
-export function roleSessionFile(rt: ProviderRuntime, role: Role): string {
-  if (role !== 'creator' || rt.sessionMode !== 1) {
+export function roleSessionFile(providerRuntime: ProviderRuntime, role: Role): string {
+  if (role !== 'creator' || providerRuntime.sessionMode !== 1) {
     return '';
   }
-  const runner = rt.matrix.creator.runner;
+  const runner = providerRuntime.matrix.creator.runner;
   if (runner === 'claude' || runner === 'cursor') {
-    return rt.creatorSessionFile;
+    return providerRuntime.creatorSessionFile;
   }
   return '';
 }

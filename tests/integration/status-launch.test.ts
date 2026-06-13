@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -176,5 +177,34 @@ describe('launch + status (Finding F4, AC-5)', () => {
     process.kill(runB.pid, 'SIGTERM');
     await sleep(1500);
     expect(isAlive(runB.grandchildPid)).toBe(false);
+  }, 120_000);
+});
+
+describe('status provider-neutral hints (FR-7)', () => {
+  it('derives the stall hint provider and shows a provider-neutral retry hint', async () => {
+    const run = await launchHangingRun('gamma');
+    const statusEnv = {
+      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
+      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
+      PLAN_LOOP_STATUS_SCAN_PS: '0',
+    };
+
+    // The neutralized P1 retry trace token triggers the provider-neutral hint.
+    appendFileSync(run.log, '    api retry 2/10 after 1172ms\n');
+    const retry = runCli(['status', String(run.grandchildPid)], statusEnv);
+    expect(retry.status).toBe(0);
+    expect(retry.stdout).toContain('(a provider is retrying API calls, waiting not progressing)');
+    expect(retry.stdout).not.toContain('claude is retrying');
+
+    // A cursor stall names cursor in the hint, not the old hardcoded claude.
+    appendFileSync(run.log, '[plan-loop] cursor stream stalled: no byte progress\n');
+    const stall = runCli(['status', String(run.grandchildPid)], statusEnv);
+    expect(stall.status).toBe(0);
+    expect(stall.stdout).toContain('(watchdog terminated a recent cursor call, see run.log)');
+    expect(stall.stdout).not.toContain('recent claude call');
+
+    process.kill(run.pid, 'SIGTERM');
+    await sleep(1500);
+    expect(isAlive(run.grandchildPid)).toBe(false);
   }, 120_000);
 });

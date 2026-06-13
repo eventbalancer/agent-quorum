@@ -18,6 +18,12 @@ Error-path usage output keeps the reference streams and exit codes.
 ANSI color is emitted only when the target stream is a TTY and `NO_COLOR` is
 unset or empty ([no-color.org](https://no-color.org) semantics) — redirected
 output and `run.log` stay escape-free; the log text itself is unchanged.
+Provider stream logs are metadata-only: tool names, target paths, command and
+text sizes, retry/stall markers, status, and counts are logged, but prompt,
+plan, source, tool-argument, and raw provider stderr bodies are not mirrored to
+normal output. On a non-zero provider exit, `plan-loop` emits one compact
+`<role>/<provider> call failed` summary with status, captured stderr line
+count, and a classified reason when one is recognized.
 
 ## Core run — `plan-loop [flags] <plan.md>`
 

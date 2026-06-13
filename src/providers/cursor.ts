@@ -1,10 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err, log } from '../runtime/log.js';
 import { cursorSessionArgs } from './session.js';
 import { CursorStreamLogFilter } from './stream-log.js';
-import { extractJsonPayload, extractResultField, runStreamingCli } from './stream-runner.js';
+import {
+  extractJsonPayload,
+  extractResultField,
+  runStreamingCli,
+  defaultJsonExtractionContext,
+} from './stream-runner.js';
+import type { DiagnosticSink, TraceContext } from './trace.js';
 import { cursorProgressEvent } from './watchdog.js';
 import { stripTrailingNewlines, type ProviderRuntime } from './runtime.js';
 
@@ -20,25 +26,29 @@ export function cursorCliSupportsFlag(cursorBin: string, flag: string): boolean 
 }
 
 interface CursorStreamOutcome {
-  status: number;
-  output: string;
+  readonly status: number;
+  readonly output: string;
 }
 
 async function cursorStream(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   promptText: string,
   args: readonly string[],
   captureFile: string,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<CursorStreamOutcome> {
   const filter = new CursorStreamLogFilter();
   const result = await runStreamingCli({
-    command: rt.cursorBin,
+    command: providerRuntime.cursorBin,
     args: ['-p', '--output-format', 'stream-json', ...args],
     promptText,
-    cwd: rt.projectRoot,
-    knobs: rt.cursorKnobs,
+    cwd: providerRuntime.projectRoot,
+    knobs: providerRuntime.cursorKnobs,
     renderLine: (line) => filter.line(line),
     progressEvent: cursorProgressEvent,
+    traceContext,
+    ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),
   });
   const output = extractResultField(result.streamLines, 'result');
   if (captureFile !== '') {
@@ -51,7 +61,7 @@ async function cursorStream(
   let status = result.status;
   if (result.stallReason !== undefined) {
     err(`cursor stream stalled: ${result.stallReason}`);
-    status = rt.cursorKnobs.stallStatus;
+    status = providerRuntime.cursorKnobs.stallStatus;
   }
   return { status, output };
 }
@@ -59,14 +69,23 @@ async function cursorStream(
 type CursorMode = 'json' | 'markdown';
 
 async function cursorStreamToFile(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: CursorMode,
   promptText: string,
   outFile: string,
   args: readonly string[],
   captureFile: string,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
-  const { status, output } = await cursorStream(rt, promptText, args, captureFile);
+  const { status, output } = await cursorStream(
+    providerRuntime,
+    promptText,
+    args,
+    captureFile,
+    traceContext,
+    diagnosticSink,
+  );
   if (mode === 'markdown') {
     writeFileSync(outFile, output);
     if (status !== 0) {
@@ -86,21 +105,20 @@ async function cursorStreamToFile(
     err('cursor produced no final result');
     return 4;
   }
-  const extracted = extractJsonPayload(output, {
-    existsFile: (p) => existsSync(p),
-    readFile: (p) => readFileSync(p, 'utf8'),
-  });
+  const extracted = extractJsonPayload(output, defaultJsonExtractionContext);
   writeFileSync(outFile, extracted.content);
   return 0;
 }
 
 async function cursorRunOnce(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: CursorMode,
   promptText: string,
   outFile: string,
   sessionFile: string,
   invokeArgs: readonly string[],
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
   const session = cursorSessionArgs(sessionFile);
   const wasResume = session.wasResume;
@@ -109,31 +127,37 @@ async function cursorRunOnce(
 
   rmSync(outFile, { force: true });
   let status = await cursorStreamToFile(
-    rt,
+    providerRuntime,
     mode,
     promptText,
     outFile,
     [...session.args, ...invokeArgs],
     captureFile,
+    traceContext,
+    diagnosticSink,
   );
   if (status === 0) {
     return 0;
   }
 
   const isStallWithLiveSession =
-    status === rt.cursorKnobs.stallStatus && sessionFile !== '' && nonEmptyFile(sessionFile);
+    status === providerRuntime.cursorKnobs.stallStatus &&
+    sessionFile !== '' &&
+    nonEmptyFile(sessionFile);
   if (isStallWithLiveSession) {
     log('WARNING: creator stream stalled; resuming the same cursor session once');
     const resumeArgs = ['--resume', readFileSync(sessionFile, 'utf8').trim()];
     attemptedStallResume = true;
     rmSync(outFile, { force: true });
     status = await cursorStreamToFile(
-      rt,
+      providerRuntime,
       mode,
       CURSOR_STALL_RESUME_PROMPT,
       outFile,
       [...resumeArgs, ...invokeArgs],
       captureFile,
+      traceContext,
+      diagnosticSink,
     );
     if (status === 0) {
       return 0;
@@ -147,12 +171,14 @@ async function cursorRunOnce(
       const freshSession = cursorSessionArgs(sessionFile);
       rmSync(outFile, { force: true });
       return cursorStreamToFile(
-        rt,
+        providerRuntime,
         mode,
         promptText,
         outFile,
         [...freshSession.args, ...invokeArgs],
         captureFile,
+        traceContext,
+        diagnosticSink,
       );
     }
   }
@@ -161,26 +187,29 @@ async function cursorRunOnce(
 }
 
 export interface CursorInvokeInput {
-  skillFile: string;
-  tools: string;
-  disallowedTools: string;
-  model: string;
-  sessionFile: string;
-  schemaFile: string;
-  promptBody: string;
+  readonly skillFile: string;
+  readonly tools: string;
+  readonly disallowedTools: string;
+  readonly model: string;
+  readonly sessionFile: string;
+  readonly schemaFile: string;
+  readonly promptBody: string;
 }
 
 interface CursorPromptAndArgs {
-  args: string[];
-  fullPrompt: string;
+  readonly args: string[];
+  readonly fullPrompt: string;
 }
 
-function cursorPromptAndArgs(rt: ProviderRuntime, input: CursorInvokeInput): CursorPromptAndArgs {
-  const args = ['--workspace', rt.projectRoot, '--model', input.model];
-  if (cursorCliSupportsFlag(rt.cursorBin, '--trust')) {
+function cursorPromptAndArgs(
+  providerRuntime: ProviderRuntime,
+  input: CursorInvokeInput,
+): CursorPromptAndArgs {
+  const args = ['--workspace', providerRuntime.projectRoot, '--model', input.model];
+  if (cursorCliSupportsFlag(providerRuntime.cursorBin, '--trust')) {
     args.push('--trust');
   }
-  if (cursorCliSupportsFlag(rt.cursorBin, '--approve-mcps')) {
+  if (cursorCliSupportsFlag(providerRuntime.cursorBin, '--approve-mcps')) {
     args.push('--approve-mcps');
   }
 
@@ -206,11 +235,22 @@ function cursorPromptAndArgs(rt: ProviderRuntime, input: CursorInvokeInput): Cur
 }
 
 export async function cursorInvoke(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: CursorMode,
   outFile: string,
   input: CursorInvokeInput,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
-  const { args, fullPrompt } = cursorPromptAndArgs(rt, input);
-  return cursorRunOnce(rt, mode, fullPrompt, outFile, input.sessionFile, args);
+  const { args, fullPrompt } = cursorPromptAndArgs(providerRuntime, input);
+  return cursorRunOnce(
+    providerRuntime,
+    mode,
+    fullPrompt,
+    outFile,
+    input.sessionFile,
+    args,
+    traceContext,
+    diagnosticSink,
+  );
 }

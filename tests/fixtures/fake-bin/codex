@@ -10,6 +10,16 @@ fi
 if [[ -n "${FAKE_CODEX_ARGV_LOG:-}" ]]; then
   { for arg in "$@"; do printf '%s\0' "$arg"; done; printf '\036'; } >> "$FAKE_CODEX_ARGV_LOG"
 fi
+# Raw-stderr injection: one raw stdout NDJSON line, then a multi-line stderr
+# blob plus one ~2 MB line with no trailing newline, then a non-zero exit.
+# Exercises bounded capture + default-drop and the opt-in raw artifact.
+if [[ -n "${FAKE_CODEX_STDERR:-}" ]]; then
+  printf '{"type":"item.started","item":{"type":"command_execution","command":"/bin/zsh -lc \\"echo diag\\"","status":"in_progress","exit_code":null}}\n'
+  printf 'raw codex stderr alpha: %s\n' "$FAKE_CODEX_STDERR" >&2
+  printf 'raw codex stderr beta: overloaded request\n' >&2
+  head -c 2000000 /dev/zero | tr '\0' 'x' >&2
+  exit "${FAKE_CODEX_STDERR_EXIT:-1}"
+fi
 # Transient-failure injection: fail the first FAKE_CODEX_FAILS attempts (counted
 # in FAKE_CODEX_ATTEMPTS) before any output, exercising provider_run retries.
 if [[ -n "${FAKE_CODEX_ATTEMPTS:-}" ]]; then
@@ -70,6 +80,15 @@ if [[ -n "${FAKE_CODEX_OUTPUT_CALLS:-}" ]]; then
 fi
 [[ -n "$output" ]] || exit 2
 cp "$output" "$out"
+# Body-bearing stdout NDJSON: a tool input, assistant prose, an exec command,
+# and a retry reason all carrying a planted body, to drive stdout redaction.
+if [[ -n "${FAKE_CODEX_STDOUT_BODY:-}" ]]; then
+  b="$FAKE_CODEX_STDOUT_BODY"
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cat %s"}}]}}\n' "$b"
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"the plan body is %s"}]}}\n' "$b"
+  printf '{"type":"item.started","item":{"type":"command_execution","command":"/bin/zsh -lc \\"echo %s\\"","status":"in_progress","exit_code":null}}\n' "$b"
+  printf '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"delay_ms":10,"error":"failed: %s"}\n' "$b"
+fi
 if [[ -n "${FAKE_CODEX_EMIT_ID:-}" ]]; then
   printf '{"type":"thread.started","thread_id":"%s"}\n' "$FAKE_CODEX_EMIT_ID"
 fi

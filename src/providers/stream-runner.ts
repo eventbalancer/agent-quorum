@@ -1,38 +1,38 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
+import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
 import { StreamState, watchStream, type StreamKnobs } from './watchdog.js';
 
 export interface StreamRunResult {
-  status: number;
-  stallReason: string | undefined;
-  streamLines: string[];
+  readonly status: number;
+  readonly stallReason: string | undefined;
+  readonly streamLines: string[];
 }
 
 export interface StreamRunOptions {
-  command: string;
-  args: readonly string[];
-  promptText: string;
-  cwd: string;
-  knobs: StreamKnobs;
-  renderLine: (line: string) => string[];
-  progressEvent: (line: string) => boolean;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly promptText: string;
+  readonly cwd: string;
+  readonly knobs: StreamKnobs;
+  readonly renderLine: (line: string) => string[];
+  readonly progressEvent: (line: string) => boolean;
+  readonly traceContext: TraceContext;
+  readonly diagnosticSink?: DiagnosticSink;
 }
 
-// Equivalent of the reference's stream_claude_once / stream_cursor_once
-// pipeline: spawn the CLI in its own group, mirror the NDJSON stream through
-// the log filter to stderr, and let the watchdog guard byte/semantic/wall
-// progress over in-memory counters instead of a tee'd temp file.
 export async function runStreamingCli(options: StreamRunOptions): Promise<StreamRunResult> {
   const child = spawnDetached(options.command, [...options.args], {
     cwd: options.cwd,
-    stdio: ['pipe', 'pipe', 'inherit'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   const state = new StreamState();
   const lines: string[] = [];
   let pending = '';
 
-  const consumeLine = (line: string) => {
+  function consumeLine(line: string): void {
     lines.push(line);
     if (options.progressEvent(line)) {
       state.progress += 1;
@@ -40,20 +40,26 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
     for (const rendered of options.renderLine(line)) {
       process.stderr.write(`${rendered}\n`);
     }
-  };
+  }
 
   child.stdout?.on('data', (chunk: Buffer) => {
+    if (options.diagnosticSink !== undefined) {
+      options.diagnosticSink.write(chunk);
+    }
     state.bytes += chunk.length;
     pending += chunk.toString();
     for (;;) {
-      const nl = pending.indexOf('\n');
-      if (nl === -1) {
+      const newlineIndex = pending.indexOf('\n');
+      if (newlineIndex === -1) {
         break;
       }
-      consumeLine(pending.slice(0, nl));
-      pending = pending.slice(nl + 1);
+      consumeLine(pending.slice(0, newlineIndex));
+      pending = pending.slice(newlineIndex + 1);
     }
   });
+
+  const stderr = new ProviderStderr(options.traceContext, options.diagnosticSink);
+  const stderrDrained = drainStderr(child.stderr, stderr);
 
   child.stdin?.on('error', () => {
     /* CLI exited before reading the prompt */
@@ -67,6 +73,8 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
   if (pending !== '') {
     consumeLine(pending);
   }
+  await stderrDrained;
+  stderr.failureSummary(status);
 
   return { status, stallReason, streamLines: lines };
 }
@@ -78,8 +86,6 @@ function jqRawRender(value: JsonValue): string {
   return JSON.stringify(value, null, 2);
 }
 
-// jq -r 'select(.type == "result") | .result // empty' over the stream: every
-// matching event contributes its rendering plus a newline.
 export function extractResultField(streamLines: readonly string[], field: string): string {
   let out = '';
   for (const line of streamLines) {
@@ -102,9 +108,14 @@ export function extractResultField(streamLines: readonly string[], field: string
 }
 
 export interface JsonExtractionContext {
-  existsFile: (path: string) => boolean;
-  readFile: (path: string) => string;
+  readonly existsFile: (path: string) => boolean;
+  readonly readFile: (path: string) => string;
 }
+
+export const defaultJsonExtractionContext: JsonExtractionContext = {
+  existsFile: (filePath) => existsSync(filePath),
+  readFile: (filePath) => readFileSync(filePath, 'utf8'),
+};
 
 function parsesAsTruthyJson(text: string): boolean {
   try {
@@ -116,14 +127,14 @@ function parsesAsTruthyJson(text: string): boolean {
 }
 
 export interface ExtractedJson {
-  content: string;
-  fromFile?: string;
+  readonly content: string;
+  readonly fromFile?: string;
 }
 
-// The shared claude/cursor JSON-result extraction chain: unwrap a {result}
-// envelope, strip markdown fences, drop prose before the first `{` line, and
-// finally fall back to a referenced temp-file path.
-export function extractJsonPayload(rawInput: string, ctx: JsonExtractionContext): ExtractedJson {
+export function extractJsonPayload(
+  rawInput: string,
+  jsonContext: JsonExtractionContext,
+): ExtractedJson {
   let raw = rawInput.replace(/\n+$/, '');
 
   try {
@@ -162,9 +173,9 @@ export function extractJsonPayload(rawInput: string, ctx: JsonExtractionContext)
 
   const refMatch = /(\/tmp|\/var)[a-zA-Z0-9_./-]+\.json/.exec(raw);
   const refPath = refMatch?.[0];
-  if (refPath !== undefined && ctx.existsFile(refPath)) {
+  if (refPath !== undefined && jsonContext.existsFile(refPath)) {
     try {
-      const fileContent = ctx.readFile(refPath);
+      const fileContent = jsonContext.readFile(refPath);
       if (parsesAsTruthyJson(fileContent)) {
         err(
           `WARNING: model wrote JSON to ${refPath} instead of returning inline — using file content`,

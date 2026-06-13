@@ -1,9 +1,15 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err, log } from '../runtime/log.js';
 import { claudeSessionArgs } from './session.js';
 import { StreamLogFilter } from './stream-log.js';
-import { extractJsonPayload, extractResultField, runStreamingCli } from './stream-runner.js';
+import {
+  extractJsonPayload,
+  extractResultField,
+  runStreamingCli,
+  defaultJsonExtractionContext,
+} from './stream-runner.js';
+import type { DiagnosticSink, TraceContext } from './trace.js';
 import { claudeProgressEvent } from './watchdog.js';
 import type { ProviderRuntime } from './runtime.js';
 
@@ -13,30 +19,34 @@ const CLAUDE_STALL_RESUME_PROMPT =
   'Continue the original task using the context already gathered in this session. Return the exact output requested by the original prompt and current output mode. Do not ask user questions. If enough evidence is already gathered, produce the final output now.\n';
 
 interface ClaudeStreamOutcome {
-  status: number;
-  output: string;
+  readonly status: number;
+  readonly output: string;
 }
 
 async function claudeStream(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   promptText: string,
   args: readonly string[],
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<ClaudeStreamOutcome> {
   const filter = new StreamLogFilter();
   const result = await runStreamingCli({
     command: 'claude',
     args: ['-p', '--verbose', '--output-format', 'stream-json', ...args],
     promptText,
-    cwd: rt.projectRoot,
-    knobs: rt.claudeKnobs,
+    cwd: providerRuntime.projectRoot,
+    knobs: providerRuntime.claudeKnobs,
     renderLine: (line) => filter.line(line),
     progressEvent: claudeProgressEvent,
+    traceContext,
+    ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),
   });
   const output = extractResultField(result.streamLines, 'result');
   let status = result.status;
   if (result.stallReason !== undefined) {
     err(`claude stream stalled: ${result.stallReason}`);
-    status = rt.claudeKnobs.stallStatus;
+    status = providerRuntime.claudeKnobs.stallStatus;
   }
   return { status, output };
 }
@@ -44,13 +54,21 @@ async function claudeStream(
 type ClaudeMode = 'json' | 'markdown';
 
 async function claudeStreamToFile(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: ClaudeMode,
   promptText: string,
   outFile: string,
   args: readonly string[],
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
-  const { status, output } = await claudeStream(rt, promptText, args);
+  const { status, output } = await claudeStream(
+    providerRuntime,
+    promptText,
+    args,
+    traceContext,
+    diagnosticSink,
+  );
   if (mode === 'markdown') {
     writeFileSync(outFile, output);
     if (status !== 0) {
@@ -70,50 +88,58 @@ async function claudeStreamToFile(
     err('claude produced no final result');
     return 4;
   }
-  const extracted = extractJsonPayload(output, {
-    existsFile: (p) => existsSync(p),
-    readFile: (p) => readFileSync(p, 'utf8'),
-  });
+  const extracted = extractJsonPayload(output, defaultJsonExtractionContext);
   writeFileSync(outFile, extracted.content);
   return 0;
 }
 
-// Single-attempt claude call with session self-heal: on a stall with a live
-// session, resume the same session once; on any further failure, drop the
-// session file and re-establish a fresh session when this call was itself a
-// resume. Transient-failure retries are owned by provider_run, not here.
+// Session self-heal only; transient-failure retries are owned by providerRun.
 async function claudeRunOnce(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: ClaudeMode,
   promptText: string,
   outFile: string,
   sessionFile: string,
   invokeArgs: readonly string[],
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
   const session = claudeSessionArgs(sessionFile);
   const wasResume = session.wasResume;
   let attemptedStallResume = false;
 
   rmSync(outFile, { force: true });
-  let status = await claudeStreamToFile(rt, mode, promptText, outFile, [
-    ...session.args,
-    ...invokeArgs,
-  ]);
+  let status = await claudeStreamToFile(
+    providerRuntime,
+    mode,
+    promptText,
+    outFile,
+    [...session.args, ...invokeArgs],
+    traceContext,
+    diagnosticSink,
+  );
   if (status === 0) {
     return 0;
   }
 
   const isStallWithLiveSession =
-    status === rt.claudeKnobs.stallStatus && sessionFile !== '' && nonEmptyFile(sessionFile);
+    status === providerRuntime.claudeKnobs.stallStatus &&
+    sessionFile !== '' &&
+    nonEmptyFile(sessionFile);
   if (isStallWithLiveSession) {
     log('WARNING: creator stream stalled; resuming the same session once');
     const resumeArgs = ['--resume', readFileSync(sessionFile, 'utf8').trim()];
     attemptedStallResume = true;
     rmSync(outFile, { force: true });
-    status = await claudeStreamToFile(rt, mode, CLAUDE_STALL_RESUME_PROMPT, outFile, [
-      ...resumeArgs,
-      ...invokeArgs,
-    ]);
+    status = await claudeStreamToFile(
+      providerRuntime,
+      mode,
+      CLAUDE_STALL_RESUME_PROMPT,
+      outFile,
+      [...resumeArgs, ...invokeArgs],
+      traceContext,
+      diagnosticSink,
+    );
     if (status === 0) {
       return 0;
     }
@@ -125,21 +151,25 @@ async function claudeRunOnce(
       log('WARNING: creator session resume failed; re-establishing session');
       const freshSession = claudeSessionArgs(sessionFile);
       rmSync(outFile, { force: true });
-      return claudeStreamToFile(rt, mode, promptText, outFile, [
-        ...freshSession.args,
-        ...invokeArgs,
-      ]);
+      return claudeStreamToFile(
+        providerRuntime,
+        mode,
+        promptText,
+        outFile,
+        [...freshSession.args, ...invokeArgs],
+        traceContext,
+        diagnosticSink,
+      );
     }
   }
 
   return status;
 }
 
-// Argument contract for one claude call. Plan mode is the default permission
-// mode; the translator overrides it to "default" because its stdout IS the
-// artifact and plan mode's framing collides with that.
+// Translator overrides permission mode to "default": plan mode framing collides
+// when stdout is the artifact.
 function claudeInvokeArgs(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   skillFile: string,
   tools: string,
   disallowedTools: string,
@@ -147,7 +177,8 @@ function claudeInvokeArgs(
   effort: string,
   schemaFile?: string,
 ): string[] {
-  const permissionMode = rt.claudePermissionMode ?? process.env.CLAUDE_PERMISSION_MODE ?? 'plan';
+  const permissionMode =
+    providerRuntime.claudePermissionMode ?? process.env.CLAUDE_PERMISSION_MODE ?? 'plan';
   const args = [
     '--append-system-prompt',
     readFileSync(skillFile, 'utf8').replace(/\n+$/, ''),
@@ -173,7 +204,7 @@ function claudeInvokeArgs(
 }
 
 export async function claudeInvoke(
-  rt: ProviderRuntime,
+  providerRuntime: ProviderRuntime,
   mode: ClaudeMode,
   outFile: string,
   skillFile: string,
@@ -184,7 +215,26 @@ export async function claudeInvoke(
   sessionFile: string,
   schemaFile: string | undefined,
   promptText: string,
+  traceContext: TraceContext,
+  diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
-  const args = claudeInvokeArgs(rt, skillFile, tools, disallowedTools, model, effort, schemaFile);
-  return claudeRunOnce(rt, mode, promptText, outFile, sessionFile, args);
+  const args = claudeInvokeArgs(
+    providerRuntime,
+    skillFile,
+    tools,
+    disallowedTools,
+    model,
+    effort,
+    schemaFile,
+  );
+  return claudeRunOnce(
+    providerRuntime,
+    mode,
+    promptText,
+    outFile,
+    sessionFile,
+    args,
+    traceContext,
+    diagnosticSink,
+  );
 }

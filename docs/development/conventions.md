@@ -155,6 +155,8 @@ Rules:
 
 Use domain names first, then technical role names. Prefer a precise file name (`translate-pass.ts`, `validate-plan.ts`, `clarify.ts`) over a catch-all. Avoid new generic `helpers`, `common`, `misc`, or `utils` buckets; `src/runtime/` already holds the genuinely generic primitives.
 
+Do not abbreviate domain terms in project-owned names. Prefer `traceContext`, not `traceCtx`; `providerRuntime`, not `rt`; `runContext`, not `ctx`; `iteration`, not `iter`; and `previousCritiques`, not `prevCritiques`.
+
 ## TypeScript Style
 
 ### Blocks
@@ -284,6 +286,7 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 - Log through `src/runtime/log.ts` (`log` / `err`); do not call `console.*` directly in `core/` or `providers/`.
 - Logs carry run metadata — role, provider, model, status, line counts, latency — not plan bodies, prompts, or secrets.
+- The provider trace is metadata-only on both streams: tool-argument values, assistant prose, raw command bodies, and free-text retry/stderr reasons render as a kind, size, target path, command descriptor, or classified token — never the body. Raw stdout/stderr is reachable only behind the opt-in `PLAN_LOOP_PROVIDER_DIAGNOSTICS` escape hatch (see [`docs/configuration.md`](../configuration.md)).
 
 ## Security and Secrets
 

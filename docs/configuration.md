@@ -120,6 +120,17 @@ Passes: `PLAN_LOOP_FIX_PASS_TIMEOUT_SECONDS` (900),
 `PLAN_LOOP_FIX_PASS_RETRY_COUNT` (1), and the `PLAN_LOOP_TRANSLATE_PASS_*`
 equivalents.
 
+### Provider diagnostics (env layer)
+
+`PLAN_LOOP_PROVIDER_DIAGNOSTICS=1` enables opt-in raw capture of each provider
+call's stdout and stderr into `$WORK/diagnostics/` as
+`<seq>-<role>-<provider>.log` files. Normal logs still follow the metadata-only
+contract and emit only a `diagnostics →` reference line per call; raw prompt,
+plan, source, tool-argument, and stderr bodies never reach standard output.
+Capture is best-effort — a filesystem failure disables the sink for that call
+with one bounded warning and does not change the provider exit code. Default is
+off (unset or any value other than `1`).
+
 ### Clarification gate / Telegram
 
 `PLAN_LOOP_TELEGRAM_BOT_TOKEN` plus `PLAN_LOOP_TELEGRAM_CHAT_ID` enable

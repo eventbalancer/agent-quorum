@@ -24,6 +24,7 @@ The flow keeps three boundaries clear:
 The workflow Claude commands and Codex skills are mirrored byte-for-byte:
 
 ```text
+.claude/commands/issues.md              <-> .agents/skills/issues/SKILL.md
 .claude/commands/requirements.md        <-> .agents/skills/requirements/SKILL.md
 .claude/commands/solution-handoff.md    <-> .agents/skills/solution-handoff/SKILL.md
 .claude/commands/prompt-architect.md    <-> .agents/skills/prompt-architect/SKILL.md
@@ -54,6 +55,9 @@ source and should be committed when the skill text changes.
 Use the shortest chain that still preserves the needed decision boundary.
 
 ```text
+Session insights to capture for later:
+  /issues -> (per issue, later) /requirements -> /solution-handoff -> /prompt-architect -> confirmed run
+
 Raw or ambiguous task:
   /requirements -> /solution-handoff -> /prompt-architect -> confirmed run
 
@@ -70,6 +74,25 @@ run profiles, and starts the selected run only after explicit operator
 confirmation.
 
 ## Stage Contracts
+
+### issues
+
+Use to capture loose improvement and fix directions from the current session as
+tracked proposals before they are lost. It is the optional front door of the
+flow, not a required step.
+
+Outputs:
+
+- one proposal-level GitHub issue per cluster, created only after operator
+  confirmation;
+- no implementation details, no chosen solution, no checkout edits.
+
+Rules:
+
+- ground every candidate in the current conversation;
+- cluster related directions and de-duplicate against open issues;
+- keep issue bodies outcome-level and solution-free;
+- point each issue at the downstream flow; never start `agent-quorum`.
 
 ### requirements
 
@@ -181,6 +204,7 @@ pnpm run check
 Before finishing, verify mirrors when skill text changed:
 
 ```sh
+cmp -s .claude/commands/issues.md .agents/skills/issues/SKILL.md
 cmp -s .claude/commands/requirements.md .agents/skills/requirements/SKILL.md
 cmp -s .claude/commands/solution-handoff.md .agents/skills/solution-handoff/SKILL.md
 cmp -s .claude/commands/prompt-architect.md .agents/skills/prompt-architect/SKILL.md
@@ -190,6 +214,8 @@ cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
 
 ## Quick Selection Guide
 
+- Use `/issues` when a session surfaced follow-ups or ideas worth tracking as
+  GitHub proposals before they are lost.
 - Use `/requirements` when the operator still needs to decide scope, behavior,
   compatibility, priority, or acceptance.
 - Use `/solution-handoff` when the problem is known but should be reframed

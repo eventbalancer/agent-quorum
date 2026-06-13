@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -87,7 +87,7 @@ describe('claude argv contract', () => {
     emptyCritique(critique);
     const out = path.join(tmp, 'out.json');
     const argvLog = path.join(tmp, 'claude.argv');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       matrix: {
         ...fixtureMatrix(),
         critic: { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'xhigh' },
@@ -102,7 +102,7 @@ describe('claude argv contract', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'critic',
           'json',
           out,
@@ -148,7 +148,7 @@ describe('claude argv contract', () => {
     writeStructuredPlanFile(created, 'Created');
     const out = path.join(tmp, 'plan.v0.md');
     const argvLog = path.join(tmp, 'claude.argv');
-    const rt = makeRuntime();
+    const providerRuntime = makeRuntime();
     const createTools = 'Read,Grep,Glob,Bash';
     const createDisallowed = 'Write,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion';
 
@@ -160,7 +160,7 @@ describe('claude argv contract', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -193,7 +193,7 @@ describe('claude sessions', () => {
     writeStructuredPlanFile(created, 'Created');
     const out = path.join(tmp, 'out.md');
     const argvLog = path.join(tmp, 'claude.argv');
-    const rt = makeRuntime({ sessionMode: 1 });
+    const providerRuntime = makeRuntime({ sessionMode: 1 });
 
     const env = {
       PATH: fakePath(),
@@ -203,7 +203,7 @@ describe('claude sessions', () => {
     expect(
       await withEnvAsync(env, () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -215,13 +215,13 @@ describe('claude sessions', () => {
         ),
       ),
     ).toBe(0);
-    const sessionId = readFileSync(rt.creatorSessionFile, 'utf8').trim();
+    const sessionId = readFileSync(providerRuntime.creatorSessionFile, 'utf8').trim();
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
 
     expect(
       await withEnvAsync(env, () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -249,9 +249,12 @@ describe('claude sessions', () => {
     writeStructuredPlanFile(created, 'Created');
     const out = path.join(tmp, 'out.md');
     const argvLog = path.join(tmp, 'claude.argv');
-    const rt = makeRuntime({ sessionMode: 1, retry: { retryCount: 0, retryDelaySeconds: 0 } });
+    const providerRuntime = makeRuntime({
+      sessionMode: 1,
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+    });
     const staleId = '00000000-0000-4000-8000-00000000dead';
-    writeFileSync(rt.creatorSessionFile, `${staleId}\n`);
+    writeFileSync(providerRuntime.creatorSessionFile, `${staleId}\n`);
 
     const status = await withEnvAsync(
       {
@@ -262,7 +265,7 @@ describe('claude sessions', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -279,7 +282,7 @@ describe('claude sessions', () => {
     expect(records).toHaveLength(2);
     expect(records[0]).toContain('--resume');
     expect(records[1]).toContain('--session-id');
-    const newId = readFileSync(rt.creatorSessionFile, 'utf8').trim();
+    const newId = readFileSync(providerRuntime.creatorSessionFile, 'utf8').trim();
     expect(newId).not.toBe(staleId);
     expect(capture.text()).toContain('creator session resume failed; re-establishing session');
   });
@@ -290,7 +293,7 @@ describe('claude sessions', () => {
     const out = path.join(tmp, 'out.md');
     const argvLog = path.join(tmp, 'claude.argv');
     const stallCounter = path.join(tmp, 'stall.count');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       sessionMode: 1,
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       claudeKnobs: {
@@ -303,7 +306,7 @@ describe('claude sessions', () => {
       },
     });
     const liveId = '00000000-0000-4000-8000-0000000000aa';
-    writeFileSync(rt.creatorSessionFile, `${liveId}\n`);
+    writeFileSync(providerRuntime.creatorSessionFile, `${liveId}\n`);
 
     const status = await withEnvAsync(
       {
@@ -314,7 +317,7 @@ describe('claude sessions', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -340,7 +343,7 @@ describe('claude watchdog', () => {
   it('semantic idle terminates an api-retry loop', async () => {
     const created = path.join(tmp, 'created.md');
     writeStructuredPlanFile(created, 'Created');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       claudeKnobs: {
         stallStatus: 124,
@@ -360,7 +363,7 @@ describe('claude watchdog', () => {
       },
       () =>
         providerRun(
-          makeRuntime({ ...rt }),
+          makeRuntime({ ...providerRuntime }),
           'creator',
           'markdown',
           path.join(tmp, 'o.md'),
@@ -379,7 +382,7 @@ describe('claude watchdog', () => {
   it('thinking heartbeats defer semantic idle until the wall clock fires', async () => {
     const created = path.join(tmp, 'created.md');
     writeStructuredPlanFile(created, 'Created');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       claudeKnobs: {
         stallStatus: 124,
@@ -399,7 +402,7 @@ describe('claude watchdog', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           path.join(tmp, 'o.md'),
@@ -419,7 +422,7 @@ describe('claude watchdog', () => {
   it('wall-clock timeout terminates a busy stream', async () => {
     const created = path.join(tmp, 'created.md');
     writeStructuredPlanFile(created, 'Created');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       claudeKnobs: {
         stallStatus: 124,
@@ -439,7 +442,7 @@ describe('claude watchdog', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           path.join(tmp, 'o.md'),
@@ -463,7 +466,7 @@ describe('codex argv and retries', () => {
     const out = path.join(tmp, 'critique.out.json');
     const argvLog = path.join(tmp, 'codex.argv');
     const promptCapture = path.join(tmp, 'codex.prompt');
-    const rt = makeRuntime();
+    const providerRuntime = makeRuntime();
 
     const status = await withEnvAsync(
       {
@@ -474,7 +477,7 @@ describe('codex argv and retries', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'critic',
           'json',
           out,
@@ -516,7 +519,7 @@ describe('codex argv and retries', () => {
     const wrapper = path.join(tmp, 'wrapper.json');
     writeMarkdownWrapper(wrapper, 'Wrapped Plan');
     const out = path.join(tmp, 'plan.md');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       matrix: {
         ...fixtureMatrix(),
         creator: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' },
@@ -529,7 +532,18 @@ describe('codex argv and retries', () => {
         FAKE_CODEX_OUTPUT: wrapper,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => providerRun(rt, 'creator', 'markdown', out, CREATOR_SKILL, '', '', '', 'Create.\n'),
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          out,
+          CREATOR_SKILL,
+          '',
+          '',
+          '',
+          'Create.\n',
+        ),
     );
 
     expect(status).toBe(0);
@@ -575,7 +589,7 @@ describe('codex argv and retries', () => {
     const critique = path.join(tmp, 'critique.json');
     emptyCritique(critique);
     const attempts = path.join(tmp, 'attempts');
-    const rt = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
+    const providerRuntime = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
 
     const status = await withEnvAsync(
       {
@@ -587,7 +601,7 @@ describe('codex argv and retries', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'critic',
           'json',
           path.join(tmp, 'out.json'),
@@ -607,7 +621,7 @@ describe('codex argv and retries', () => {
   it('maps empty codex output to status 4', async () => {
     const empty = path.join(tmp, 'empty.json');
     writeFileSync(empty, '');
-    const rt = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
+    const providerRuntime = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
 
     const status = await withEnvAsync(
       {
@@ -617,7 +631,7 @@ describe('codex argv and retries', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'critic',
           'json',
           path.join(tmp, 'out.json'),
@@ -641,7 +655,7 @@ describe('cursor adapter', () => {
     const out = path.join(tmp, 'out.json');
     const argvLog = path.join(tmp, 'cursor.argv');
     const promptCapture = path.join(tmp, 'cursor.prompt');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       sessionMode: 1,
       matrix: {
         ...fixtureMatrix(),
@@ -657,7 +671,7 @@ describe('cursor adapter', () => {
     };
     const status = await withEnvAsync(env, () =>
       providerRun(
-        rt,
+        providerRuntime,
         'creator',
         'json',
         out,
@@ -692,12 +706,12 @@ describe('cursor adapter', () => {
     expect(prompt).toContain('## Tool constraints');
     expect(prompt).toContain(`Use only these tools when inspecting the codebase: ${TOOLS}.`);
     expect(prompt).toContain('## JSON schema');
-    expect(readFileSync(rt.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
+    expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
     expect(readFileSync(out, 'utf8')).toBe(strippedFile(critique));
 
     const status2 = await withEnvAsync(env, () =>
       providerRun(
-        rt,
+        providerRuntime,
         'creator',
         'json',
         out,
@@ -718,7 +732,7 @@ describe('cursor adapter', () => {
     writeStructuredPlanFile(created, 'Cursor Created');
     const out = path.join(tmp, 'out.md');
     const argvLog = path.join(tmp, 'cursor.argv');
-    const rt = makeRuntime({
+    const providerRuntime = makeRuntime({
       sessionMode: 1,
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       matrix: {
@@ -726,7 +740,7 @@ describe('cursor adapter', () => {
         creator: { runner: 'cursor', model: 'composer-2.5', reasoning: '' },
       },
     });
-    writeFileSync(rt.creatorSessionFile, 'stale-cursor-session');
+    writeFileSync(providerRuntime.creatorSessionFile, 'stale-cursor-session');
 
     const status = await withEnvAsync(
       {
@@ -737,7 +751,7 @@ describe('cursor adapter', () => {
       },
       () =>
         providerRun(
-          rt,
+          providerRuntime,
           'creator',
           'markdown',
           out,
@@ -758,6 +772,281 @@ describe('cursor adapter', () => {
     expect(records[0]).toContain('--resume');
     expect(records[1]).not.toContain('--resume');
     expect(readFileSync(out, 'utf8')).toBe(readFileSync(created, 'utf8'));
-    expect(readFileSync(rt.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
+    expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
+  });
+});
+
+describe('provider stderr capture (P2, AC-4)', () => {
+  // A run of x's that only the fake bins' multi-MB no-newline line could produce;
+  // its absence proves the raw stderr blob never reached the logs.
+  const HUGE_MARKER = 'x'.repeat(64);
+
+  it('drops raw codex stderr and surfaces a metadata-only failure summary', async () => {
+    const PLANT = 'CODEX-STDERR-PLANT-7f3a9c-do-not-leak';
+    const providerRuntime = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_STDERR: PLANT,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(1);
+    const text = capture.text();
+    expect(text).not.toContain(PLANT);
+    expect(text).not.toContain(HUGE_MARKER);
+    expect(text).toContain('critic/codex call failed (status=1, stderr_lines=3): overloaded');
+    expect(text).not.toContain('raw codex stderr');
+  });
+
+  it('drops raw claude stderr (streaming path) and surfaces a metadata-only summary', async () => {
+    const PLANT = 'CLAUDE-STDERR-PLANT-7f3a9c-do-not-leak';
+    const providerRuntime = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_STDERR: PLANT,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          path.join(tmp, 'out.md'),
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(1);
+    const text = capture.text();
+    expect(text).not.toContain(PLANT);
+    expect(text).not.toContain(HUGE_MARKER);
+    expect(text).toContain('creator/claude call failed (status=1, stderr_lines=3): overloaded');
+    expect(text).not.toContain('raw claude stderr');
+  });
+});
+
+describe('provider opt-in diagnostics (P3, AC-3)', () => {
+  const HUGE_MARKER = 'x'.repeat(64);
+
+  it('streams raw stdout and stderr to a per-call artifact, logging only a reference line', async () => {
+    const PLANT = 'DIAG-STDERR-PLANT-7f3a9c-do-not-leak';
+    const diagnosticsDir = path.join(tmp, 'diagnostics');
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      diagnosticsDir,
+    });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_STDERR: PLANT,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(1);
+    const files = readdirSync(diagnosticsDir);
+    expect(files).toHaveLength(1);
+    const artifact = readFileSync(path.join(diagnosticsDir, files[0] ?? ''), 'utf8');
+    // Raw stdout NDJSON and raw stderr (incl. the huge no-newline line) land in the artifact.
+    expect(artifact).toContain('command_execution');
+    expect(artifact).toContain(PLANT);
+    expect(artifact).toContain(HUGE_MARKER);
+
+    const text = capture.text();
+    expect(text).toContain('critic/codex diagnostics → ');
+    expect(text).toContain('critic/codex call failed (status=1, stderr_lines=');
+    // Raw content never reaches normal logs.
+    expect(text).not.toContain(PLANT);
+    expect(text).not.toContain(HUGE_MARKER);
+    expect(text).not.toContain('command_execution');
+  });
+
+  it('produces a distinct artifact per provider call with no overwrite', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const diagnosticsDir = path.join(tmp, 'diagnostics');
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      diagnosticsDir,
+    });
+    const env = {
+      PATH: fakePath(),
+      FAKE_CODEX_OUTPUT: critique,
+      FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+      FAKE_CODEX_STREAM_EVENTS: 'started',
+    };
+
+    await withEnvAsync(env, () =>
+      providerRun(
+        providerRuntime,
+        'critic',
+        'json',
+        path.join(tmp, 'a.json'),
+        CRITIC_SKILL,
+        CRITIC_SCHEMA,
+        '',
+        '',
+        'A\n',
+      ),
+    );
+    await withEnvAsync(env, () =>
+      providerRun(
+        providerRuntime,
+        'critic',
+        'json',
+        path.join(tmp, 'b.json'),
+        CRITIC_SKILL,
+        CRITIC_SCHEMA,
+        '',
+        '',
+        'B\n',
+      ),
+    );
+
+    const files = readdirSync(diagnosticsDir);
+    expect(files).toHaveLength(2);
+    expect(new Set(files).size).toBe(2);
+  });
+
+  it('writes no artifact when diagnostics are off', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const diagnosticsDir = path.join(tmp, 'diagnostics');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_STREAM_EVENTS: 'started',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(existsSync(diagnosticsDir)).toBe(false);
+    expect(capture.text()).not.toContain('diagnostics →');
+  });
+
+  it('disables the sink with one bounded warning on a write failure, leaving the call intact', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const blocker = path.join(tmp, 'blocker');
+    writeFileSync(blocker, 'not a dir');
+    // diagnosticsDir nested under a regular file → mkdir fails (ENOTDIR).
+    const diagnosticsDir = path.join(blocker, 'diagnostics');
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      diagnosticsDir,
+    });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_STREAM_EVENTS: 'started',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(existsSync(diagnosticsDir)).toBe(false);
+    const text = capture.text();
+    expect(text).not.toContain('command_execution');
+    const warnings = text.split('\n').filter((line) => line.includes('diagnostics unavailable:'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('critic/codex diagnostics unavailable:');
+  });
+});
+
+describe('provider stdout redaction through the real pipeline (AC-2)', () => {
+  it('keeps body-bearing stdout NDJSON out of normal logs', async () => {
+    const PLANT = 'STDOUTBODYPLANT7f3a9c';
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const providerRuntime = makeRuntime({ retry: { retryCount: 0, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_STDOUT_BODY: PLANT,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    // Tool input, assistant prose, exec command, and retry reason all carried
+    // the plant on stdout; only metadata reaches the logs.
+    expect(capture.text()).not.toContain(PLANT);
   });
 });

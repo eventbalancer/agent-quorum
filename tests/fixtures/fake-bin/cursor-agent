@@ -30,6 +30,14 @@ prompt="$(cat)"
 if [[ -n "${FAKE_CURSOR_PROMPT:-}" ]]; then
   printf '%s' "$prompt" > "$FAKE_CURSOR_PROMPT"
 fi
+# Raw-stderr injection: a multi-line blob plus one ~2 MB line with no trailing
+# newline, then a non-zero exit. Exercises bounded capture + default-drop.
+if [[ -n "${FAKE_CURSOR_STDERR:-}" ]]; then
+  printf 'raw cursor stderr alpha: %s\n' "$FAKE_CURSOR_STDERR" >&2
+  printf 'raw cursor stderr beta: overloaded request\n' >&2
+  head -c 2000000 /dev/zero | tr '\0' 'x' >&2
+  exit "${FAKE_CURSOR_STDERR_EXIT:-1}"
+fi
 if [[ "$prompt" == *"## JSON schema"* ]]; then
   is_json=1
 fi

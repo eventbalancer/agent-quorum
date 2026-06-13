@@ -1,14 +1,15 @@
-import { isJsonObject, jqAlt, type JsonValue } from '../core/json.js';
-import { colorsEnabled } from '../runtime/log.js';
-
-// Escape codes are applied at render time (never cached at import) so
-// TTY/NO_COLOR state changes after module load still gate the output.
-function paint(code: string, text: string): string {
-  return colorsEnabled() ? `${code}${text}\x1b[0m` : text;
-}
-const yellow = (text: string): string => paint('\x1b[33m', text);
-const red = (text: string): string => paint('\x1b[31m', text);
-const dim = (text: string): string => paint('\x1b[2m', text);
+import { isJsonObject, jqAlt, type JsonObject, type JsonValue } from '../core/json.js';
+import {
+  capTraceBody,
+  classifyReason,
+  describeCommand,
+  describeText,
+  describeToolActivity,
+  dim,
+  red,
+  TRACE_INDENT,
+  traceLine,
+} from './trace.js';
 
 function jqToString(value: JsonValue | undefined): string {
   if (value === undefined || value === null) {
@@ -20,15 +21,36 @@ function jqToString(value: JsonValue | undefined): string {
   return JSON.stringify(value);
 }
 
-function firstLine(value: JsonValue | undefined): string {
-  const text = jqToString(value);
-  return (text.split('\n')[0] ?? '').slice(0, 120);
+function parseEvent(line: string): JsonObject | undefined {
+  let event: JsonValue;
+  try {
+    event = JSON.parse(line) as JsonValue;
+  } catch {
+    return undefined;
+  }
+  return isJsonObject(event) ? event : undefined;
 }
 
-function shortCommand(command: JsonValue | undefined): string {
-  const text = jqToString(command);
-  const captured = /-lc "(.*)"/.exec(text);
-  return firstLine(captured ? (captured[1] ?? '') : text);
+function firstPresent(event: JsonObject, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = event[key];
+    if (value !== undefined && value !== null && value !== false) {
+      return jqToString(value);
+    }
+  }
+  return undefined;
+}
+
+function subObject(parent: JsonObject | undefined, key: string): JsonObject | undefined {
+  if (parent === undefined) {
+    return undefined;
+  }
+  const value = parent[key];
+  return isJsonObject(value) ? value : undefined;
+}
+
+function callArgs(call: JsonObject): JsonObject {
+  return isJsonObject(call.args) ? call.args : {};
 }
 
 function contentText(value: JsonValue | undefined): string {
@@ -59,110 +81,137 @@ function contentText(value: JsonValue | undefined): string {
   return '';
 }
 
-// Port of the claude/codex stream_json_event jq program: one rendered line per
-// matching content item.
-export function streamJsonEvent(line: string): string[] {
-  let event: JsonValue;
-  try {
-    event = JSON.parse(line) as JsonValue;
-  } catch {
-    return [];
+type EventRenderer = (event: JsonObject) => string[] | undefined;
+
+function pushText(out: string[], value: JsonValue | undefined): void {
+  const marker = describeText(contentText(value));
+  if (marker !== undefined) {
+    out.push(traceLine('text', marker));
   }
-  if (!isJsonObject(event)) {
-    return [];
-  }
+}
+
+function assistantContent(event: JsonObject): readonly JsonValue[] {
+  const message = isJsonObject(event.message) ? event.message : {};
+  return Array.isArray(message.content) ? message.content : [];
+}
+
+function renderAssistantContent(
+  content: readonly JsonValue[],
+  shouldRenderTools: boolean,
+): string[] {
   const out: string[] = [];
-
-  if (event.type === 'assistant') {
-    const message = isJsonObject(event.message) ? event.message : {};
-    const content = Array.isArray(message.content) ? message.content : [];
-    for (const item of content) {
-      if (!isJsonObject(item)) {
-        continue;
-      }
-      if (item.type === 'tool_use') {
-        out.push(`    ${yellow(jqToString(item.name))} ${jqToString(item.input).slice(0, 120)}`);
-      } else if (item.type === 'text') {
-        out.push(`    ${dim(firstLine(item.text))}`);
-      }
+  for (const item of content) {
+    if (!isJsonObject(item)) {
+      continue;
     }
-    return out;
-  }
-
-  const item = isJsonObject(event.item) ? event.item : undefined;
-  if (event.type === 'item.started' && item?.type === 'command_execution') {
-    out.push(`    ${yellow('exec')} ${shortCommand(jqAlt(item.command, ''))}`);
-    return out;
-  }
-  if (
-    event.type === 'item.completed' &&
-    item?.type === 'command_execution' &&
-    jqAlt(item.exit_code, 0) !== 0
-  ) {
-    out.push(
-      `    ${red(`exec failed(${jqToString(jqAlt(item.exit_code, 0))})`)} ${shortCommand(jqAlt(item.command, ''))}`,
-    );
-    return out;
-  }
-  const itemContent = item?.content;
-  if (
-    (event.type === 'item.completed' || event.type === 'item.started') &&
-    itemContent !== undefined &&
-    itemContent !== null
-  ) {
-    const text = firstLine(contentText(itemContent));
-    if (text !== '') {
-      out.push(`    ${dim(text)}`);
+    if (shouldRenderTools && item.type === 'tool_use') {
+      out.push(traceLine('tool', describeToolActivity(jqToString(item.name), item.input)));
+    } else if (item.type === 'text') {
+      pushText(out, item.text);
     }
-    return out;
-  }
-  if (event.type === 'agent_message' && event.message !== undefined && event.message !== null) {
-    const text = firstLine(event.message);
-    if (text !== '') {
-      out.push(`    ${dim(text)}`);
-    }
-    return out;
-  }
-
-  const subtype = jqToString(jqAlt(event.subtype, ''));
-  const isRetry =
-    event.type === 'api_retry' ||
-    (event.type === 'system' && subtype.includes('retry')) ||
-    (event.retry !== undefined && event.retry !== null) ||
-    (event.attempt !== undefined && event.attempt !== null);
-  if (isRetry) {
-    const attempt = jqToString(jqAlt(jqAlt(event.attempt, event.retry ?? null), '?'));
-    const max = jqToString(
-      jqAlt(
-        jqAlt(jqAlt(event.max_retries, event.max_attempts ?? null), event.maxRetries ?? null),
-        '?',
-      ),
-    );
-    const delay = jqToString(
-      jqAlt(jqAlt(jqAlt(event.delay_ms, event.delayMs ?? null), event.retry_after_ms ?? null), '?'),
-    );
-    const reason = jqToString(
-      jqAlt(jqAlt(jqAlt(event.error, event.message ?? null), event.reason ?? null), 'unknown'),
-    ).slice(0, 80);
-    out.push(`    claude api retry ${attempt}/${max} after ${delay}ms: ${reason}`);
   }
   return out;
 }
 
-function streamPlainExec(text: string): string {
-  let cmd = text;
-  const lc = cmd.indexOf('-lc "');
-  if (lc !== -1) {
-    cmd = cmd.slice(lc + '-lc "'.length);
+function dispatch(line: string, renderers: readonly EventRenderer[]): string[] {
+  const event = parseEvent(line);
+  if (event === undefined) {
+    return [];
   }
-  const tail = cmd.indexOf('" in ');
-  if (tail !== -1) {
-    cmd = cmd.slice(0, tail);
+  for (const render of renderers) {
+    const rendered = render(event);
+    if (rendered !== undefined) {
+      return rendered;
+    }
   }
-  return `    ${yellow('exec')} ${cmd.slice(0, 120)}`;
+  return [];
 }
 
-// Stateful line filter shared by the codex and claude stream renderers.
+function renderAssistantMessage(event: JsonObject): string[] | undefined {
+  if (event.type !== 'assistant') {
+    return undefined;
+  }
+  return renderAssistantContent(assistantContent(event), true);
+}
+
+function renderCodexItem(event: JsonObject): string[] | undefined {
+  const item = isJsonObject(event.item) ? event.item : undefined;
+  if (item === undefined) {
+    return undefined;
+  }
+
+  const isCommandExec = item.type === 'command_execution';
+  const isExecStart = event.type === 'item.started' && isCommandExec;
+  const isExecFailure =
+    event.type === 'item.completed' && isCommandExec && jqAlt(item.exit_code, 0) !== 0;
+  const isItemLifecycle = event.type === 'item.started' || event.type === 'item.completed';
+  const hasContent = item.content !== undefined && item.content !== null;
+
+  if (isExecStart) {
+    return [traceLine('exec', `exec ${describeCommand(jqAlt(item.command, ''))}`)];
+  }
+  if (isExecFailure) {
+    const code = jqToString(jqAlt(item.exit_code, 0));
+    return [
+      traceLine('exec-failed', `exec failed(${code}) ${describeCommand(jqAlt(item.command, ''))}`),
+    ];
+  }
+  if (isItemLifecycle && hasContent) {
+    const out: string[] = [];
+    pushText(out, item.content);
+    return out;
+  }
+  return undefined;
+}
+
+function renderAgentMessage(event: JsonObject): string[] | undefined {
+  const isAgentMessage =
+    event.type === 'agent_message' && event.message !== undefined && event.message !== null;
+  if (!isAgentMessage) {
+    return undefined;
+  }
+  const out: string[] = [];
+  pushText(out, event.message);
+  return out;
+}
+
+function isRetryEvent(event: JsonObject): boolean {
+  const subtype = jqToString(jqAlt(event.subtype, ''));
+  return (
+    event.type === 'api_retry' ||
+    (event.type === 'system' && subtype.includes('retry')) ||
+    (event.retry !== undefined && event.retry !== null) ||
+    (event.attempt !== undefined && event.attempt !== null)
+  );
+}
+
+function renderRetry(event: JsonObject): string[] | undefined {
+  if (!isRetryEvent(event)) {
+    return undefined;
+  }
+  const attempt = firstPresent(event, ['attempt', 'retry']) ?? '?';
+  const max = firstPresent(event, ['max_retries', 'max_attempts', 'maxRetries']) ?? '?';
+  const delay = firstPresent(event, ['delay_ms', 'delayMs', 'retry_after_ms']) ?? '?';
+  const token = classifyReason(firstPresent(event, ['error', 'message', 'reason']));
+  const suffix = token !== undefined ? `: ${token}` : '';
+  return [traceLine('retry', `api retry ${attempt}/${max} after ${delay}ms${suffix}`)];
+}
+
+const CODEX_RENDERERS: readonly EventRenderer[] = [
+  renderAssistantMessage,
+  renderCodexItem,
+  renderAgentMessage,
+  renderRetry,
+];
+
+export function streamJsonEvent(line: string): string[] {
+  return dispatch(line, CODEX_RENDERERS);
+}
+
+function streamPlainExec(text: string): string {
+  return traceLine('exec', `exec ${describeCommand(text)}`);
+}
+
 export class StreamLogFilter {
   private isExec = false;
   private wantsTokens = false;
@@ -181,7 +230,7 @@ export class StreamLogFilter {
     }
     if (this.wantsTokens) {
       this.wantsTokens = false;
-      return [`    ${dim(`tokens: ${line}`)}`];
+      return [`${TRACE_INDENT}${dim(`tokens: ${line}`)}`];
     }
     if (line === 'exec') {
       this.isExec = true;
@@ -194,7 +243,7 @@ export class StreamLogFilter {
     if (line.includes('"thinking_tokens"')) {
       this.thinkingSeen += 1;
       if (this.thinkingEvery > 0 && this.thinkingSeen % this.thinkingEvery === 1) {
-        return [`    thinking... (${this.thinkingSeen} heartbeats)`];
+        return [`${TRACE_INDENT}thinking... (${this.thinkingSeen} heartbeats)`];
       }
       return [];
     }
@@ -205,68 +254,69 @@ export class StreamLogFilter {
   }
 }
 
-// Port of the cursor_stream_json_event jq program.
+function renderCursorAssistant(event: JsonObject): string[] | undefined {
+  if (event.type !== 'assistant') {
+    return undefined;
+  }
+  return renderAssistantContent(assistantContent(event), false);
+}
+
+function describeCursorFunction(fn: JsonObject): string {
+  const name = jqToString(jqAlt(fn.name, 'tool'));
+  const argsText = jqToString(jqAlt(fn.arguments, ''));
+  const trimmed = argsText.trim();
+  const argc = trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+  return `${name} (${argc} args, ${argsText.length} chars)`;
+}
+
+function renderCursorToolStarted(event: JsonObject): string[] | undefined {
+  const isToolCallStart = event.type === 'tool_call' && event.subtype === 'started';
+  if (!isToolCallStart) {
+    return undefined;
+  }
+  const toolCall = subObject(event, 'tool_call');
+  const read = subObject(toolCall, 'readToolCall');
+  if (read !== undefined) {
+    return [traceLine('tool', describeToolActivity('Read', callArgs(read)))];
+  }
+  const write = subObject(toolCall, 'writeToolCall');
+  if (write !== undefined) {
+    return [traceLine('tool', describeToolActivity('Write', callArgs(write)))];
+  }
+  const functionCall = subObject(toolCall, 'function');
+  if (functionCall !== undefined) {
+    return [traceLine('tool', describeCursorFunction(functionCall))];
+  }
+  return [traceLine('tool', 'tool_call')];
+}
+
+function renderCursorToolCompleted(event: JsonObject): string[] | undefined {
+  const isToolCallCompletion = event.type === 'tool_call' && event.subtype === 'completed';
+  if (!isToolCallCompletion) {
+    return undefined;
+  }
+  const write = subObject(subObject(event, 'tool_call'), 'writeToolCall');
+  if (write === undefined) {
+    return [];
+  }
+  const success = subObject(write, 'result')?.success;
+  const writeSucceeded = success !== undefined && success !== null && success !== false;
+  if (!writeSucceeded) {
+    return [];
+  }
+  const target = jqToString(jqAlt(callArgs(write).path, ''));
+  const body = target !== '' ? `write completed ${target}` : 'write completed';
+  return [`${TRACE_INDENT}${red(capTraceBody(body))}`];
+}
+
+const CURSOR_RENDERERS: readonly EventRenderer[] = [
+  renderCursorAssistant,
+  renderCursorToolStarted,
+  renderCursorToolCompleted,
+];
+
 export function cursorStreamJsonEvent(line: string): string[] {
-  let event: JsonValue;
-  try {
-    event = JSON.parse(line) as JsonValue;
-  } catch {
-    return [];
-  }
-  if (!isJsonObject(event)) {
-    return [];
-  }
-  const out: string[] = [];
-
-  if (event.type === 'assistant') {
-    const message = isJsonObject(event.message) ? event.message : {};
-    const content = Array.isArray(message.content) ? message.content : [];
-    for (const item of content) {
-      if (!isJsonObject(item) || item.type !== 'text') {
-        continue;
-      }
-      const text = firstLine(item.text);
-      if (text !== '') {
-        out.push(`    ${dim(text)}`);
-      }
-    }
-    return out;
-  }
-
-  const toolCall = isJsonObject(event.tool_call) ? event.tool_call : undefined;
-  if (event.type === 'tool_call' && event.subtype === 'started') {
-    const read =
-      toolCall && isJsonObject(toolCall.readToolCall) ? toolCall.readToolCall : undefined;
-    const write =
-      toolCall && isJsonObject(toolCall.writeToolCall) ? toolCall.writeToolCall : undefined;
-    const fn = toolCall && isJsonObject(toolCall.function) ? toolCall.function : undefined;
-    if (read) {
-      const args = isJsonObject(read.args) ? read.args : {};
-      out.push(`    ${yellow('Read')} ${firstLine(jqAlt(args.path, ''))}`);
-    } else if (write) {
-      const args = isJsonObject(write.args) ? write.args : {};
-      out.push(`    ${yellow('Write')} ${firstLine(jqAlt(args.path, ''))}`);
-    } else if (fn) {
-      out.push(
-        `    ${yellow(jqToString(jqAlt(fn.name, 'tool')))} ${firstLine(jqAlt(fn.arguments, ''))}`,
-      );
-    } else {
-      out.push(`    ${yellow('tool_call')}`);
-    }
-    return out;
-  }
-  if (event.type === 'tool_call' && event.subtype === 'completed') {
-    const write =
-      toolCall && isJsonObject(toolCall.writeToolCall) ? toolCall.writeToolCall : undefined;
-    const result = write && isJsonObject(write.result) ? write.result : undefined;
-    const success = result?.success;
-    if (success !== undefined && success !== null && success !== false) {
-      const args = write && isJsonObject(write.args) ? write.args : {};
-      out.push(`    ${red('write completed')} ${firstLine(jqAlt(args.path, ''))}`);
-    }
-    return out;
-  }
-  return out;
+  return dispatch(line, CURSOR_RENDERERS);
 }
 
 export class CursorStreamLogFilter {

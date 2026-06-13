@@ -534,6 +534,9 @@ export async function runPlanLoopCli(
         creatorSessionFile,
         markdownSchemaPath: skills.markdownSchema,
         cursorBin,
+        ...(process.env.PLAN_LOOP_PROVIDER_DIAGNOSTICS === '1'
+          ? { diagnosticsDir: path.join(work, 'diagnostics') }
+          : {}),
       },
       passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
       maxPlanLines: Number(process.env.PLAN_LOOP_MAX_PLAN_LINES ?? 900),
