@@ -225,8 +225,8 @@ pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 Useful options:
 
 ```sh
-pnpm run plan:self -- --effort high --iters 7 --prompt .agents/prompts/<slug>.md
-PLAN_LOOP_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 7 --prompt .agents/prompts/<slug>.md
+pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
+PLAN_LOOP_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
 ```
 
 `plan:self` runs `src/cli/main.ts` via `tsx` — no build step — and writes run

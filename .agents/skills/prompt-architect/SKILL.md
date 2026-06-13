@@ -299,10 +299,10 @@ Resolve paths for conversation output:
 
 Before commands, choose iteration caps:
 
-- narrow, well-bounded tasks: Low 2, High 4, Max 6;
-- standard repo-local design/debug/review tasks: Low 3-4, High 6-7, Max 9-10;
+- narrow, well-bounded tasks: Low 2, High 3, Max 5;
+- standard repo-local design/debug/review tasks: Low 3, High 5, Max 8;
 - public API, schema, provider/runtime, security, packaging, or high-risk
-  architecture tasks: Low 5, High 10, Max 15.
+  architecture tasks: Low 5, High 8, Max 12.
 
 Command template:
 
@@ -339,14 +339,14 @@ Run profiles (quality -> speed):
 
 | Profile | Speed | Quality | Iters | Use when |
 |---|---:|---:|---:|---|
-| Max | Slowest | Highest | 10 | Final planning run when completeness matters more than speed. |
-| High | Medium | Highest | 7 | High-quality everyday planning run. |
-| Low | Fastest practical | Medium | 4 | Quick idea check. |
+| Max | Slowest | Highest | 8 | Final planning run when completeness matters more than speed. |
+| High | Medium | Highest | 5 | High-quality everyday planning run. |
+| Low | Fastest practical | Medium | 3 | Quick idea check. |
 
 Max:
 
 ```sh
-cd /Users/<you>/agent-quorum && PLAN_LOOP_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 10 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
+cd /Users/<you>/agent-quorum && PLAN_LOOP_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
 ```
 
 Launch `agent-quorum` now?

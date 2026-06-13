@@ -1,7 +1,7 @@
 {
   "version": 1,
   "settings": {
-    "iters": 7,
+    "iters": 5,
     "effort": "high",
     "fix": true,
     "translate": false,
