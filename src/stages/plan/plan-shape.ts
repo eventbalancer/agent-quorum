@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
 
 export const PLAN_DOCUMENT_REQUIRED_SECTIONS = [
   'At a Glance',

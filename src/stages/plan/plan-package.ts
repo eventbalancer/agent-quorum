@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { countNewlines } from '../runtime/files.js';
+import { countNewlines } from '../../runtime/files.js';
 import { planHasHeading, planHasImpactGraphMermaid } from './plan-shape.js';
 import {
   extractShellBlockText,
@@ -17,13 +17,9 @@ import {
   validatePackageReferences,
   type FindingsCounts,
 } from './validate-plan.js';
+import type { SplitMode } from '../../core/split-policy.js';
 
-export type SplitMode = 'always' | 'never' | 'auto';
-
-export interface SplitPolicy {
-  readonly mode: SplitMode;
-  readonly minPhases: number;
-}
+export type { SplitMode } from '../../core/split-policy.js';
 
 // Default structural-complexity threshold: a plan with this many Work Plan
 // phases splits under `auto` even when it stays within the size signal.
@@ -552,14 +548,14 @@ export function evaluateSplitDecision(
     case 'always': {
       return {
         split: true,
-        rationale: `PLAN_LOOP_SPLIT=always: package emitted regardless of size (${String(signals.planLines)} lines, ${String(signals.phaseCount)} phases)`,
+        rationale: `AGENT_QUORUM_SPLIT=always: package emitted regardless of size (${String(signals.planLines)} lines, ${String(signals.phaseCount)} phases)`,
         signals,
       };
     }
     case 'never': {
       const rationale = overSize
-        ? `PLAN_LOOP_SPLIT=never: ${String(signals.planLines)} lines exceeds the ${String(knobs.maxPlanLines)}-line size signal but single-document output is forced by override`
-        : `PLAN_LOOP_SPLIT=never: single-document output forced by override (${String(signals.planLines)} lines)`;
+        ? `AGENT_QUORUM_SPLIT=never: ${String(signals.planLines)} lines exceeds the ${String(knobs.maxPlanLines)}-line size signal but single-document output is forced by override`
+        : `AGENT_QUORUM_SPLIT=never: single-document output forced by override (${String(signals.planLines)} lines)`;
       return { split: false, rationale, signals };
     }
     case 'auto': {

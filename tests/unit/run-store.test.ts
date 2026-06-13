@@ -54,7 +54,7 @@ function record(overrides: Partial<RunRecord> = {}): RunRecord {
 }
 
 beforeEach(() => {
-  stateDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-runstore.'));
+  stateDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-runstore.'));
   randomQueue.length = 0;
 });
 

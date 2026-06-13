@@ -1,11 +1,11 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
+import { fileLineCount, nonEmptyFile } from '../../runtime/files.js';
 import path from 'node:path';
-import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
-import { providerRun } from '../providers/provider.js';
-import type { ProviderRuntime } from '../providers/runtime.js';
-import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
+import { providerRun } from '../../providers/provider.js';
+import type { ProviderRuntime } from '../../providers/runtime.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
   markOperatorInterventionsMigrated,
   operatorInterventionsContext,
@@ -15,9 +15,9 @@ import {
   requirePlanDocumentShape,
   validatePlanDocumentShape,
 } from './plan-shape.js';
-import { validateSchema } from './schema.js';
+import { validateSchema } from '../../core/schema.js';
 import { validateFinalPlan } from './validate-plan.js';
-import { readStripped, type RunContext } from './run-context.js';
+import { readStripped, type RunContext } from '../../core/run-context.js';
 
 function fixPassAcceptPlanCandidate(candidate: string, label: string): boolean {
   normalizePlanDocument(candidate);

@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileLineCount } from '../runtime/files.js';
-import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
-import type { JsonValue } from './json.js';
+import { fileLineCount } from '../../runtime/files.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
+import type { JsonValue } from '../../core/json.js';
 
 const EXCLUDED_DIRS = new Set([
   'node_modules',

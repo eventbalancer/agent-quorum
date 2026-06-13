@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { HaltError } from '../runtime/halt.js';
-import { colorsEnabled } from '../runtime/log.js';
+import { AGENT_QUORUM_PREFIX, colorsEnabled } from '../runtime/log.js';
 import { packageRoot } from '../runtime/env.js';
 import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
@@ -37,10 +37,10 @@ function readMetaValue(file: string, key: string): string | undefined {
   return undefined;
 }
 
-// Command-shape root check: the port's runner sets process.title =
-// 'plan-loop', so ps shows it as the first token (a payload-matching process
-// whose arguments merely mention plan-loop never passes).
-function commandIsPlanLoopRoot(pid: number): boolean {
+// Command-shape root check: the runner sets process.title = 'agent-quorum', so
+// ps shows it as the first token (a payload-matching process whose arguments
+// merely mention agent-quorum never passes).
+function commandIsAgentQuorumRoot(pid: number): boolean {
   const cmd = commandOf(pid);
   if (cmd === '') {
     return false;
@@ -48,22 +48,22 @@ function commandIsPlanLoopRoot(pid: number): boolean {
   const tokens = cmd.split(/\s+/).filter((token) => token !== '');
   const first = baseToken(tokens[0] ?? '');
   const second = baseToken(tokens[1] ?? '');
-  if (first === 'plan-loop' || first === 'plan-loop.sh') {
+  if (first === 'agent-quorum') {
     return true;
   }
   if (['bash', 'sh', 'zsh', 'node'].includes(first)) {
-    if (second === 'plan-loop.sh' || second === 'plan-loop') {
+    if (second === 'agent-quorum') {
       return true;
     }
   }
   return false;
 }
 
-function findRootPlanLoop(pid: number): number | undefined {
+function findRootAgentQuorum(pid: number): number | undefined {
   let cur: number | undefined = pid;
   let last: number | undefined;
   while (cur !== undefined && cur !== 0 && cur !== 1) {
-    if (commandIsPlanLoopRoot(cur)) {
+    if (commandIsAgentQuorumRoot(cur)) {
       last = cur;
     }
     cur = ppidOf(cur);
@@ -111,17 +111,17 @@ function processEnvVar(root: number, key: string): string | undefined {
 
 function stateDirCandidates(root: number): string[] {
   const dirs: string[] = [];
-  if (process.env.PLAN_LOOP_STATE_DIR) {
-    dirs.push(process.env.PLAN_LOOP_STATE_DIR);
+  if (process.env.AGENT_QUORUM_STATE_DIR) {
+    dirs.push(process.env.AGENT_QUORUM_STATE_DIR);
   }
-  const envState = processEnvVar(root, 'PLAN_LOOP_STATE_DIR');
+  const envState = processEnvVar(root, 'AGENT_QUORUM_STATE_DIR');
   if (envState !== undefined && envState !== '') {
     dirs.push(envState);
   }
-  if (process.env.PLAN_LOOP_PLANS_DIR) {
-    dirs.push(path.join(process.env.PLAN_LOOP_PLANS_DIR, '.runs'));
+  if (process.env.AGENT_QUORUM_PLANS_DIR) {
+    dirs.push(path.join(process.env.AGENT_QUORUM_PLANS_DIR, '.runs'));
   }
-  const envPlans = processEnvVar(root, 'PLAN_LOOP_PLANS_DIR');
+  const envPlans = processEnvVar(root, 'AGENT_QUORUM_PLANS_DIR');
   if (envPlans !== undefined && envPlans !== '') {
     dirs.push(path.join(envPlans, '.runs'));
   }
@@ -214,11 +214,11 @@ function resolveWorkDir(root: number, input: string): string | undefined {
   if (fromLog !== undefined) {
     return canonicalDir(fromLog);
   }
-  const fromEnv = processEnvVar(root, 'PLAN_LOOP_WORK_DIR');
+  const fromEnv = processEnvVar(root, 'AGENT_QUORUM_WORK_DIR');
   if (fromEnv !== undefined && fromEnv !== '') {
     return canonicalDir(fromEnv);
   }
-  const envPlans = processEnvVar(root, 'PLAN_LOOP_PLANS_DIR');
+  const envPlans = processEnvVar(root, 'AGENT_QUORUM_PLANS_DIR');
   if (envPlans !== undefined && envPlans !== '') {
     const work = defaultWorkDirFromInput(input, envPlans);
     if (work !== undefined) {
@@ -264,7 +264,7 @@ function strippedLogLines(logPath: string): string[] {
   return readFileSync(logPath, 'utf8')
     .split('\n')
     .map((line) => line.replace(ansiPattern, ''))
-    .filter((line) => line.startsWith('[plan-loop]'));
+    .filter((line) => line.startsWith(AGENT_QUORUM_PREFIX));
 }
 
 function phaseActiveRole(logPath: string): string {
@@ -365,7 +365,7 @@ function pad(value: string, width: number): string {
 // health metric; run.log feeds only the last-event line.
 function printIterTable(work: string, pal: Palette, write: (s: string) => void): void {
   const criticSchema = path.join(packageRoot(), 'skills', 'plan-critic', 'critique.schema.json');
-  const maxPlanLines = Number(process.env.PLAN_LOOP_MAX_PLAN_LINES ?? 900);
+  const maxPlanLines = Number(process.env.AGENT_QUORUM_MAX_PLAN_LINES ?? 900);
   const iters: number[] = [];
   for (const name of readdirSync(work)) {
     const match = /^critique\.v([0-9]+)\.json$/.exec(name);
@@ -552,7 +552,7 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
 
   const logLines = strippedLogLines(logPath);
   const lastEvent = logLines[logLines.length - 1] ?? '';
-  write(`\n  last event: ${pal.DIM}${lastEvent.replace(/^\[plan-loop\] /, '')}${pal.R}\n`);
+  write(`\n  last event: ${pal.DIM}${lastEvent.replace(/^\[agent-quorum\] /, '')}${pal.R}\n`);
 
   try {
     const mtime = Math.floor(statSync(logPath).mtimeMs / 1000);
@@ -575,7 +575,7 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
   }
 
   write(`\n  follow: tail -F ${logPath}\n`);
-  write(`  intervene: plan-loop intervene --work ${work} --target all "message"\n`);
+  write(`  intervene: agent-quorum intervene --work ${work} --target all "message"\n`);
   const pgid = psField(root, 'pgid');
   if (pgid !== '') {
     write(`  stop:   kill -TERM -${pgid}${pal.DIM}   (whole process group)${pal.R}\n`);
@@ -596,7 +596,7 @@ export function runStatusCli(
   if (args.length === 0) {
     const candidates = listCandidates();
     if (candidates.length === 0) {
-      process.stderr.write('no plan-loop runs currently active\n');
+      process.stderr.write('no agent-quorum runs currently active\n');
       return 0;
     }
     out(renderListing(candidates, { color: colorsEnabled(process.stdout) }));
@@ -614,10 +614,10 @@ export function runStatusCli(
     throw new HaltError('pid not found', 2, true);
   }
 
-  const root = findRootPlanLoop(pid);
+  const root = findRootAgentQuorum(pid);
   if (root === undefined) {
-    process.stderr.write(`PID ${pid} is not part of a plan-loop tree\n`);
-    throw new HaltError('not a plan-loop pid', 3, true);
+    process.stderr.write(`PID ${pid} is not part of an agent-quorum tree\n`);
+    throw new HaltError('not an agent-quorum pid', 3, true);
   }
 
   printStatus(root, pal, out);
@@ -683,7 +683,7 @@ export async function runStatusCliInteractive(
   }
   const candidates = listCandidates();
   if (candidates.length === 0) {
-    process.stderr.write('no plan-loop runs currently active\n');
+    process.stderr.write('no agent-quorum runs currently active\n');
     return 0;
   }
   const picked = await pickInteractive(candidates, {

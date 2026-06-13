@@ -9,7 +9,7 @@ Transform a brief or vague request into a problem-describing prompt for a
 downstream coding agent. The prompt hands the agent what is known about the
 problem and lets it choose the solution shape. For this repository, the primary
 downstream runner is the local `agent-quorum` self-planning loop, driven through
-the `plan:self` package script (the `plan-loop` bin, run from source).
+the `plan:self` package script (the `agent-quorum` bin, run from source).
 
 This is the only command in the chain that may start `agent-quorum`, and it does
 so only after explicit operator confirmation.
@@ -120,7 +120,7 @@ compact context only when it helps the matched pattern:
 2. `CLAUDE.md`: operating rules, especially public API and self-planning.
 3. `docs/architecture.md`, `docs/api.md`, `docs/cli.md`,
    `docs/configuration.md`: only the relevant sections.
-4. `plan-loop.json`: default runner/model/role matrix if orchestration behavior
+4. `agent-quorum.json`: default runner/model/role matrix if orchestration behavior
    is in scope.
 5. `skills/**/SKILL.md` and `skills/**/*.schema.json`: when role I/O or prompt
    contracts are in scope.
@@ -253,7 +253,7 @@ Conditional defaults:
 - **Plan fidelity** in plan mode: read the plan in full before work; surface
   divergences from live code instead of improvising replacements.
 - **Public contract care** when touching `src/index.ts`, `package.json`
-  `exports`, CLI flags, config keys, `plan-loop.json`, or `skills/**/*.schema.json`.
+  `exports`, CLI flags, config keys, `agent-quorum.json`, or `skills/**/*.schema.json`.
 
 Constraint budget: at most 6 bullets total.
 
@@ -307,7 +307,7 @@ Before commands, choose iteration caps:
 Command template:
 
 ```sh
-cd <repo-absolute-path> && PLAN_LOOP_WORK_DIR=<workdir-absolute-path> pnpm run plan:self -- --effort <effort> --iters <n> --prompt <prompt-absolute-path>
+cd <repo-absolute-path> && AGENT_QUORUM_WORK_DIR=<workdir-absolute-path> pnpm run plan:self -- --effort <effort> --iters <n> --prompt <prompt-absolute-path>
 ```
 
 Keep commands identical except `--effort`, `--iters`, and workdir suffix.
@@ -346,7 +346,7 @@ Run profiles (quality -> speed):
 Max:
 
 ```sh
-cd /Users/<you>/agent-quorum && PLAN_LOOP_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
+cd /Users/<you>/agent-quorum && AGENT_QUORUM_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
 ```
 
 Launch `agent-quorum` now?

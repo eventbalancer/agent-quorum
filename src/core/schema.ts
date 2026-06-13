@@ -11,16 +11,16 @@ let ajv: InstanceType<typeof Ajv2019> | undefined;
 const compiledSchemas = new Map<string, ValidateFunction>();
 let ajvBinWarned = false;
 
-// PLAN_LOOP_AJV_BIN selected the validator binary in the reference; schema
+// AGENT_QUORUM_AJV_BIN selected the validator binary in the reference; schema
 // validation now runs in-process, so a set value is obsolete — warned once and
 // ignored, never an error (Finding F8).
 function warnObsoleteAjvBin(): void {
   if (ajvBinWarned) {
     return;
   }
-  if (process.env.PLAN_LOOP_AJV_BIN) {
+  if (process.env.AGENT_QUORUM_AJV_BIN) {
     log(
-      'WARNING: PLAN_LOOP_AJV_BIN is ignored — schema validation runs in-process via the ajv npm package',
+      'WARNING: AGENT_QUORUM_AJV_BIN is ignored — schema validation runs in-process via the ajv npm package',
     );
     ajvBinWarned = true;
   }

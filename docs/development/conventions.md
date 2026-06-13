@@ -16,7 +16,7 @@ If a task exposes a real gap in conventions, scripts, or docs, report what happe
 ## Language
 
 - Code, comments, commits, configuration, tests, and docs use English.
-- Operator-facing strings that ship in a non-English locale (the Telegram clarification copy, the companion plan) are selected by the `locale` setting, not hardcoded per language inside business logic. Keep the per-locale copy in one place (see `clarifyCopy` in `src/core/clarify.ts`) and the default English.
+- Operator-facing strings that ship in a non-English locale (the Telegram clarification copy, the companion plan) are selected by the `locale` setting, not hardcoded per language inside business logic. Keep the per-locale copy in one place (see `clarifyCopy` in `src/stages/plan/clarify.ts`) and the default English.
 
 ## Source Comments
 
@@ -210,7 +210,7 @@ Use PascalCase and name them `<Function>Params` / `<Function>Result` (or `<Name>
 Definition keyword — match the linter (`consistent-type-definitions`):
 
 - Use `interface` for object shapes (parameter bags, return shapes, config records, role tables).
-- Use `type` only for what an interface cannot express: unions, intersections, mapped/conditional types, tuples, and function-type aliases. The discriminated `WaitOutcome` union in `src/core/clarify.ts` is the model.
+- Use `type` only for what an interface cannot express: unions, intersections, mapped/conditional types, tuples, and function-type aliases. The discriminated `WaitOutcome` union in `src/stages/plan/clarify.ts` is the model.
 
 ```ts
 interface ResolveTranslatePassParams {
@@ -286,11 +286,11 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 - Log through `src/runtime/log.ts` (`log` / `err`); do not call `console.*` directly in `core/` or `providers/`.
 - Logs carry run metadata — role, provider, model, status, line counts, latency — not plan bodies, prompts, or secrets.
-- The provider trace is metadata-only on both streams: tool-argument values, assistant prose, raw command bodies, and free-text retry/stderr reasons render as a kind, size, target path, command descriptor, or classified token — never the body. Raw stdout/stderr is reachable only behind the opt-in `PLAN_LOOP_PROVIDER_DIAGNOSTICS` escape hatch (see [`docs/configuration.md`](../configuration.md)).
+- The provider trace is metadata-only on both streams: tool-argument values, assistant prose, raw command bodies, and free-text retry/stderr reasons render as a kind, size, target path, command descriptor, or classified token — never the body. Raw stdout/stderr is reachable only behind the opt-in `AGENT_QUORUM_PROVIDER_DIAGNOSTICS` escape hatch (see [`docs/configuration.md`](../configuration.md)).
 
 ## Security and Secrets
 
-- Never commit `.env` files, tokens, or keys. Telegram and provider credentials (`PLAN_LOOP_TELEGRAM_BOT_TOKEN`, `PLAN_LOOP_TELEGRAM_CHAT_ID`, provider auth) come from the environment.
+- Never commit `.env` files, tokens, or keys. Telegram and provider credentials (`AGENT_QUORUM_TELEGRAM_BOT_TOKEN`, `AGENT_QUORUM_TELEGRAM_CHAT_ID`, provider auth) come from the environment.
 - Keep any `.env.example` current when local config keys change.
 - Do not paste real secrets into docs, issues, commits, tests, logs, or prompts.
 
@@ -298,7 +298,7 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 Committed code and docs must work for any developer machine and clone location.
 
-- Resolve user-local artifacts under `$HOME/.agent-quorum` — functional output in `runs/`, the durable run ledger in `state/` (overridable via `PLAN_LOOP_HOME`, or the legacy `PLAN_LOOP_PLANS_DIR` / `PLAN_LOOP_STATE_DIR` / `PLAN_LOOP_WORK_DIR`); resolve packaged assets relative to `packageRoot()`.
+- Resolve user-local artifacts under `$HOME/.agent-quorum` — functional output in `runs/`, the durable run ledger in `state/` (overridable via `AGENT_QUORUM_HOME`, or the legacy `AGENT_QUORUM_PLANS_DIR` / `AGENT_QUORUM_STATE_DIR` / `AGENT_QUORUM_WORK_DIR`); resolve packaged assets relative to `packageRoot()`.
 - In committed code and docs use `$HOME`, `~`, env vars, or package-relative paths — never an absolute clone path such as `/Users/<username>/...`.
 - `docs/` and journals may keep historical absolute paths as an audit trail; do not normalize them retroactively.
 

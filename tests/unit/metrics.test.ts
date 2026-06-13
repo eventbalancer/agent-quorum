@@ -10,7 +10,7 @@ let work: string;
 let schema: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-metricstest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-metricstest.'));
   work = path.join(tmp, 'work');
   mkdirSync(work);
   schema = path.join(tmp, 'critique.schema.json');

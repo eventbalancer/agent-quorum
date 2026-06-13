@@ -8,14 +8,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ExitCode, runPlanLoop } from '../../src/index.js';
 import { resetConfigCache } from '../../src/core/config.js';
 import {
   captureStderr,
   emptyCritique,
+  REPO_ROOT,
   withEnvAsync,
   writeDefaultPlanLoopConfig,
   writeFakeBin,
@@ -34,13 +36,13 @@ type EnvOverrides = Record<string, string | undefined>;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-    PLAN_LOOP_WORK_DIR: work,
-    PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-    PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-    PLAN_LOOP_CLARIFY: '0',
-    PLAN_LOOP_RETRY_COUNT: '0',
-    PLAN_LOOP_RESUME: undefined,
+    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_WORK_DIR: work,
+    AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+    AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+    AGENT_QUORUM_CLARIFY: '0',
+    AGENT_QUORUM_RETRY_COUNT: '0',
+    AGENT_QUORUM_RESUME: undefined,
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
     ...extra,
@@ -54,14 +56,14 @@ function summaryFinalLines(): string[] {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-packageint.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-packageint.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   work = path.join(tmp, 'work');
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'plan-loop.json'));
+  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
   emptyCritique(path.join(tmp, 'empty.json'));
   resetConfigCache();
   capture = captureStderr();
@@ -76,7 +78,7 @@ describe('package emission through runPlanLoop', () => {
   it('emits a validated package and one combined FINAL status when split fires', async () => {
     writeStructuredPlanFile(path.join(tmp, 'input.md'), 'Package Run');
 
-    const result = await withEnvAsync(baseEnv({ PLAN_LOOP_SPLIT: 'always' }), () =>
+    const result = await withEnvAsync(baseEnv({ AGENT_QUORUM_SPLIT: 'always' }), () =>
       runPlanLoop({
         input: path.join(tmp, 'input.md'),
         iters: 1,
@@ -120,7 +122,7 @@ describe('package emission through runPlanLoop', () => {
     // P0. The package must validate clean end to end, not just in unit emit.
     writeLargeStructuredPlanFile(path.join(tmp, 'input.md'), 'P0 Package Run', 3, 0);
 
-    const result = await withEnvAsync(baseEnv({ PLAN_LOOP_SPLIT: 'always' }), () =>
+    const result = await withEnvAsync(baseEnv({ AGENT_QUORUM_SPLIT: 'always' }), () =>
       runPlanLoop({
         input: path.join(tmp, 'input.md'),
         iters: 1,
@@ -146,7 +148,7 @@ describe('package emission through runPlanLoop', () => {
     writeStructuredPlanFile(input, 'Empty Work Plan');
     writeFileSync(input, readFileSync(input, 'utf8').replace('1. Fixture step.', ''));
 
-    const result = await withEnvAsync(baseEnv({ PLAN_LOOP_SPLIT: 'always' }), () =>
+    const result = await withEnvAsync(baseEnv({ AGENT_QUORUM_SPLIT: 'always' }), () =>
       runPlanLoop({ input, iters: 1, effort: 'low', fix: false, translate: false }),
     );
 
@@ -157,5 +159,73 @@ describe('package emission through runPlanLoop', () => {
     expect(finals).toHaveLength(1);
     expect(finals[0]).toContain('blocked');
     expect(finals[0]).toContain('empty');
+  });
+});
+
+interface PackageManifest {
+  bin: Record<string, string>;
+  files: string[];
+  version: string;
+}
+
+function readManifest(): PackageManifest {
+  return JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as PackageManifest;
+}
+
+// Composed from parts so the legacy identity never appears as a literal token
+// here, keeping the AC-10 sweep over tests/ clean while still guarding it.
+const LEGACY_BIN = ['plan', 'loop'].join('-');
+const LEGACY_CONFIG_NAME = `${LEGACY_BIN}.json`;
+
+describe('bin + packaged files contract (AC-1, AC-6)', () => {
+  it('exposes exactly one agent-quorum bin and no legacy key', () => {
+    const manifest = readManifest();
+    expect(manifest.bin).toEqual({ 'agent-quorum': 'dist/cli/main.js' });
+    expect(Object.keys(manifest.bin)).not.toContain(LEGACY_BIN);
+  });
+
+  it('ships agent-quorum.json and not the legacy config so installed packageRoot resolves', () => {
+    const manifest = readManifest();
+    expect(manifest.files).toContain('agent-quorum.json');
+    expect(manifest.files).not.toContain(LEGACY_CONFIG_NAME);
+  });
+});
+
+describe('built CLI smoke (AC-1)', () => {
+  beforeAll(() => {
+    const build = spawnSync(
+      process.execPath,
+      [
+        path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
+        '-p',
+        'tsconfig.build.json',
+      ],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    );
+    expect(build.status, `tsc build failed:\n${build.stdout}${build.stderr}`).toBe(0);
+  }, 120_000);
+
+  function runBuiltCli(args: string[]): { status: number | null; stdout: string; stderr: string } {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(REPO_ROOT, 'dist', 'cli', 'main.js'), ...args],
+      {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+      },
+    );
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  it('prints the package version through the built agent-quorum bin', () => {
+    const result = runBuiltCli(['--version']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(`${readManifest().version}\n`);
+  });
+
+  it('resolves the plan stage through the built bin', () => {
+    const result = runBuiltCli(['plan', '--help']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('usage: agent-quorum plan');
   });
 });

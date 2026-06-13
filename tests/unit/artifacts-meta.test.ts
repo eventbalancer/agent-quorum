@@ -88,7 +88,7 @@ function sampleMeta(workDir: string): RunMetadata {
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-metatest.'));
+  dir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-metatest.'));
 });
 
 afterEach(() => {

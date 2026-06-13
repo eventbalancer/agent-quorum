@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { countNewlines } from '../../src/runtime/files.js';
-import { planHasHeading } from '../../src/core/plan-shape.js';
-import { validatePlanPackage } from '../../src/core/plan-package.js';
+import { planHasHeading } from '../../src/stages/plan/plan-shape.js';
+import { validatePlanPackage } from '../../src/stages/plan/plan-package.js';
 import { REPO_ROOT } from '../helpers/harness.js';
 
 const FIXTURE = path.join(REPO_ROOT, 'tests', 'fixtures', 'plan-package');
@@ -13,7 +13,7 @@ let tmp: string;
 let findingsFile: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-packfixture.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-packfixture.'));
   findingsFile = path.join(tmp, 'package-findings.json');
 });
 

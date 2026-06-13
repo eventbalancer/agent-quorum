@@ -1,12 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { HaltError } from '../runtime/halt.js';
-import { log } from '../runtime/log.js';
-import { providerRun } from '../providers/provider.js';
-import { isJsonObject, type JsonValue } from './json.js';
-import { schemaValidQuiet } from './schema.js';
+import { HaltError } from '../../runtime/halt.js';
+import { log } from '../../runtime/log.js';
+import { providerRun } from '../../providers/provider.js';
+import { isJsonObject, type JsonValue } from '../../core/json.js';
+import { schemaValidQuiet } from '../../core/schema.js';
 import { operatorInterventionsContext } from './interventions.js';
-import { readStripped, type RunContext } from './run-context.js';
+import { readStripped, type RunContext } from '../../core/run-context.js';
 
 export function artifactVersion(file: string, prefix: string, suffix: string): number | undefined {
   let base = path.basename(file);

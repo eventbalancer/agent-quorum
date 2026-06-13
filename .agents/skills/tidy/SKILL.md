@@ -113,7 +113,7 @@ Apply these in order until no issue remains in the scoped files.
   Catch as `unknown`, narrow with `instanceof`, and never branch on
   `err.message`.
 - Use named exports and preserve `src/index.ts`, `package.json` exports, and
-  the `plan-loop` bin unless an explicit breaking change was requested.
+  the `agent-quorum` bin unless an explicit breaking change was requested.
 - Use `const`, `===`, ESM imports with `.js` relative extensions, and no
   `export default` in touched files.
 - Keep time, randomness, process I/O, and global reads at boundaries. Inject a
@@ -167,7 +167,7 @@ Do not report success until this gate is complete.
 3. **Triage every hit.** For each match, update the documentation or record why
    it is unaffected. Relevant locations include `README.md`, `docs/`,
    `AGENTS.md`, `CLAUDE.md`, `.agents/skills/`, `.claude/commands/`, `skills/`,
-   `plan-loop.json`, and schema files. Do not add new documentation just to
+   `agent-quorum.json`, and schema files. Do not add new documentation just to
    document the tidy; only keep existing docs accurate.
 
 4. **Gate completion.** If the corpus is non-empty and any term was not searched

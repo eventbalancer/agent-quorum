@@ -1,15 +1,15 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { nonEmptyFile } from '../runtime/files.js';
+import { nonEmptyFile } from '../../runtime/files.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { err, log } from '../runtime/log.js';
-import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
-import { nowUtcStamp } from './artifacts.js';
+import { err, log } from '../../runtime/log.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
+import { nowUtcStamp } from '../../core/artifacts.js';
 import { runCreatorClarify } from './creator.js';
 import { operatorInterventionsFile } from './interventions.js';
-import { schemaValidQuiet } from './schema.js';
-import { telegramConfigured, telegramGetUpdates, telegramSend } from './telegram.js';
-import type { RunContext } from './run-context.js';
+import { schemaValidQuiet } from '../../core/schema.js';
+import { telegramConfigured, telegramGetUpdates, telegramSend } from '../../core/telegram.js';
+import type { RunContext } from '../../core/run-context.js';
 
 function clarifyQuestionsFile(work: string): string {
   return path.join(work, 'clarify-questions.json');
@@ -27,7 +27,7 @@ export function clarifyDoneFile(work: string): string {
 type GateMode = 'run' | 'skip' | 'error';
 
 export function clarifyGateEnabled(): GateMode {
-  const value = process.env.PLAN_LOOP_CLARIFY ?? 'auto';
+  const value = process.env.AGENT_QUORUM_CLARIFY ?? 'auto';
   switch (value) {
     case '0':
     case 'false':
@@ -40,7 +40,7 @@ export function clarifyGateEnabled(): GateMode {
     case 'yes':
       if (!telegramConfigured()) {
         err(
-          `clarification gate requested (PLAN_LOOP_CLARIFY=${value}) but PLAN_LOOP_TELEGRAM_BOT_TOKEN / PLAN_LOOP_TELEGRAM_CHAT_ID are not set`,
+          `clarification gate requested (AGENT_QUORUM_CLARIFY=${value}) but AGENT_QUORUM_TELEGRAM_BOT_TOKEN / AGENT_QUORUM_TELEGRAM_CHAT_ID are not set`,
         );
         return 'error';
       }
@@ -49,7 +49,7 @@ export function clarifyGateEnabled(): GateMode {
     case '':
       return telegramConfigured() ? 'run' : 'skip';
     default:
-      err(`PLAN_LOOP_CLARIFY must be 1, 0, or auto (got '${value}')`);
+      err(`AGENT_QUORUM_CLARIFY must be 1, 0, or auto (got '${value}')`);
       return 'error';
   }
 }
@@ -119,9 +119,9 @@ function clarifyCopy(locale: string): ClarifyCopy {
         `Ответьте номером (1–${optcount}) или своим текстом. /skip — доверить решение агенту, /cancel — отменить.`,
       replyFree: 'Ответьте своим текстом. /skip — доверить решение агенту, /cancel — отменить.',
       skipAnswer: '(оператор пропустил вопрос — действуй по своему усмотрению)',
-      cancelled: '🛑 Отменено — plan-loop останавливается.',
+      cancelled: '🛑 Отменено — agent-quorum останавливается.',
       timeout: (qnum) =>
-        `⌛ Не дождался ответа на вопрос ${qnum} — plan-loop останавливается. Перезапустите тот же input, чтобы продолжить.`,
+        `⌛ Не дождался ответа на вопрос ${qnum} — agent-quorum останавливается. Перезапустите тот же input, чтобы продолжить.`,
       done: (total) => `✅ Готово — получены все ответы (${total}). Создаю план.`,
     };
   }
@@ -135,9 +135,9 @@ function clarifyCopy(locale: string): ClarifyCopy {
       `Reply with a number (1–${optcount}) or your own text. /skip — my judgement, /cancel — cancel.`,
     replyFree: 'Reply with your own text. /skip — my judgement, /cancel — cancel.',
     skipAnswer: '(operator skipped — use your best judgement)',
-    cancelled: '🛑 Cancelled — plan-loop is stopping.',
+    cancelled: '🛑 Cancelled — agent-quorum is stopping.',
     timeout: (qnum) =>
-      `⌛ Timed out waiting for question ${qnum} — plan-loop is stopping. Re-run the same input to resume.`,
+      `⌛ Timed out waiting for question ${qnum} — agent-quorum is stopping. Re-run the same input to resume.`,
     done: (total) => `✅ Done — received all ${total} answers. Creating the plan.`,
   };
 }
@@ -215,7 +215,7 @@ export async function runClarificationGate(ctx: RunContext, promptFile: string):
   }
   if (mode === 'skip') {
     log(
-      'clarification gate: disabled (set PLAN_LOOP_TELEGRAM_BOT_TOKEN + PLAN_LOOP_TELEGRAM_CHAT_ID and PLAN_LOOP_CLARIFY=1 to enable)',
+      'clarification gate: disabled (set AGENT_QUORUM_TELEGRAM_BOT_TOKEN + AGENT_QUORUM_TELEGRAM_CHAT_ID and AGENT_QUORUM_CLARIFY=1 to enable)',
     );
     return true;
   }
@@ -251,8 +251,8 @@ export async function runClarificationGate(ctx: RunContext, promptFile: string):
     `clarification gate: ${total} question(s), ${answered} already answered — waiting via Telegram`,
   );
 
-  const poll = Number(process.env.PLAN_LOOP_TELEGRAM_POLL_TIMEOUT ?? 50);
-  const deadline = Number(process.env.PLAN_LOOP_CLARIFY_DEADLINE_SECONDS ?? 86400);
+  const poll = Number(process.env.AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT ?? 50);
+  const deadline = Number(process.env.AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS ?? 86400);
   const deadlineEpoch = Math.floor(Date.now() / 1000) + deadline;
   const copy = clarifyCopy(ctx.settings.locale);
 

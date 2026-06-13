@@ -36,7 +36,7 @@ Phase docs carry enough context to implement one phase; consult `plan.md` only b
 
 ## Split Rationale
 
-- PLAN_LOOP_SPLIT=always: package emitted regardless of size (79 lines, 4 phases)
+- AGENT_QUORUM_SPLIT=always: package emitted regardless of size (79 lines, 4 phases)
 - Signals: 79 lines, 4 phases, 4 touched surfaces.
 
 ## Contract

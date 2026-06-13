@@ -1,16 +1,16 @@
 import { appendFileSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { structuredPatch } from 'diff';
-import { fileLineCount } from '../runtime/files.js';
-import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
-import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
-import { critiqueHealth } from './metrics.js';
+import { fileLineCount } from '../../runtime/files.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
+import { critiqueHealth } from '../../core/metrics.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { runCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
-import { sanitizeCritiqueJson, validateSchema } from './schema.js';
-import type { RunContext } from './run-context.js';
+import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
+import type { RunContext } from '../../core/run-context.js';
 
 function readJson(file: string): JsonValue {
   return JSON.parse(readFileSync(file, 'utf8')) as JsonValue;

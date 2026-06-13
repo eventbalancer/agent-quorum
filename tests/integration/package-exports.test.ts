@@ -28,7 +28,7 @@ beforeAll(() => {
   );
   expect(build.status, `tsc build failed:\n${build.stdout}${build.stderr}`).toBe(0);
 
-  tempDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-exports.'));
+  tempDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-exports.'));
   mkdirSync(path.join(tempDir, 'node_modules'));
   symlinkSync(REPO_ROOT, path.join(tempDir, 'node_modules', 'agent-quorum'), 'dir');
 }, 120_000);

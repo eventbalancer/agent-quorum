@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseRunArgs } from '../../src/cli/run.js';
+import { parseRunArgs } from '../../src/stages/plan/run.js';
 import { runInterveneCli } from '../../src/cli/intervene.js';
 import { runLaunchCli } from '../../src/cli/launch.js';
 import { HaltError } from '../../src/runtime/halt.js';
@@ -12,7 +12,7 @@ let tmp: string;
 let capture: StderrCapture;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-flags.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-flags.'));
   writeFileSync(path.join(tmp, 'input.md'), '# X\n');
   capture = captureStderr();
 });

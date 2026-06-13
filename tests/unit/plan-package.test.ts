@@ -22,8 +22,8 @@ import {
   type SplitDecision,
   type SplitDecisionKnobs,
   type SplitMode,
-} from '../../src/core/plan-package.js';
-import { planHasHeading } from '../../src/core/plan-shape.js';
+} from '../../src/stages/plan/plan-package.js';
+import { planHasHeading } from '../../src/stages/plan/plan-shape.js';
 import {
   REPO_ROOT,
   writeLargeStructuredPlanFile,
@@ -62,7 +62,7 @@ function splitFor(plan: string): SplitDecision {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-packagetest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-packagetest.'));
   work = path.join(tmp, 'work');
   mkdirSync(work, { recursive: true });
 });

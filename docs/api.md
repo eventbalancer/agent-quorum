@@ -69,8 +69,8 @@ const result = await runPlanLoop({
   fix: true,
   locale: 'ru', // optional; localizes Telegram interaction + final companion plan
   translate: false, // optional compatibility toggle
-  workDir: '/abs/path/loop-my-plan', // optional; takes precedence over PLAN_LOOP_WORK_DIR
-  configFile: '/abs/path/plan-loop.json', // optional; takes precedence over PLAN_LOOP_CONFIG_FILE
+  workDir: '/abs/path/loop-my-plan', // optional; takes precedence over AGENT_QUORUM_WORK_DIR
+  configFile: '/abs/path/agent-quorum.json', // optional; takes precedence over AGENT_QUORUM_CONFIG_FILE
 });
 // result: {
 //   exitCode: 0,
@@ -98,7 +98,7 @@ callers are unaffected. `runId` and `name` identify the run (the same id the
 start surfaces report); they are additive on `RunResult`/`LaunchResult`.
 Artifacts land in the resolved workdir; for `home`, `workDir`, and
 `configFile` the precedence is option > environment variable > default
-(`<home>/runs/loop-<name>` / `~/.agent-quorum` / the packaged `plan-loop.json`).
+(`<home>/runs/loop-<name>` / `~/.agent-quorum` / the packaged `agent-quorum.json`).
 `home` relocates the whole artifact root (`runs/` + `state/`) without mutating
 `process.env`.
 `locale` is the typed counterpart of `--locale`; it defaults to `en`.
@@ -111,7 +111,7 @@ environment. (The package-root `.env` loader keeps its reference semantics
 and still fills missing keys; see
 [configuration.md](configuration.md).)
 
-If `PLAN_LOOP_TELEGRAM_BOT_TOKEN` and `PLAN_LOOP_TELEGRAM_CHAT_ID` are present,
+If `AGENT_QUORUM_TELEGRAM_BOT_TOKEN` and `AGENT_QUORUM_TELEGRAM_CHAT_ID` are present,
 `runPlanLoop` also sends the same best-effort completion notification as the
 CLI. Notification failures are logged and do not alter the returned
 `RunResult`.
@@ -141,12 +141,12 @@ the detached child run, not by the launch parent.
 ## getRunStatus(query?)
 
 ```ts
-const all = getRunStatus(); // list every running plan-loop run
+const all = getRunStatus(); // list every running agent-quorum run
 const one = getRunStatus(12345); // any PID in a run's process tree
 ```
 
 Returns `{ exitCode, output }` with the rendered snapshot; exit 2 for an
-unknown PID, 3 for a PID outside any plan-loop tree. The signature and behavior
+unknown PID, 3 for a PID outside any agent-quorum tree. The signature and behavior
 are unchanged; with no query, `output` is now the scriptable run listing.
 
 ## addIntervention(workDir, message, target?)

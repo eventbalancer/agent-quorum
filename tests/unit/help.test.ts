@@ -7,15 +7,19 @@ import {
   INTERVENE_USAGE,
   LAUNCH_USAGE,
   packageVersion,
-  RUN_USAGE,
   STATUS_USAGE,
 } from '../../src/cli/help.js';
+import { RUN_USAGE } from '../../src/stages/plan/run.js';
 import { REPO_ROOT, withEnv } from '../helpers/harness.js';
+
+const STAGE_SUMMARIES = [
+  { name: 'plan', summary: 'iterate plan → critique → update over a prompt or plan file' },
+];
 
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-helptest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-helptest.'));
 });
 
 afterEach(() => {
@@ -23,9 +27,9 @@ afterEach(() => {
 });
 
 describe('help text', () => {
-  it('usage strings name the plan-loop bin and never the reference scripts', () => {
+  it('usage strings name the agent-quorum bin and never the reference scripts', () => {
     for (const usage of [RUN_USAGE, LAUNCH_USAGE, INTERVENE_USAGE, STATUS_USAGE]) {
-      expect(usage).toContain('plan-loop');
+      expect(usage).toContain('agent-quorum');
       expect(usage).not.toContain('.sh');
     }
   });
@@ -38,13 +42,13 @@ describe('help text', () => {
   });
 
   it('globalHelp embeds defaults from a readable config', () => {
-    const config = path.join(tmp, 'plan-loop.json');
+    const config = path.join(tmp, 'agent-quorum.json');
     writeFileSync(
       config,
       JSON.stringify({ settings: { iters: 9, effort: 'max', fix: false, translate: true } }),
     );
-    const help = withEnv({ PLAN_LOOP_CONFIG_FILE: config }, () => globalHelp());
-    expect(help).toContain('usage: plan-loop');
+    const help = withEnv({ AGENT_QUORUM_CONFIG_FILE: config }, () => globalHelp(STAGE_SUMMARIES));
+    expect(help).toContain('usage: agent-quorum');
     expect(help).toContain('defaults: iters=9 effort=max fix=off translate=on');
     expect(help).toContain(`(from ${config})`);
   });
@@ -52,13 +56,17 @@ describe('help text', () => {
   it('globalHelp omits the defaults line for unreadable or shape-broken configs', () => {
     const broken = path.join(tmp, 'broken.json');
     writeFileSync(broken, '{not json');
-    const withoutDefaults = withEnv({ PLAN_LOOP_CONFIG_FILE: broken }, () => globalHelp());
+    const withoutDefaults = withEnv({ AGENT_QUORUM_CONFIG_FILE: broken }, () =>
+      globalHelp(STAGE_SUMMARIES),
+    );
     expect(withoutDefaults).not.toContain('defaults:');
-    expect(withoutDefaults).toContain('usage: plan-loop');
+    expect(withoutDefaults).toContain('usage: agent-quorum');
 
     const noSettings = path.join(tmp, 'no-settings.json');
     writeFileSync(noSettings, '{}');
-    const stillNoDefaults = withEnv({ PLAN_LOOP_CONFIG_FILE: noSettings }, () => globalHelp());
+    const stillNoDefaults = withEnv({ AGENT_QUORUM_CONFIG_FILE: noSettings }, () =>
+      globalHelp(STAGE_SUMMARIES),
+    );
     expect(stillNoDefaults).not.toContain('defaults:');
   });
 });

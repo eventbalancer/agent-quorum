@@ -1,7 +1,8 @@
 import path from 'node:path';
 import type { RoleMatrix, RolePermissions } from '../../src/core/config.js';
 import { effortMatrix } from '../../src/core/effort.js';
-import { DEFAULT_SPLIT_MIN_PHASES, type SplitMode } from '../../src/core/plan-package.js';
+import { DEFAULT_SPLIT_MIN_PHASES } from '../../src/stages/plan/plan-package.js';
+import type { SplitMode } from '../../src/core/split-policy.js';
 import { skillPaths, type RunContext } from '../../src/core/run-context.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';

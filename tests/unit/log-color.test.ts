@@ -72,11 +72,13 @@ describe('log/err prefixes', () => {
         });
         const text = capture.text();
         if (colored) {
-          expect(text).toBe('\x1b[36m[plan-loop]\x1b[0m hello\n\x1b[31m[plan-loop]\x1b[0m boom\n');
+          expect(text).toBe(
+            '\x1b[36m[agent-quorum]\x1b[0m hello\n\x1b[31m[agent-quorum]\x1b[0m boom\n',
+          );
         } else {
-          expect(text).toBe('[plan-loop] hello\n[plan-loop] boom\n');
+          expect(text).toBe('[agent-quorum] hello\n[agent-quorum] boom\n');
         }
-        expect(stripAnsi(text)).toBe('[plan-loop] hello\n[plan-loop] boom\n');
+        expect(stripAnsi(text)).toBe('[agent-quorum] hello\n[agent-quorum] boom\n');
       } finally {
         capture.restore();
       }

@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { countNewlines } from '../runtime/files.js';
-import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
-import { critiqueHealth, type CritiqueHealth } from './metrics.js';
+import { countNewlines } from '../../runtime/files.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
+import { critiqueHealth, type CritiqueHealth } from '../../core/metrics.js';
 import { operatorInterventionsState } from './interventions.js';
 import { PACKAGE_DIR_NAME, SPLIT_DECISION_FILE, type PackageHealth } from './plan-package.js';
 import { planDocumentShapeHealth } from './plan-shape.js';
-import type { RunContext } from './run-context.js';
+import type { RunContext } from '../../core/run-context.js';
 
 function jsonArrayLength(file: string, key: string): number {
   try {
@@ -101,7 +101,7 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   const rejectedLog = path.join(ctx.work, 'rejected-log.jsonl');
   const finalPlan = path.join(ctx.work, 'plan.final.md');
 
-  lines.push('# plan-loop summary');
+  lines.push('# agent-quorum summary');
   lines.push('');
   lines.push(`- input: \`${ctx.inputPath}\``);
   lines.push(`- mode: ${ctx.mode}`);

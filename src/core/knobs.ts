@@ -41,25 +41,25 @@ function requireNonNegativeInteger(entry: EnvNumberEntry): number {
 // reference validates only the claude and fix/translate knobs (cursor knobs
 // pass through unvalidated); the claude poll must additionally be positive.
 export function resolveWatchdogKnobs(): WatchdogKnobs {
-  const claudeByte = envNumber('PLAN_LOOP_CLAUDE_STALL_TIMEOUT_SECONDS', 600);
-  const claudePoll = envNumber('PLAN_LOOP_CLAUDE_STALL_POLL_SECONDS', 5);
-  const claudeGrace = envNumber('PLAN_LOOP_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS', 20);
-  const claudeWall = envNumber('PLAN_LOOP_CLAUDE_CALL_TIMEOUT_SECONDS', 1800);
-  const claudeSemantic = envNumber('PLAN_LOOP_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
-  const cursorByte = envNumber('PLAN_LOOP_CURSOR_STALL_TIMEOUT_SECONDS', 600);
-  const cursorPoll = envNumber('PLAN_LOOP_CURSOR_STALL_POLL_SECONDS', 5);
-  const cursorGrace = envNumber('PLAN_LOOP_CURSOR_STALL_INTERRUPT_GRACE_SECONDS', 20);
-  const cursorWall = envNumber('PLAN_LOOP_CURSOR_CALL_TIMEOUT_SECONDS', 1800);
-  const cursorSemantic = envNumber('PLAN_LOOP_CURSOR_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
-  const fixTimeout = envNumber('PLAN_LOOP_FIX_PASS_TIMEOUT_SECONDS', 900);
-  const fixSemantic = envNumber('PLAN_LOOP_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
-  const fixRetries = envNumber('PLAN_LOOP_FIX_PASS_RETRY_COUNT', 1);
-  const translateTimeout = envNumber('PLAN_LOOP_TRANSLATE_PASS_TIMEOUT_SECONDS', 900);
+  const claudeByte = envNumber('AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS', 600);
+  const claudePoll = envNumber('AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS', 5);
+  const claudeGrace = envNumber('AGENT_QUORUM_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS', 20);
+  const claudeWall = envNumber('AGENT_QUORUM_CLAUDE_CALL_TIMEOUT_SECONDS', 1800);
+  const claudeSemantic = envNumber('AGENT_QUORUM_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
+  const cursorByte = envNumber('AGENT_QUORUM_CURSOR_STALL_TIMEOUT_SECONDS', 600);
+  const cursorPoll = envNumber('AGENT_QUORUM_CURSOR_STALL_POLL_SECONDS', 5);
+  const cursorGrace = envNumber('AGENT_QUORUM_CURSOR_STALL_INTERRUPT_GRACE_SECONDS', 20);
+  const cursorWall = envNumber('AGENT_QUORUM_CURSOR_CALL_TIMEOUT_SECONDS', 1800);
+  const cursorSemantic = envNumber('AGENT_QUORUM_CURSOR_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
+  const fixTimeout = envNumber('AGENT_QUORUM_FIX_PASS_TIMEOUT_SECONDS', 900);
+  const fixSemantic = envNumber('AGENT_QUORUM_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
+  const fixRetries = envNumber('AGENT_QUORUM_FIX_PASS_RETRY_COUNT', 1);
+  const translateTimeout = envNumber('AGENT_QUORUM_TRANSLATE_PASS_TIMEOUT_SECONDS', 900);
   const translateSemantic = envNumber(
-    'PLAN_LOOP_TRANSLATE_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS',
+    'AGENT_QUORUM_TRANSLATE_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS',
     900,
   );
-  const translateRetries = envNumber('PLAN_LOOP_TRANSLATE_PASS_RETRY_COUNT', 1);
+  const translateRetries = envNumber('AGENT_QUORUM_TRANSLATE_PASS_RETRY_COUNT', 1);
 
   requireNonNegativeInteger(claudeByte);
   requireNonNegativeInteger(claudePoll);
@@ -73,7 +73,7 @@ export function resolveWatchdogKnobs(): WatchdogKnobs {
   requireNonNegativeInteger(translateSemantic);
   requireNonNegativeInteger(translateRetries);
   if (!(claudePoll.value > 0)) {
-    throw new HaltError('PLAN_LOOP_CLAUDE_STALL_POLL_SECONDS expects a positive integer', 1);
+    throw new HaltError('AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS expects a positive integer', 1);
   }
 
   return {

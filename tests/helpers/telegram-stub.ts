@@ -21,7 +21,7 @@ interface StubUpdate {
   message: StubMessage;
 }
 
-// Minimal Bot API stub served over PLAN_LOOP_TELEGRAM_API_BASE. getUpdates pops
+// Minimal Bot API stub served over AGENT_QUORUM_TELEGRAM_API_BASE. getUpdates pops
 // one queued reply per call (mirroring the reference test queue); sendMessage
 // records the text and returns a message id.
 export async function startTelegramStub(chatId = '42'): Promise<TelegramStub> {

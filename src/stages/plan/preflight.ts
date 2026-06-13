@@ -1,8 +1,8 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { log } from '../runtime/log.js';
-import type { Runner } from '../types.js';
+import { log } from '../../runtime/log.js';
+import type { Runner } from '../../types.js';
 
 export function commandExists(name: string): boolean {
   for (const dir of (process.env.PATH ?? '').split(':')) {

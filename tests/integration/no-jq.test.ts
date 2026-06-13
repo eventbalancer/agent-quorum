@@ -22,7 +22,7 @@ import {
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-nojq.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-nojq.'));
 });
 
 afterEach(() => {
@@ -39,7 +39,7 @@ describe('no jq/ajv/rg prerequisites (AC-9)', () => {
     rmSync(path.join(fake, 'pnpm'));
     const work = path.join(tmp, 'work');
     mkdirSync(work);
-    writeDefaultPlanLoopConfig(path.join(tmp, 'plan-loop.json'));
+    writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
     writeStructuredPlanFile(path.join(tmp, 'input.md'), 'No-JQ Input');
     emptyCritique(path.join(tmp, 'empty.json'));
 
@@ -76,15 +76,24 @@ describe('no jq/ajv/rg prerequisites (AC-9)', () => {
     }
 
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       {
         PATH: restrictedPath,
-        PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-        PLAN_LOOP_WORK_DIR: work,
-        PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-        PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-        PLAN_LOOP_CLARIFY: '0',
-        PLAN_LOOP_RETRY_COUNT: '0',
+        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+        AGENT_QUORUM_WORK_DIR: work,
+        AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+        AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+        AGENT_QUORUM_CLARIFY: '0',
+        AGENT_QUORUM_RETRY_COUNT: '0',
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },

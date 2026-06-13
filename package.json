@@ -23,7 +23,7 @@
   },
   "packageManager": "pnpm@11.5.3",
   "bin": {
-    "plan-loop": "dist/cli/main.js"
+    "agent-quorum": "dist/cli/main.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,14 +38,15 @@
   "files": [
     "dist",
     "skills",
-    "plan-loop.json",
+    "agent-quorum.json",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "dev": "tsx src/cli/main.ts",
-    "plan:self": "PLAN_LOOP_PLANS_DIR=.agents/plans tsx src/cli/main.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "dev": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts",
+    "plan:self": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts plan",
+    "clean": "rm -rf dist",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

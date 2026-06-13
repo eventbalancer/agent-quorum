@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clarifyGateEnabled, runClarificationGate } from '../../src/core/clarify.js';
+import { clarifyGateEnabled, runClarificationGate } from '../../src/stages/plan/clarify.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { captureStderr, withEnv, withEnvAsync, type StderrCapture } from '../helpers/harness.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
@@ -41,12 +41,12 @@ function seedQuestions(questions: unknown = FIXED_QUESTIONS): void {
 
 function gateEnv(): Record<string, string> {
   return {
-    PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
-    PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
-    PLAN_LOOP_TELEGRAM_API_BASE: stub.baseUrl,
-    PLAN_LOOP_TELEGRAM_POLL_TIMEOUT: '1',
-    PLAN_LOOP_CLARIFY_DEADLINE_SECONDS: '3',
-    PLAN_LOOP_CLARIFY: undefined as unknown as string,
+    AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+    AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+    AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
+    AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT: '1',
+    AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '3',
+    AGENT_QUORUM_CLARIFY: undefined as unknown as string,
   };
 }
 
@@ -59,7 +59,7 @@ function readJsonl(file: string): Record<string, unknown>[] {
 }
 
 beforeEach(async () => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-clarifytest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-clarifytest.'));
   work = path.join(tmp, 'work');
   mkdirSync(work);
   scratch = Scratch.create('clarify-test');
@@ -76,13 +76,13 @@ afterEach(async () => {
 });
 
 describe('clarify gate enablement', () => {
-  it('honors PLAN_LOOP_CLARIFY and credentials', () => {
+  it('honors AGENT_QUORUM_CLARIFY and credentials', () => {
     expect(
       withEnv(
         {
-          PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
-          PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
-          PLAN_LOOP_CLARIFY: 'auto',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+          AGENT_QUORUM_CLARIFY: 'auto',
         },
         () => clarifyGateEnabled(),
       ),
@@ -90,9 +90,9 @@ describe('clarify gate enablement', () => {
     expect(
       withEnv(
         {
-          PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
-          PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
-          PLAN_LOOP_CLARIFY: '0',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+          AGENT_QUORUM_CLARIFY: '0',
         },
         () => clarifyGateEnabled(),
       ),
@@ -100,9 +100,9 @@ describe('clarify gate enablement', () => {
     expect(
       withEnv(
         {
-          PLAN_LOOP_TELEGRAM_BOT_TOKEN: undefined,
-          PLAN_LOOP_TELEGRAM_CHAT_ID: undefined,
-          PLAN_LOOP_CLARIFY: 'auto',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: undefined,
+          AGENT_QUORUM_CLARIFY: 'auto',
         },
         () => clarifyGateEnabled(),
       ),
@@ -110,9 +110,9 @@ describe('clarify gate enablement', () => {
     expect(
       withEnv(
         {
-          PLAN_LOOP_TELEGRAM_BOT_TOKEN: undefined,
-          PLAN_LOOP_TELEGRAM_CHAT_ID: undefined,
-          PLAN_LOOP_CLARIFY: '1',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: undefined,
+          AGENT_QUORUM_CLARIFY: '1',
         },
         () => clarifyGateEnabled(),
       ),
@@ -268,8 +268,8 @@ describe('clarification gate', () => {
     const ok = await withEnvAsync(
       {
         ...gateEnv(),
-        PLAN_LOOP_CLARIFY_DEADLINE_SECONDS: '1',
-        PLAN_LOOP_TELEGRAM_POLL_TIMEOUT: '1',
+        AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '1',
+        AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT: '1',
       },
       () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
     );

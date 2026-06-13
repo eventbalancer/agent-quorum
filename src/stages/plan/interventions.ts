@@ -1,8 +1,8 @@
 import { appendFileSync, readFileSync } from 'node:fs';
-import { nonEmptyFile } from '../runtime/files.js';
+import { nonEmptyFile } from '../../runtime/files.js';
 import path from 'node:path';
-import { isJsonObject, type JsonValue } from './json.js';
-import { nowUtcStamp } from './artifacts.js';
+import { isJsonObject, type JsonValue } from '../../core/json.js';
+import { nowUtcStamp } from '../../core/artifacts.js';
 
 export function operatorInterventionsFile(work: string): string {
   return path.join(work, 'operator-interventions.jsonl');
@@ -118,7 +118,7 @@ export function operatorInterventionsContext(work: string, role = 'all'): string
     .join('\n');
   return (
     '## Operator interventions\n' +
-    'These active instructions were added after this plan-loop was launched. Fold relevant entries into the next plan revision or fix-pass output. Once a revision is written, the loop records the target plan version and stops injecting the full text.\n' +
+    'These active instructions were added after this agent-quorum was launched. Fold relevant entries into the next plan revision or fix-pass output. Once a revision is written, the loop records the target plan version and stops injecting the full text.\n' +
     '\n' +
     lines
   );

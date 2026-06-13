@@ -69,7 +69,7 @@ Quality rules:
 - Scope the plan to what the outcome needs — complete on the root cause, minimal everywhere else. Skip speculative abstractions, unrequested refactors, and defensive design for states that cannot occur.
 - Split-ready detail: never compress per-phase execution detail below execution-readiness to stay under the size policy. If the detail a weaker implementation model needs would push the plan past the size budget, that is a signal to keep the detail — the orchestrator splits large or structurally complex plans into a `plan.package/` (index, master plan, self-contained phase docs, journal, runbook) — not to omit material execution detail.
 - Minimalism governs _which work the plan takes on_, never _how fully the in-scope work is specified_. This first plan is the definitive execution brief, not a skeleton for later review to expand: on the first pass, fully enumerate the concrete file lists, the complete set of importers/consumers a change touches, the exact edits per phase, and every acceptance gate that in-scope work requires. If a detail can only be resolved at execution time (a borderline classification, a count to be grepped), name it explicitly in Open Questions with its resolution rule — do not leave a section thin by default and rely on the critic to surface what you could have specified now.
-- Give decision rationale only where it prevents re-litigation; no revision history, critique IDs, or plan-loop bookkeeping; no prose unverifiable from code, a command, or an operator decision.
+- Give decision rationale only where it prevents re-litigation; no revision history, critique IDs, or agent-quorum bookkeeping; no prose unverifiable from code, a command, or an operator decision.
 
 ### Impact Graph Format
 

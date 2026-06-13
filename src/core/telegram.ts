@@ -5,13 +5,13 @@ import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 const COMPLETION_REASON_MAX_LENGTH = 180;
 
 export function telegramApiBase(): string {
-  return process.env.PLAN_LOOP_TELEGRAM_API_BASE ?? 'https://api.telegram.org';
+  return process.env.AGENT_QUORUM_TELEGRAM_API_BASE ?? 'https://api.telegram.org';
 }
 
 export function telegramConfigured(): boolean {
   return (
-    Boolean(process.env.PLAN_LOOP_TELEGRAM_BOT_TOKEN) &&
-    Boolean(process.env.PLAN_LOOP_TELEGRAM_CHAT_ID)
+    Boolean(process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN) &&
+    Boolean(process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID)
   );
 }
 
@@ -23,10 +23,10 @@ async function telegramCall(
   params: Record<string, string>,
   options: { get?: boolean; timeoutSeconds?: number } = {},
 ): Promise<JsonObject | undefined> {
-  const token = process.env.PLAN_LOOP_TELEGRAM_BOT_TOKEN ?? '';
+  const token = process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN ?? '';
   const url = `${telegramApiBase()}/bot${token}/${method}`;
   const timeoutSeconds =
-    options.timeoutSeconds ?? Number(process.env.PLAN_LOOP_TELEGRAM_HTTP_TIMEOUT ?? 70);
+    options.timeoutSeconds ?? Number(process.env.AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT ?? 70);
   const search = new URLSearchParams(params);
   try {
     const response = await fetch(options.get ? `${url}?${search.toString()}` : url, {
@@ -56,7 +56,7 @@ async function telegramCall(
 // message_id, or undefined on failure.
 export async function telegramSend(text: string): Promise<string | undefined> {
   const body = await telegramCall('sendMessage', {
-    chat_id: process.env.PLAN_LOOP_TELEGRAM_CHAT_ID ?? '',
+    chat_id: process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '',
     text,
     disable_web_page_preview: 'true',
   });
@@ -97,7 +97,7 @@ export function renderTelegramCompletionNotification(
 ): string {
   const isSuccess = notification.exitCode === 0;
   const lines = [
-    `plan-loop finished: ${isSuccess ? 'SUCCESS' : `FAILED (exit ${notification.exitCode})`}`,
+    `agent-quorum finished: ${isSuccess ? 'SUCCESS' : `FAILED (exit ${notification.exitCode})`}`,
     `input: ${path.basename(notification.inputPath)}`,
   ];
 
@@ -157,7 +157,7 @@ export async function telegramGetUpdates(
   if (body === undefined) {
     return undefined;
   }
-  const chat = process.env.PLAN_LOOP_TELEGRAM_CHAT_ID ?? '';
+  const chat = process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '';
   const results = Array.isArray(body.result) ? body.result : [];
   const updates: TelegramUpdate[] = [];
   for (const entry of results) {

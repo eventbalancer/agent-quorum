@@ -15,7 +15,7 @@ function skillText(file: string): string {
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-skillcontract.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-skillcontract.'));
 });
 
 afterEach(() => {

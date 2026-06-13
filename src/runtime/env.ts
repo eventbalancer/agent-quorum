@@ -4,25 +4,33 @@ import { fileURLToPath } from 'node:url';
 
 let cachedPackageRoot: string | undefined;
 
-export function packageRoot(): string {
-  if (cachedPackageRoot !== undefined) {
-    return cachedPackageRoot;
-  }
-  let dir = path.dirname(fileURLToPath(import.meta.url));
+export function findPackageRoot(startDir: string): string {
+  let dir = startDir;
   for (;;) {
     if (
-      existsSync(path.join(dir, 'plan-loop.json')) &&
+      existsSync(path.join(dir, 'agent-quorum.json')) &&
       existsSync(path.join(dir, 'package.json'))
     ) {
-      cachedPackageRoot = dir;
       return dir;
     }
     const parent = path.dirname(dir);
     if (parent === dir) {
-      throw new Error('plan-loop package root not found');
+      throw new Error('agent-quorum package root not found');
     }
     dir = parent;
   }
+}
+
+export function packageRoot(): string {
+  if (cachedPackageRoot !== undefined) {
+    return cachedPackageRoot;
+  }
+  cachedPackageRoot = findPackageRoot(path.dirname(fileURLToPath(import.meta.url)));
+  return cachedPackageRoot;
+}
+
+export function resetPackageRootCache(): void {
+  cachedPackageRoot = undefined;
 }
 
 // In-process replacement for `git rev-parse --show-toplevel || pwd`: walk up
@@ -45,9 +53,9 @@ const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Mirrors the reference loader: real environment variables win (an empty
 // string counts as unset), quotes are stripped one layer per kind, and the
-// file is read only from the package root — never from the directory of a
-// PLAN_LOOP_CONFIG_FILE override.
-export function loadPlanLoopDotenv(root: string = packageRoot()): void {
+// file is read only from the package root — never from the directory of an
+// AGENT_QUORUM_CONFIG_FILE override.
+export function loadAgentQuorumDotenv(root: string = packageRoot()): void {
   const file = path.join(root, '.env');
   if (!existsSync(file)) {
     return;

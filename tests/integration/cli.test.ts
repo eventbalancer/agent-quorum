@@ -29,12 +29,12 @@ let work: string;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-    PLAN_LOOP_WORK_DIR: work,
-    PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-    PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-    PLAN_LOOP_CLARIFY: '0',
-    PLAN_LOOP_RETRY_COUNT: '0',
+    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_WORK_DIR: work,
+    AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+    AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+    AGENT_QUORUM_CLARIFY: '0',
+    AGENT_QUORUM_RETRY_COUNT: '0',
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     ...extra,
   };
@@ -42,9 +42,9 @@ function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
 
 function telegramEnv(stub: TelegramStub, extra: EnvOverrides = {}): EnvOverrides {
   return baseEnv({
-    PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
-    PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
-    PLAN_LOOP_TELEGRAM_API_BASE: stub.baseUrl,
+    AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+    AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+    AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
     ...extra,
   });
 }
@@ -54,14 +54,14 @@ function canonicalWorkPath(...segments: string[]): string {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-clitest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-clitest.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   work = path.join(tmp, 'work');
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'plan-loop.json'));
+  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'CLI Input');
   emptyCritique(path.join(tmp, 'empty.json'));
 });
@@ -73,7 +73,16 @@ afterEach(() => {
 describe('exit-code matrix (AC-3)', () => {
   it('clean converge-at-v0 exits 0 with the AC-2 artifact set', () => {
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(0);
@@ -96,6 +105,7 @@ describe('exit-code matrix (AC-3)', () => {
     try {
       const result = await runCliAsync(
         [
+          'plan',
           '--effort',
           'low',
           '--iters',
@@ -112,7 +122,7 @@ describe('exit-code matrix (AC-3)', () => {
       expect(result.status).toBe(0);
       expect(stub.sent).toHaveLength(1);
       const message = stub.sent[0] ?? '';
-      expect(message).toContain('plan-loop finished: SUCCESS');
+      expect(message).toContain('agent-quorum finished: SUCCESS');
       expect(message).toContain('input: input.md');
       expect(message).toContain('status: clean');
       expect(message).toContain('iterations: 0');
@@ -124,12 +134,12 @@ describe('exit-code matrix (AC-3)', () => {
   }, 60_000);
 
   it('usage errors exit 1', () => {
-    const bogus = runCli(['--bogus', path.join(tmp, 'input.md')], baseEnv());
+    const bogus = runCli(['plan', '--bogus', path.join(tmp, 'input.md')], baseEnv());
     expect(bogus.status).toBe(1);
     expect(bogus.stderr).toContain('unknown flag: --bogus');
-    expect(bogus.stderr).toContain('usage: plan-loop');
+    expect(bogus.stderr).toContain('usage: agent-quorum');
 
-    const missing = runCli([path.join(tmp, 'no-such.md')], baseEnv());
+    const missing = runCli(['plan', path.join(tmp, 'no-such.md')], baseEnv());
     expect(missing.status).toBe(1);
     expect(missing.stderr).toContain(`file not found: ${path.join(tmp, 'no-such.md')}`);
   });
@@ -138,7 +148,16 @@ describe('exit-code matrix (AC-3)', () => {
     const invalid = path.join(tmp, 'invalid-critique.json');
     writeCritique(invalid, [{ id: 'BAD' }]);
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({ FAKE_CODEX_OUTPUT: invalid }),
     );
     expect(result.status).toBe(3);
@@ -152,6 +171,7 @@ describe('exit-code matrix (AC-3)', () => {
       writeCritique(invalid, [{ id: 'BAD' }]);
       const result = await runCliAsync(
         [
+          'plan',
           '--effort',
           'low',
           '--iters',
@@ -168,7 +188,7 @@ describe('exit-code matrix (AC-3)', () => {
       expect(result.status).toBe(3);
       expect(stub.sent).toHaveLength(1);
       const message = stub.sent[0] ?? '';
-      expect(message).toContain('plan-loop finished: FAILED (exit 3)');
+      expect(message).toContain('agent-quorum finished: FAILED (exit 3)');
       expect(message).toContain('input: input.md');
       expect(message).toContain('reason: critique failed schema validation');
       expect(message).toContain(`workdir: ${canonicalWorkPath()}`);
@@ -184,7 +204,7 @@ describe('exit-code matrix (AC-3)', () => {
     const empty = path.join(tmp, 'empty.md');
     writeFileSync(empty, '');
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', '--prompt', prompt, '--no-fix', '--no-translate'],
+      ['plan', '--effort', 'low', '--iters', '1', '--prompt', prompt, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CLAUDE_MARKDOWN_RESULT: empty }),
     );
     expect(result.status).toBe(4);
@@ -198,7 +218,7 @@ describe('exit-code matrix (AC-3)', () => {
       `${readFileSync(violating, 'utf8')}\n\`\`\`sh\npnpm -r test\n\`\`\`\n`,
     );
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', violating, '--no-fix', '--no-translate'],
+      ['plan', '--effort', 'low', '--iters', '1', violating, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(5);
@@ -209,7 +229,7 @@ describe('exit-code matrix (AC-3)', () => {
     const broken = path.join(tmp, 'broken.md');
     writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
+      ['plan', '--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(6);
@@ -222,7 +242,7 @@ describe('exit-code matrix (AC-3)', () => {
       const broken = path.join(tmp, 'broken.md');
       writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
       const result = await runCliAsync(
-        ['--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
+        ['plan', '--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
         telegramEnv(stub, {
           FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         }),
@@ -231,7 +251,7 @@ describe('exit-code matrix (AC-3)', () => {
       expect(result.status).toBe(6);
       expect(stub.sent).toHaveLength(1);
       const message = stub.sent[0] ?? '';
-      expect(message).toContain('plan-loop finished: FAILED (exit 6)');
+      expect(message).toContain('agent-quorum finished: FAILED (exit 6)');
       expect(message).toContain('input: broken.md');
       expect(message).toContain('status: blocked');
       expect(message).toContain('reason: plan shape broken');
@@ -257,14 +277,24 @@ describe('exit-code matrix (AC-3)', () => {
       const prompt = path.join(tmp, 'prompt.md');
       writeFileSync(prompt, 'Build the thing.\n');
       const result = await runCliAsync(
-        ['--effort', 'low', '--iters', '1', '--prompt', prompt, '--no-fix', '--no-translate'],
+        [
+          'plan',
+          '--effort',
+          'low',
+          '--iters',
+          '1',
+          '--prompt',
+          prompt,
+          '--no-fix',
+          '--no-translate',
+        ],
         baseEnv({
-          PLAN_LOOP_CLARIFY: '1',
-          PLAN_LOOP_TELEGRAM_BOT_TOKEN: 't',
-          PLAN_LOOP_TELEGRAM_CHAT_ID: '42',
-          PLAN_LOOP_TELEGRAM_API_BASE: stub.baseUrl,
-          PLAN_LOOP_TELEGRAM_POLL_TIMEOUT: '1',
-          PLAN_LOOP_CLARIFY_DEADLINE_SECONDS: '5',
+          AGENT_QUORUM_CLARIFY: '1',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+          AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
+          AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT: '1',
+          AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '5',
         }),
       );
       expect(result.status).toBe(7);
@@ -321,7 +351,7 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
 
     const help = runCli(['launch', '--help'], baseEnv());
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain('usage: plan-loop launch');
+    expect(help.stdout).toContain('usage: agent-quorum launch');
   });
 
   it('status rejects an unknown PID with exit 2', () => {
@@ -330,9 +360,50 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
     expect(result.stderr).toContain('PID 999999 not found');
   });
 
-  it('the core run owns every non-subcommand first argument', () => {
+  it('the plan stage runs the loop under an explicit plan subcommand', () => {
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
+      baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
+    );
+    expect(result.status).toBe(0);
+  });
+
+  it('rejects an unknown first token with exit 2 and global help', () => {
+    const result = runCli(['frobnicate'], baseEnv());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("unknown command 'frobnicate'");
+    expect(result.stderr).toContain('usage: agent-quorum');
+  });
+
+  it('prints global help and exits 0 with no arguments', () => {
+    const result = runCli([], baseEnv());
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('usage: agent-quorum');
+    expect(result.stdout).toContain('stages:');
+  });
+
+  it('drops a forwarded -- separator before the plan flags (plan:self shape)', () => {
+    const result = runCli(
+      [
+        'plan',
+        '--',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(0);
@@ -342,7 +413,16 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
 describe('runner auth preflight', () => {
   it('halts with exit 1 before any provider call when a probe reports unauthenticated', () => {
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         FAKE_CODEX_LOGIN_STATUS: '1',
@@ -356,7 +436,16 @@ describe('runner auth preflight', () => {
 
   it('warns and continues when a probe outcome is unknown', () => {
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         FAKE_CODEX_LOGIN_STATUS: '3',
@@ -377,19 +466,28 @@ describe('default artifact root (AC-14, AC-16)', () => {
     writeFileSync(seed, seedContent);
 
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       {
         PATH: `${fake}:${process.env.PATH ?? ''}`,
-        PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-        PLAN_LOOP_CLARIFY: '0',
-        PLAN_LOOP_RETRY_COUNT: '0',
+        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+        AGENT_QUORUM_CLARIFY: '0',
+        AGENT_QUORUM_RETRY_COUNT: '0',
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         HOME: home,
-        PLAN_LOOP_HOME: undefined,
-        PLAN_LOOP_PLANS_DIR: undefined,
-        PLAN_LOOP_STATE_DIR: undefined,
-        PLAN_LOOP_WORK_DIR: undefined,
+        AGENT_QUORUM_HOME: undefined,
+        AGENT_QUORUM_PLANS_DIR: undefined,
+        AGENT_QUORUM_STATE_DIR: undefined,
+        AGENT_QUORUM_WORK_DIR: undefined,
       },
     );
     expect(result.status).toBe(0);
@@ -404,19 +502,28 @@ describe('default artifact root (AC-14, AC-16)', () => {
     expect(existsSync(path.join(claudePlans, '.runs'))).toBe(false);
   });
 
-  it('still honors PLAN_LOOP_PLANS_DIR / PLAN_LOOP_STATE_DIR overrides', () => {
+  it('still honors AGENT_QUORUM_PLANS_DIR / AGENT_QUORUM_STATE_DIR overrides', () => {
     const result = runCli(
-      ['--effort', 'low', '--iters', '1', path.join(tmp, 'input.md'), '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--effort',
+        'low',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
       {
         PATH: `${fake}:${process.env.PATH ?? ''}`,
-        PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-        PLAN_LOOP_CLARIFY: '0',
-        PLAN_LOOP_RETRY_COUNT: '0',
+        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+        AGENT_QUORUM_CLARIFY: '0',
+        AGENT_QUORUM_RETRY_COUNT: '0',
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
-        PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-        PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-        PLAN_LOOP_WORK_DIR: undefined,
+        AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+        AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+        AGENT_QUORUM_WORK_DIR: undefined,
       },
     );
     expect(result.status).toBe(0);
@@ -435,18 +542,21 @@ describe('--help / --version', () => {
     ]) {
       const result = runCli(args, baseEnv());
       expect(result.status, args.join(' ')).toBe(0);
-      expect(result.stdout, args.join(' ')).toContain('plan-loop');
+      expect(result.stdout, args.join(' ')).toContain('agent-quorum');
       expect(result.stdout, args.join(' ')).not.toContain('.sh');
     }
     const core = runCli(['--help'], baseEnv());
-    expect(core.stdout).toContain('usage: plan-loop');
+    expect(core.stdout).toContain('usage: agent-quorum');
     expect(core.stdout).toContain('defaults: iters=4 effort=high fix=on translate=off');
   });
 
-  it('--help inside core-run args prints the run usage to stdout and exits 0', () => {
-    const result = runCli(['--iters', '1', path.join(tmp, 'input.md'), '--help'], baseEnv());
+  it('--help inside plan args prints the run usage to stdout and exits 0', () => {
+    const result = runCli(
+      ['plan', '--iters', '1', path.join(tmp, 'input.md'), '--help'],
+      baseEnv(),
+    );
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('usage: plan-loop');
+    expect(result.stdout).toContain('usage: agent-quorum');
     expect(result.stdout).not.toContain('.sh');
   });
 

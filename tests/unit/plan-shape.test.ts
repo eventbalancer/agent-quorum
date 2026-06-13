@@ -9,7 +9,7 @@ import {
   planHasImpactGraphMermaid,
   planHasTitleHeading,
   requirePlanDocumentShape,
-} from '../../src/core/plan-shape.js';
+} from '../../src/stages/plan/plan-shape.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import { captureStderr, writeStructuredPlanFile } from '../helpers/harness.js';
 
@@ -44,7 +44,7 @@ function normalizeQuiet(target: string): void {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-shapetest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-shapetest.'));
 });
 
 afterEach(() => {

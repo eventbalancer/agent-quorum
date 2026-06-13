@@ -4,51 +4,53 @@ import { packageRoot } from '../runtime/env.js';
 import { configFilePath } from '../core/config.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 
-// Single source of the usage strings for all four entry points — the bin is
-// `plan-loop`; the reference *.sh names never appear in user-facing output.
+// Single source of the run-lifecycle usage strings — the bin is `agent-quorum`;
+// the reference *.sh names never appear in user-facing output. Stage usage
+// (the plan loop) lives with its stage, not here.
 
-export const RUN_USAGE =
-  'usage: plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
-  '       plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>\n';
+export interface StageSummary {
+  readonly name: string;
+  readonly summary: string;
+}
 
 export const LAUNCH_USAGE =
-  'usage: plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n';
+  'usage: agent-quorum launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n';
 
 export const INTERVENE_USAGE =
-  'usage: plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
-  '       plan-loop intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>\n' +
-  '       plan-loop intervene (--work <workdir> | <selector>) [--target ...] --stdin\n';
+  'usage: agent-quorum intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
+  '       agent-quorum intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>\n' +
+  '       agent-quorum intervene (--work <workdir> | <selector>) [--target ...] --stdin\n';
 
 export const STATUS_USAGE =
-  'plan-loop status — show progress of a plan-loop run.\n' +
+  'agent-quorum status — show progress of an agent-quorum run.\n' +
   '\n' +
   'Usage:\n' +
-  '  plan-loop status <PID>          — any PID in the run’s process tree (main or child)\n' +
-  '  plan-loop status                — list runs (interactive picker in a TTY)\n' +
-  '  plan-loop status --watch [sel]  — re-render until the run ends (one snapshot non-TTY)\n';
+  '  agent-quorum status <PID>          — any PID in the run’s process tree (main or child)\n' +
+  '  agent-quorum status                — list runs (interactive picker in a TTY)\n' +
+  '  agent-quorum status --watch [sel]  — re-render until the run ends (one snapshot non-TTY)\n';
 
 export const PRUNE_USAGE =
-  'plan-loop prune — bound the run ledger (records only; workdirs are never deleted).\n' +
+  'agent-quorum prune — bound the run ledger (records only; workdirs are never deleted).\n' +
   '\n' +
   'Usage:\n' +
-  '  plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]\n';
+  '  agent-quorum prune [--keep N] [--max-age DAYS] [--dry-run]\n';
 
 export const SHOW_USAGE =
-  'plan-loop show <selector> — print a run’s artifact paths and state.\n' +
+  'agent-quorum show <selector> — print a run’s artifact paths and state.\n' +
   '\n' +
   'Usage:\n' +
-  '  plan-loop show <name|id|PID>   — resolve a run and print workdir/plan/summary/log\n' +
-  '  plan-loop show --last          — the most recent run\n' +
-  '  plan-loop show --work <dir>    — an explicit workdir\n';
+  '  agent-quorum show <name|id|PID>   — resolve a run and print workdir/plan/summary/log\n' +
+  '  agent-quorum show --last          — the most recent run\n' +
+  '  agent-quorum show --work <dir>    — an explicit workdir\n';
 
 export const LOGS_USAGE =
-  'plan-loop logs <selector> [-f] — print or follow a run’s run.log.\n' +
+  'agent-quorum logs <selector> [-f] — print or follow a run’s run.log.\n' +
   '\n' +
   'Usage:\n' +
-  '  plan-loop logs <name|id|PID>      — print run.log\n' +
-  '  plan-loop logs <selector> -f      — follow until the run ends\n' +
-  '  plan-loop logs --last [-f]        — the most recent run\n' +
-  '  plan-loop logs --work <dir> [-f]  — an explicit workdir\n';
+  '  agent-quorum logs <name|id|PID>      — print run.log\n' +
+  '  agent-quorum logs <selector> -f      — follow until the run ends\n' +
+  '  agent-quorum logs --last [-f]        — the most recent run\n' +
+  '  agent-quorum logs --work <dir> [-f]  — an explicit workdir\n';
 
 export function packageVersion(): string {
   const parsed = JSON.parse(
@@ -99,34 +101,26 @@ function defaultsLine(): string {
   return `\ndefaults: ${parts.join(' ')} (from ${file})\n`;
 }
 
-export function globalHelp(): string {
+export function globalHelp(stages: readonly StageSummary[]): string {
+  const stageLines = stages
+    .map((stage) => `  ${stage.name.padEnd(11)} ${stage.summary}`)
+    .join('\n');
   return (
-    RUN_USAGE +
-    '       plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n' +
-    '       plan-loop status [PID]\n' +
-    '       plan-loop show <selector>\n' +
-    '       plan-loop logs <selector> [-f]\n' +
-    '       plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]\n' +
-    '       plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
+    'usage: agent-quorum <command> [options]\n' +
     '\n' +
-    'subcommands:\n' +
+    'stages:\n' +
+    `${stageLines}\n` +
+    '\n' +
+    'run-lifecycle commands:\n' +
     '  launch      detach a run into its own process group with run.log redirection\n' +
-    '  status      show progress of running plan-loop runs (--watch to follow)\n' +
+    '  status      show progress of running agent-quorum runs (--watch to follow)\n' +
     '  show        print a run’s artifact paths (resolve by name/id/PID/--last/--work)\n' +
     '  logs        print or follow a run’s run.log\n' +
     '  prune       remove terminal run records beyond the retention bound\n' +
     '  intervene   append an operator intervention to a run’s ledger\n' +
     '\n' +
-    'flags (core run):\n' +
-    '  --iters N                     iteration cap\n' +
-    '  --effort {low,high,max}       effort preset\n' +
-    '  --fix / --no-fix              enable/disable the fix pass\n' +
-    '  --locale LOCALE               localize human interaction and final companion plan\n' +
-    '  --translate / --no-translate  compatibility toggle for the translate pass\n' +
-    '  --prompt <prompt.md>          create plan.v0 from a prompt file first\n' +
-    '  -h, --help                    print usage\n' +
-    '\n' +
-    'plan-loop --version (or -V, as the first argument) prints the package version.\n' +
+    'agent-quorum <command> --help prints command-specific usage.\n' +
+    'agent-quorum --version (or -V, as the first argument) prints the package version.\n' +
     defaultsLine()
   );
 }

@@ -3,7 +3,7 @@
 ## Roles and providers
 
 Five roles drive the loop, each resolved to a provider through
-`plan-loop.json` (`env > file` per field):
+`agent-quorum.json` (`env > file` per field):
 
 | Role       | Purpose                                            | Mode                   |
 | ---------- | -------------------------------------------------- | ---------------------- |
@@ -34,7 +34,7 @@ stderr bodies are omitted from normal logs. Provider stderr is captured and
 bounded rather than inherited directly; non-zero exits produce one
 `<role>/<provider> call failed` summary with status, stderr line count, and a
 classified reason when recognized. Raw stdout and stderr are dropped from normal
-logs by default; `PLAN_LOOP_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
+logs by default; `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
 `$WORK/diagnostics/` directory that captures each call's raw streams chunk-wise
 through a best-effort sink that never fails or alters the call.
 
@@ -94,7 +94,7 @@ split policy fires: `README.md`, `plan.md`, `run.md`, `journal.md`,
 `operator-intervention-migrations.jsonl`, `clarify-questions.json`,
 `clarify-answers.jsonl`, `clarify.offset`, `clarify.done`, `prompt.md`,
 `run.meta.tsv`, `run.log`, the opt-in `diagnostics/<seq>-<role>-<provider>.log`
-artifacts (only when `PLAN_LOOP_PROVIDER_DIAGNOSTICS=1`), `creator.session-id`,
+artifacts (only when `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1`), `creator.session-id`,
 and `stale.<timestamp>/` archives on resume (which now also archive `plan.split.json`,
 `package-findings.json`, and `plan.package/`). A registry copy of
 `run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
@@ -118,7 +118,7 @@ the runner exits 143 on signal.
 
 ## Resume and interventions
 
-`PLAN_LOOP_RESUME=1` finds the last stable plan (highest `plan.vN.md` whose
+`AGENT_QUORUM_RESUME=1` finds the last stable plan (highest `plan.vN.md` whose
 `update.v(N-1).json` validates), archives stale artifacts to
 `stale.<timestamp>/`, and continues. Operator interventions append to a JSONL
 ledger; active entries are injected into critic/creator/fixer/reviewer prompts

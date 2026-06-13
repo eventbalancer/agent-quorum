@@ -7,7 +7,7 @@ export class Scratch {
   private constructor(readonly dir: string) {}
 
   static create(base: string): Scratch {
-    return new Scratch(mkdtempSync(path.join(os.tmpdir(), `plan-loop-${base}.`)));
+    return new Scratch(mkdtempSync(path.join(os.tmpdir(), `agent-quorum-${base}.`)));
   }
 
   file(): string {

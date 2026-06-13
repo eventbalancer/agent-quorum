@@ -15,14 +15,14 @@ export function colorsEnabled(stream: ColorStream = process.stderr): boolean {
   return stream.isTTY === true;
 }
 
-const PLAN_LOOP_PREFIX = '[plan-loop]';
+export const AGENT_QUORUM_PREFIX = '[agent-quorum]';
 const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 let runLogFd: number | undefined;
 
-// Mirror every `[plan-loop]` line into a run's own run.log for in-process runs.
+// Mirror every `[agent-quorum]` line into a run's own run.log for in-process runs.
 // The detached launch child already has run.log as its stderr fd, so it sets
-// PLAN_LOOP_STDIO_IS_RUNLOG=1 and leaves the sink disabled to avoid double
+// AGENT_QUORUM_STDIO_IS_RUNLOG=1 and leaves the sink disabled to avoid double
 // writes, keeping the detached run.log byte-identical.
 export function enableRunLogSink(file: string): void {
   disableRunLogSink();
@@ -46,11 +46,13 @@ export function disableRunLogSink(): void {
 }
 
 function emit(colorCode: string, message: string): void {
-  const prefix = colorsEnabled() ? `${colorCode}${PLAN_LOOP_PREFIX}\x1b[0m` : PLAN_LOOP_PREFIX;
+  const prefix = colorsEnabled()
+    ? `${colorCode}${AGENT_QUORUM_PREFIX}\x1b[0m`
+    : AGENT_QUORUM_PREFIX;
   process.stderr.write(`${prefix} ${message}\n`);
   if (runLogFd !== undefined) {
     try {
-      writeSync(runLogFd, `${PLAN_LOOP_PREFIX} ${message.replace(ANSI_PATTERN, '')}\n`);
+      writeSync(runLogFd, `${AGENT_QUORUM_PREFIX} ${message.replace(ANSI_PATTERN, '')}\n`);
     } catch {
       /* never let logging crash the run */
     }

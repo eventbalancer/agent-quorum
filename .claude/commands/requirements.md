@@ -72,12 +72,12 @@ Check the relevant surfaces:
 
 - CLI behavior: `src/cli/*`, `docs/cli.md`, `package.json` `bin` and scripts.
 - Public API: `src/index.ts`, `docs/api.md`, `package.json` `exports`.
-- Configuration: `plan-loop.json`, `src/core/config.ts`,
+- Configuration: `agent-quorum.json`, `src/core/config.ts`,
   `docs/configuration.md`.
 - Orchestration: `src/core/*`, `docs/architecture.md`.
 - Providers and watchdogs: `src/providers/*`, `src/runtime/*`.
 - Role skills and schemas: `skills/**/SKILL.md`, `skills/**/*.schema.json`.
-- Self-planning dogfood: the `plan:self` package script (`plan-loop` from source).
+- Self-planning dogfood: the `plan:self` package script (`agent-quorum` from source).
 
 Every claim about existing code carries `file:line`. Every claim about behavior
 carries a source: docs, config, tests, or a prior operator statement. Anything

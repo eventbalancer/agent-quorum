@@ -40,13 +40,13 @@ pairs with `cmp`.
 
 All workflow artifacts stay inside the repository-local `.agents` directory:
 
-| Directory                     | Contents                                      |
-| ----------------------------- | --------------------------------------------- |
-| `.agents/requirements/`       | approved or draft requirements                |
-| `.agents/prompts/`            | generated downstream prompts                  |
-| `.agents/plans/`              | agent-quorum workdirs and plan-loop artifacts |
-| `.agents/execution-journals/` | generated lightweight execute journals        |
-| `.agents/skills/`             | mirrored Codex skills, committed source       |
+| Directory                     | Contents                                         |
+| ----------------------------- | ------------------------------------------------ |
+| `.agents/requirements/`       | approved or draft requirements                   |
+| `.agents/prompts/`            | generated downstream prompts                     |
+| `.agents/plans/`              | agent-quorum workdirs and agent-quorum artifacts |
+| `.agents/execution-journals/` | generated lightweight execute journals           |
+| `.agents/skills/`             | mirrored Codex skills, committed source          |
 
 The generated artifact directories are ignored by git. `.agents/skills/` is
 source and should be committed when the skill text changes.
@@ -216,7 +216,7 @@ Rules:
 
 ## Running agent-quorum
 
-Dogfood the loop through the `plan-loop` bin, run straight from source:
+Dogfood the loop through the `agent-quorum` bin, run straight from source:
 
 ```sh
 pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
@@ -226,7 +226,7 @@ Useful options:
 
 ```sh
 pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
-PLAN_LOOP_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
+AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
 ```
 
 `plan:self` runs `src/cli/main.ts` via `tsx` — no build step — and writes run

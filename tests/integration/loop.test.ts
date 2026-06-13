@@ -10,7 +10,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runIterationLoop } from '../../src/core/loop.js';
+import { runIterationLoop } from '../../src/stages/plan/loop.js';
 import type { RunContext } from '../../src/core/run-context.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { makeTestRunContext, type TestContextOptions } from '../helpers/test-context.js';
@@ -59,7 +59,7 @@ function seedWork(): void {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-looptest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-looptest.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   work = path.join(tmp, 'work');

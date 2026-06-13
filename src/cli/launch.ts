@@ -177,7 +177,7 @@ export async function runLaunchCli(
   const { home, runsDir, stateDir } = resolveArtifactRoots(overrides);
   const plansDir = runsDir;
 
-  let workOverride = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
+  let workOverride = overrides.workDir ?? process.env.AGENT_QUORUM_WORK_DIR;
   if (resume && (workOverride === undefined || workOverride === '')) {
     const resolved = resolveResumeWorkdir(plansDir, base, effortVal);
     if (resolved.kind === 'none') {
@@ -211,22 +211,22 @@ export async function runLaunchCli(
 
   const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
   if (resume) {
-    env.PLAN_LOOP_RESUME = '1';
+    env.AGENT_QUORUM_RESUME = '1';
   }
-  env.PLAN_LOOP_WORK_DIR = work;
+  env.AGENT_QUORUM_WORK_DIR = work;
   if (overrides.configFile !== undefined) {
-    env.PLAN_LOOP_CONFIG_FILE = overrides.configFile;
+    env.AGENT_QUORUM_CONFIG_FILE = overrides.configFile;
   }
-  env.PLAN_LOOP_HOME = home;
-  env.PLAN_LOOP_STDIO_IS_RUNLOG = '1';
+  env.AGENT_QUORUM_HOME = home;
+  env.AGENT_QUORUM_STDIO_IS_RUNLOG = '1';
   if (mintedRunId !== undefined) {
-    env.PLAN_LOOP_RUN_ID = mintedRunId;
-    env.PLAN_LOOP_RUN_NAME = name;
+    env.AGENT_QUORUM_RUN_ID = mintedRunId;
+    env.AGENT_QUORUM_RUN_NAME = name;
   }
 
   const runner = runnerCommand();
   const logFd = openSync(logPath, 'w');
-  const child = spawn(runner.command, [...runner.baseArgs, ...passArgs], {
+  const child = spawn(runner.command, [...runner.baseArgs, 'plan', ...passArgs], {
     cwd: projectRoot(),
     env,
     detached: true,
@@ -236,7 +236,7 @@ export async function runLaunchCli(
   const pid = child.pid ?? 0;
   child.unref();
 
-  const verifyDelay = Number(process.env.PLAN_LOOP_LAUNCH_VERIFY_DELAY ?? 1);
+  const verifyDelay = Number(process.env.AGENT_QUORUM_LAUNCH_VERIFY_DELAY ?? 1);
   await sleep(verifyDelay * 1000);
   let alive = true;
   try {
@@ -245,7 +245,7 @@ export async function runLaunchCli(
     alive = false;
   }
   if (!alive) {
-    fail(`launch failed: plan-loop exited immediately; inspect log: ${logPath}`, 1);
+    fail(`launch failed: agent-quorum exited immediately; inspect log: ${logPath}`, 1);
   }
 
   out(

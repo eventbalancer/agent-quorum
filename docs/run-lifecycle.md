@@ -1,6 +1,6 @@
 # Run lifecycle
 
-Every plan-loop run is addressable for its whole life — start, observe, inspect,
+Every agent-quorum run is addressable for its whole life — start, observe, inspect,
 intervene, stop — from both the CLI and the library, using one selector grammar.
 This page walks the five stages end to end. For the full flag reference see
 [`cli.md`](cli.md); for the typed surface see [`api.md`](api.md).
@@ -26,7 +26,7 @@ block, and `RunResult`/`LaunchResult`.
 
 Artifacts live under `~/.agent-quorum` by default: functional output in
 `runs/loop-<name>/` and the durable per-run ledger in `state/runs/<runId>.json`
-(see [`configuration.md`](configuration.md) for `PLAN_LOOP_HOME` and the
+(see [`configuration.md`](configuration.md) for `AGENT_QUORUM_HOME` and the
 overrides). The library lookups also take a `home` option to read a custom root
 without mutating the environment.
 
@@ -35,9 +35,9 @@ without mutating the environment.
 CLI — foreground core run, or a detached background run:
 
 ```sh
-plan-loop my-plan.md                    # run in the foreground; logs to stderr
-plan-loop --prompt my-task.md           # create plan.v0 from a prompt first
-plan-loop launch --effort high task.md  # detach into its own process group
+agent-quorum plan my-plan.md               # run in the foreground; logs to stderr
+agent-quorum plan --prompt my-task.md      # create plan.v0 from a prompt first
+agent-quorum launch --effort high task.md  # detach into its own process group
 ```
 
 A foreground run logs `run <id> (<name>)` at start and writes `run.log` in its
@@ -59,8 +59,8 @@ const launched = await launchPlanLoop({ input: 'task.md' });
 Follow a run's log by selector (pure Node; no external `tail`):
 
 ```sh
-plan-loop logs my-plan          # print run.log
-plan-loop logs --last -f        # follow the most-recent run until it ends
+agent-quorum logs my-plan          # print run.log
+agent-quorum logs --last -f        # follow the most-recent run until it ends
 ```
 
 `-f`/`--follow` streams appended lines until the run reaches a terminal state.
@@ -72,16 +72,16 @@ which returns the `run.log` path when it exists, else `undefined`.
 `show` prints a run's resolved artifact paths and state:
 
 ```sh
-plan-loop show --last           # workdir + plan.final.md / summary.md / run.log + state
+agent-quorum show --last           # workdir + plan.final.md / summary.md / run.log + state
 ```
 
 ## 3. Status
 
 ```sh
-plan-loop status                # TTY: pick from live-first + recent-finished runs
+agent-quorum status                # TTY: pick from live-first + recent-finished runs
                                 # non-TTY: a scriptable listing; never blocks
-plan-loop status <PID>          # the run owning any PID in its process tree
-plan-loop status --watch --last # re-render until the run ends (one snapshot non-TTY)
+agent-quorum status <PID>          # the run owning any PID in its process tree
+agent-quorum status --watch --last # re-render until the run ends (one snapshot non-TTY)
 ```
 
 The no-arg listing sources the durable ledger (a record is live only when its
@@ -100,9 +100,9 @@ Append operator guidance to a run's ledger; the targeted roles pick it up on
 their next call:
 
 ```sh
-plan-loop intervene --last "prefer the staged rollout"
-plan-loop intervene my-plan --target creator "use the existing retry helper"
-plan-loop intervene --work /abs/path/loop-my-plan "..."   # explicit workdir
+agent-quorum intervene --last "prefer the staged rollout"
+agent-quorum intervene my-plan --target creator "use the existing retry helper"
+agent-quorum intervene --work /abs/path/loop-my-plan "..."   # explicit workdir
 ```
 
 The workdir comes from `--work` or, when absent, from the selector. The API
@@ -129,9 +129,9 @@ landed, else `failed`) once its pid is no longer live.
 ## Retention
 
 The ledger self-bounds: each run prunes terminal records beyond the retention
-window at start, and `plan-loop prune` (API `pruneRuns`) does it on demand.
+window at start, and `agent-quorum prune` (API `pruneRuns`) does it on demand.
 Pruning removes ledger records only — functional workdirs are never deleted.
 
 ```sh
-plan-loop prune --keep 50 --dry-run   # report what would be removed
+agent-quorum prune --keep 50 --dry-run   # report what would be removed
 ```

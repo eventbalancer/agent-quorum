@@ -92,7 +92,7 @@ hint instead of stalling mid-run.
 Create a task prompt and run the loop:
 
 ```sh
-plan-loop --prompt my-task.md
+agent-quorum plan --prompt my-task.md
 ```
 
 By default the run writes its functional artifacts to
@@ -108,17 +108,17 @@ you care about are:
 
 ## CLI
 
-A single `plan-loop` bin fronts these entry points:
+A single `agent-quorum` bin fronts these entry points:
 
 ```sh
-plan-loop my-plan.md                      # core loop over an existing plan
-plan-loop --prompt my-prompt.md           # create plan.v0 from a prompt first
-plan-loop launch --effort high task.md    # detached background run + run.log
-plan-loop status                          # pick a run (TTY) or scriptable listing
-plan-loop show <name|id|PID|--last>       # a run's artifact paths and state
-plan-loop logs <selector> [-f]            # print or follow a run's run.log
-plan-loop intervene <selector> "note"     # inject operator guidance mid-run
-plan-loop prune [--keep N] [--dry-run]    # bound the run ledger
+agent-quorum plan my-plan.md                 # core loop over an existing plan
+agent-quorum plan --prompt my-prompt.md      # create plan.v0 from a prompt first
+agent-quorum launch --effort high task.md    # detached background run + run.log
+agent-quorum status                          # pick a run (TTY) or scriptable listing
+agent-quorum show <name|id|PID|--last>       # a run's artifact paths and state
+agent-quorum logs <selector> [-f]            # print or follow a run's run.log
+agent-quorum intervene <selector> "note"     # inject operator guidance mid-run
+agent-quorum prune [--keep N] [--dry-run]    # bound the run ledger
 ```
 
 Runs are addressable by a durable `runId`/`name` selector; see the end-to-end
@@ -148,8 +148,8 @@ returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
 
 ## Configuration
 
-agent-quorum reads one config file: the packaged `plan-loop.json`, or the file
-pointed at by `PLAN_LOOP_CONFIG_FILE`. There is no search chain. It has two main
+agent-quorum reads one config file: the packaged `agent-quorum.json`, or the file
+pointed at by `AGENT_QUORUM_CONFIG_FILE`. There is no search chain. It has two main
 sections: `settings` (iteration cap, effort, fix pass, locale, translation,
 retries) and `roles` (per-role runner, model, reasoning level, and tool
 permissions). Supported runners are `codex`, `claude`, and `cursor`.
@@ -157,9 +157,9 @@ permissions). Supported runners are `codex`, `claude`, and `cursor`.
 A gitignored package-root `.env` is loaded before config resolution, with real
 environment variables winning. It is intended for secrets such as Telegram bot
 credentials, which enable final completion notifications automatically; set
-`PLAN_LOOP_CLARIFY=0` for notifications without the prompt-mode question gate.
+`AGENT_QUORUM_CLARIFY=0` for notifications without the prompt-mode question gate.
 
-The full reference — every `PLAN_LOOP_*` variable, watchdog knob, Telegram
+The full reference — every `AGENT_QUORUM_*` variable, watchdog knob, Telegram
 setting, status/launch toggle, and the exact CLI > env > file
 [override precedence](docs/configuration.md#precedence) — lives in
 [`docs/configuration.md`](docs/configuration.md).
@@ -176,9 +176,9 @@ Both macOS and Linux are tested on every push and pull request via the full
 `pnpm run check` matrix (build · typecheck · lint · format · tests). Install the
 provider CLIs you plan to use (`npm install -g @anthropic-ai/claude-code`,
 `npm install -g @openai/codex`) and authenticate each. `cursor-agent` has no
-official Linux package yet; point `PLAN_LOOP_CURSOR_BIN` at your Cursor headless
+official Linux package yet; point `AGENT_QUORUM_CURSOR_BIN` at your Cursor headless
 binary to use the `cursor` runner there (see
-[`docs/configuration.md`](docs/configuration.md)). `plan-loop status` uses
+[`docs/configuration.md`](docs/configuration.md)). `agent-quorum status` uses
 `lsof` to resolve a running session's workdir when `--work` is omitted and
 degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 
@@ -186,7 +186,7 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 
 - [`docs/architecture.md`](docs/architecture.md) — roles, providers, loop
   mechanics, artifact contract, watchdog, sessions.
-- [`docs/configuration.md`](docs/configuration.md) — `plan-loop.json` and the
+- [`docs/configuration.md`](docs/configuration.md) — `agent-quorum.json` and the
   environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
 - [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.
@@ -217,7 +217,7 @@ follow-ups straight into the backlog, where they enter the delivery flow
 ([`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)).
 
 For changes that should be designed by `agent-quorum` itself, dogfood the loop
-through the `plan-loop` bin straight from source — see [`examples/`](examples/)
+through the `agent-quorum` bin straight from source — see [`examples/`](examples/)
 for the full CLI and API walkthrough:
 
 ```sh
@@ -226,7 +226,7 @@ pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 
 `plan:self` runs `src/cli/main.ts` via `tsx` (no build), points run artifacts at
 `.agents/plans/`, and accepts the usual `--effort`, `--iters`, `--locale`,
-`--translate`, and `--fix` / `--no-fix` flags; set `PLAN_LOOP_WORK_DIR` to pin a
+`--translate`, and `--fix` / `--no-fix` flags; set `AGENT_QUORUM_WORK_DIR` to pin a
 workdir name.
 
 Artifact ownership:

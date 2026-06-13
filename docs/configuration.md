@@ -1,8 +1,8 @@
 # Configuration
 
-## plan-loop.json
+## agent-quorum.json
 
-One fixed config file at the package root; `PLAN_LOOP_CONFIG_FILE` overrides
+One fixed config file at the package root; `AGENT_QUORUM_CONFIG_FILE` overrides
 the path (there is no search chain). Missing required fields halt the run with
 a controlled error; unknown keys warn and are ignored.
 
@@ -47,30 +47,30 @@ string or a non-empty string array (joined with commas).
 
 A gitignored `.env` at the **package root** loads unconditionally before any
 config resolution, with real-environment-wins semantics. A `.env` sitting next
-to a `PLAN_LOOP_CONFIG_FILE` override is never read. Intended for the Telegram
+to a `AGENT_QUORUM_CONFIG_FILE` override is never read. Intended for the Telegram
 secrets and other local credentials.
 
 ## Environment variables
 
 ### Run placement
 
-| Variable                 | Meaning                                                       |
-| ------------------------ | ------------------------------------------------------------- |
-| `PLAN_LOOP_CONFIG_FILE`  | config file override                                          |
-| `PLAN_LOOP_HOME`         | artifact root (default `~/.agent-quorum`)                     |
-| `PLAN_LOOP_WORK_DIR`     | explicit workdir (default `<home>/runs/loop-<name>`)          |
-| `PLAN_LOOP_PLANS_DIR`    | functional runs root (default `<home>/runs`; legacy override) |
-| `PLAN_LOOP_STATE_DIR`    | system ledger dir (default `<home>/state`; legacy override)   |
-| `PLAN_LOOP_RETAIN_COUNT` | prune keeps this many terminal records (default 50)           |
-| `PLAN_LOOP_RETAIN_DAYS`  | prune drops terminal records older than this (default 30)     |
-| `PLAN_LOOP_RESUME`       | `1` resumes from the last stable plan                         |
+| Variable                    | Meaning                                                       |
+| --------------------------- | ------------------------------------------------------------- |
+| `AGENT_QUORUM_CONFIG_FILE`  | config file override                                          |
+| `AGENT_QUORUM_HOME`         | artifact root (default `~/.agent-quorum`)                     |
+| `AGENT_QUORUM_WORK_DIR`     | explicit workdir (default `<home>/runs/loop-<name>`)          |
+| `AGENT_QUORUM_PLANS_DIR`    | functional runs root (default `<home>/runs`; legacy override) |
+| `AGENT_QUORUM_STATE_DIR`    | system ledger dir (default `<home>/state`; legacy override)   |
+| `AGENT_QUORUM_RETAIN_COUNT` | prune keeps this many terminal records (default 50)           |
+| `AGENT_QUORUM_RETAIN_DAYS`  | prune drops terminal records older than this (default 30)     |
+| `AGENT_QUORUM_RESUME`       | `1` resumes from the last stable plan                         |
 
 The default root splits **functional** output (`<home>/runs/loop-<name>`, the
 per-run workdirs holding `plan.final.md`/`summary.md`/`run.log`) from the
 **system** ledger (`<home>/state/runs/<runId>.json`, the durable run records).
 A clean install writes nothing under `~/.claude`; there is no migration of
-pre-existing `~/.claude/plans` trees (setting `PLAN_LOOP_HOME=$HOME/.claude/plans`
-recreates the old location if needed). Setting only `PLAN_LOOP_PLANS_DIR` keeps
+pre-existing `~/.claude/plans` trees (setting `AGENT_QUORUM_HOME=$HOME/.claude/plans`
+recreates the old location if needed). Setting only `AGENT_QUORUM_PLANS_DIR` keeps
 the legacy single-var layout (`<plans>/.runs` for state).
 
 The library API additionally accepts `home`/`workDir`/`configFile` as typed
@@ -81,26 +81,26 @@ precedence is option > env > default. The CLI contract stays env-first
 
 ### Loop settings (env layer)
 
-`PLAN_LOOP_MAX_ITERS`, `PLAN_LOOP_DIFF_THRESHOLD`, `PLAN_LOOP_RETRY_COUNT`,
-`PLAN_LOOP_RETRY_DELAY_SECONDS`, `PLAN_LOOP_LOCALE`, `PLAN_LOOP_TRANSLATE`,
-`PLAN_LOOP_MAX_PLAN_LINES` (plan-size warning threshold and split size signal,
+`AGENT_QUORUM_MAX_ITERS`, `AGENT_QUORUM_DIFF_THRESHOLD`, `AGENT_QUORUM_RETRY_COUNT`,
+`AGENT_QUORUM_RETRY_DELAY_SECONDS`, `AGENT_QUORUM_LOCALE`, `AGENT_QUORUM_TRANSLATE`,
+`AGENT_QUORUM_MAX_PLAN_LINES` (plan-size warning threshold and split size signal,
 default 900).
 
 ### Large-plan split policy (env layer)
 
-`PLAN_LOOP_SPLIT` (`auto` | `always` | `never`, default `auto`) and
-`PLAN_LOOP_SPLIT_MIN_PHASES` (default 5) decide whether a converged, post-fix
+`AGENT_QUORUM_SPLIT` (`auto` | `always` | `never`, default `auto`) and
+`AGENT_QUORUM_SPLIT_MIN_PHASES` (default 5) decide whether a converged, post-fix
 `plan.final.md` is additionally emitted as a navigable `plan.package/` (index,
 master plan, self-contained phase docs, journal, runbook, debt ledger):
 
-- `auto` splits when the plan exceeds `PLAN_LOOP_MAX_PLAN_LINES` **or** has at
-  least `PLAN_LOOP_SPLIT_MIN_PHASES` Work Plan phases.
+- `auto` splits when the plan exceeds `AGENT_QUORUM_MAX_PLAN_LINES` **or** has at
+  least `AGENT_QUORUM_SPLIT_MIN_PHASES` Work Plan phases.
 - `always` forces a package regardless of size.
 - `never` keeps a single document and records an explicit no-split rationale in
   `plan.split.json`, even above the size signal.
 
-These are env-only (no `plan-loop.json` settings layer), mirroring
-`PLAN_LOOP_MAX_PLAN_LINES`. Every run records the decision, rationale, and
+These are env-only (no `agent-quorum.json` settings layer), mirroring
+`AGENT_QUORUM_MAX_PLAN_LINES`. Every run records the decision, rationale, and
 signals in `plan.split.json`; `plan.final.md` stays the entry point and the
 package (when present) shares one combined final status with it. An optional
 advisory `effort.md` may accompany a package; it never affects validation.
@@ -112,30 +112,30 @@ The shared forbidden-shell scan that gates `plan.final.md` and every
 
 ### Role matrix overrides
 
-`PLAN_LOOP_<ROLE>_RUNNER`, `PLAN_LOOP_<ROLE>_MODEL`,
-`PLAN_LOOP_<ROLE>_REASONING` for `CRITIC`, `CREATOR`, `FIXER`, `REVIEWER`,
+`AGENT_QUORUM_<ROLE>_RUNNER`, `AGENT_QUORUM_<ROLE>_MODEL`,
+`AGENT_QUORUM_<ROLE>_REASONING` for `CRITIC`, `CREATOR`, `FIXER`, `REVIEWER`,
 `TRANSLATOR`.
 
 ### Watchdog knobs
 
-Claude: `PLAN_LOOP_CLAUDE_STALL_TIMEOUT_SECONDS` (600),
-`PLAN_LOOP_CLAUDE_STALL_POLL_SECONDS` (5),
-`PLAN_LOOP_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS` (20),
-`PLAN_LOOP_CLAUDE_CALL_TIMEOUT_SECONDS` (1800),
-`PLAN_LOOP_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
-`PLAN_LOOP_CLAUDE_THINKING_LOG_EVERY` (3).
+Claude: `AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS` (600),
+`AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS` (5),
+`AGENT_QUORUM_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS` (20),
+`AGENT_QUORUM_CLAUDE_CALL_TIMEOUT_SECONDS` (1800),
+`AGENT_QUORUM_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
+`AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY` (3).
 
-Cursor: the same five knobs with the `PLAN_LOOP_CURSOR_` prefix, plus
-`PLAN_LOOP_CURSOR_BIN` (default `cursor-agent`).
+Cursor: the same five knobs with the `AGENT_QUORUM_CURSOR_` prefix, plus
+`AGENT_QUORUM_CURSOR_BIN` (default `cursor-agent`).
 
-Passes: `PLAN_LOOP_FIX_PASS_TIMEOUT_SECONDS` (900),
-`PLAN_LOOP_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
-`PLAN_LOOP_FIX_PASS_RETRY_COUNT` (1), and the `PLAN_LOOP_TRANSLATE_PASS_*`
+Passes: `AGENT_QUORUM_FIX_PASS_TIMEOUT_SECONDS` (900),
+`AGENT_QUORUM_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
+`AGENT_QUORUM_FIX_PASS_RETRY_COUNT` (1), and the `AGENT_QUORUM_TRANSLATE_PASS_*`
 equivalents.
 
 ### Provider diagnostics (env layer)
 
-`PLAN_LOOP_PROVIDER_DIAGNOSTICS=1` enables opt-in raw capture of each provider
+`AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` enables opt-in raw capture of each provider
 call's stdout and stderr into `$WORK/diagnostics/` as
 `<seq>-<role>-<provider>.log` files. Normal logs still follow the metadata-only
 contract and emit only a `diagnostics →` reference line per call; raw prompt,
@@ -146,29 +146,29 @@ off (unset or any value other than `1`).
 
 ### Clarification gate / Telegram
 
-`PLAN_LOOP_TELEGRAM_BOT_TOKEN` plus `PLAN_LOOP_TELEGRAM_CHAT_ID` enable
+`AGENT_QUORUM_TELEGRAM_BOT_TOKEN` plus `AGENT_QUORUM_TELEGRAM_CHAT_ID` enable
 best-effort final completion notifications for core runs automatically. The
 same credentials also enable the prompt-mode clarification gate unless
-`PLAN_LOOP_CLARIFY=0` disables that gate; setting `PLAN_LOOP_CLARIFY=0` does
+`AGENT_QUORUM_CLARIFY=0` disables that gate; setting `AGENT_QUORUM_CLARIFY=0` does
 not disable completion notifications.
 
-| Variable                             | Meaning                                                                       |
-| ------------------------------------ | ----------------------------------------------------------------------------- |
-| `PLAN_LOOP_CLARIFY`                  | `1` force on, `0` force off, `auto` (default: on when Telegram is configured) |
-| `PLAN_LOOP_TELEGRAM_BOT_TOKEN`       | bot token (secret — keep in `.env`)                                           |
-| `PLAN_LOOP_TELEGRAM_CHAT_ID`         | numeric chat id                                                               |
-| `PLAN_LOOP_TELEGRAM_API_BASE`        | Bot API base override (tests inject a stub)                                   |
-| `PLAN_LOOP_TELEGRAM_POLL_TIMEOUT`    | long-poll seconds per getUpdates (50)                                         |
-| `PLAN_LOOP_TELEGRAM_HTTP_TIMEOUT`    | HTTP timeout seconds (70)                                                     |
-| `PLAN_LOOP_CLARIFY_DEADLINE_SECONDS` | max total wait for answers (86400)                                            |
+| Variable                                | Meaning                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------- |
+| `AGENT_QUORUM_CLARIFY`                  | `1` force on, `0` force off, `auto` (default: on when Telegram is configured) |
+| `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`       | bot token (secret — keep in `.env`)                                           |
+| `AGENT_QUORUM_TELEGRAM_CHAT_ID`         | numeric chat id                                                               |
+| `AGENT_QUORUM_TELEGRAM_API_BASE`        | Bot API base override (tests inject a stub)                                   |
+| `AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT`    | long-poll seconds per getUpdates (50)                                         |
+| `AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT`    | HTTP timeout seconds (70)                                                     |
+| `AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS` | max total wait for answers (86400)                                            |
 
 ### Status / launch
 
-`PLAN_LOOP_STATUS_SCAN_PS` (`0` disables the `ps` scan in the no-argument
-status listing), `PLAN_LOOP_LAUNCH_VERIFY_DELAY` (seconds before the launch
+`AGENT_QUORUM_STATUS_SCAN_PS` (`0` disables the `ps` scan in the no-argument
+status listing), `AGENT_QUORUM_LAUNCH_VERIFY_DELAY` (seconds before the launch
 liveness check, default 1).
 
 ### Obsolete
 
-`PLAN_LOOP_AJV_BIN` selected the validator binary in the reference; schema
+`AGENT_QUORUM_AJV_BIN` selected the validator binary in the reference; schema
 validation now runs in-process, so a set value is warned once and ignored.

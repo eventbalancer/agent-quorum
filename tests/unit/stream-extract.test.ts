@@ -13,7 +13,7 @@ import { captureStderr, stripAnsi } from '../helpers/harness.js';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-extract.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-extract.'));
 });
 
 afterEach(() => {
@@ -55,7 +55,7 @@ describe('extractJsonPayload', () => {
   });
 
   it('falls back to a referenced temp file', () => {
-    const ref = path.join(os.tmpdir(), `plan-loop-ref-${process.pid}.json`);
+    const ref = path.join(os.tmpdir(), `agent-quorum-ref-${process.pid}.json`);
     writeFileSync(ref, '{"a":1}');
     const capture = captureStderr();
     try {

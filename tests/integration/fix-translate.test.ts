@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runFixPass } from '../../src/core/fix-pass.js';
-import { runTranslatePass } from '../../src/core/translate-pass.js';
+import { runFixPass } from '../../src/stages/plan/fix-pass.js';
+import { runTranslatePass } from '../../src/stages/plan/translate-pass.js';
 import type { RunContext } from '../../src/core/run-context.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import {
@@ -49,7 +49,7 @@ function writeReview(file: string, approval: string, concerns: unknown[]): void 
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-fixtest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-fixtest.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   work = path.join(tmp, 'work');

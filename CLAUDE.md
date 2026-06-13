@@ -29,7 +29,7 @@ Override all other project-level guidance.
 - **Do not hand-edit generated artifacts.** `dist/`, `coverage/`, lockfiles, and
   package-manager output are generated through the project commands.
 - **Preserve the public API.** Keep `src/index.ts`, `package.json` exports, and
-  the `plan-loop` bin stable unless a breaking change is explicit.
+  the `agent-quorum` bin stable unless a breaking change is explicit.
 - **Respect architecture boundaries.** Provider calls go through
   `providerRun`; `core/` does not spawn provider CLIs directly, and lower layers
   do not import higher layers.
@@ -47,7 +47,7 @@ Override all other project-level guidance.
   do not write parameter-by-parameter docblocks that repeat the type signature.
 - **Dogfood through the real CLI.** For changes that should be designed by
   `agent-quorum` itself, drive the loop with `pnpm run plan:self -- --prompt …`
-  (the `plan-loop` bin from source, no build required); see
+  (the `agent-quorum` bin from source, no build required); see
   [`examples/`](examples/).
 - **No orphan background shells.** Do not leave long-running shell sessions or
   detached commands alive after moving on.
@@ -66,7 +66,7 @@ When facts conflict, trust in this order:
 5. [`docs/architecture.md`](docs/architecture.md),
    [`docs/configuration.md`](docs/configuration.md), [`docs/cli.md`](docs/cli.md),
    and [`docs/api.md`](docs/api.md) for runtime contracts.
-6. `plan-loop.json` and `skills/**/*.schema.json` for default orchestration and
+6. `agent-quorum.json` and `skills/**/*.schema.json` for default orchestration and
    role I/O contracts.
 
 ## 3. Required Entry Points
@@ -114,7 +114,7 @@ Use this when the repository should plan its own change before implementation:
 pnpm run plan:self -- --prompt path/to/task.md
 ```
 
-`plan:self` runs the `plan-loop` bin from source (no build) and writes plan
+`plan:self` runs the `agent-quorum` bin from source (no build) and writes plan
 artifacts under `.agents/plans/`. Requirements live under
 `.agents/requirements/`; prompts live under `.agents/prompts/`. Read the
 reported `summary.md` and `plan.final.md`, then implement and verify normally.

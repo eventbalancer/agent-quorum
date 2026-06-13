@@ -15,7 +15,7 @@ import { cursorProgressEvent } from './watchdog.js';
 import { stripTrailingNewlines, type ProviderRuntime } from './runtime.js';
 
 const CURSOR_STALL_RESUME_PROMPT =
-  'The previous Cursor Agent turn in this same session was interrupted by the plan-loop watchdog because it stopped making progress within the configured limit.\n' +
+  'The previous Cursor Agent turn in this same session was interrupted by the agent-quorum watchdog because it stopped making progress within the configured limit.\n' +
   '\n' +
   'Continue the original task using the context already gathered in this session. Return the exact output requested by the original prompt and current output mode. Do not ask user questions. If enough evidence is already gathered, produce the final output now.\n';
 

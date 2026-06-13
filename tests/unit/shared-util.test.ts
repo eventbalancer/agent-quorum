@@ -9,7 +9,7 @@ import { killTree, ownPgid, spawnDetached, waitForExit } from '../../src/runtime
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-shared.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-shared.'));
 });
 
 afterEach(() => {

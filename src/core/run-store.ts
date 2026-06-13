@@ -238,8 +238,8 @@ interface ResolvedRetention {
 
 function resolveRetention(policy: RetentionPolicy): ResolvedRetention {
   return {
-    keepCount: policy.keepCount ?? numberEnv('PLAN_LOOP_RETAIN_COUNT', DEFAULT_RETAIN_COUNT),
-    maxAgeDays: policy.maxAgeDays ?? numberEnv('PLAN_LOOP_RETAIN_DAYS', DEFAULT_RETAIN_DAYS),
+    keepCount: policy.keepCount ?? numberEnv('AGENT_QUORUM_RETAIN_COUNT', DEFAULT_RETAIN_COUNT),
+    maxAgeDays: policy.maxAgeDays ?? numberEnv('AGENT_QUORUM_RETAIN_DAYS', DEFAULT_RETAIN_DAYS),
     dryRun: policy.dryRun === true,
   };
 }
@@ -247,7 +247,7 @@ function resolveRetention(policy: RetentionPolicy): ResolvedRetention {
 // The count bound the run listing shares with prune so "recent finished" never
 // shows more than retention keeps.
 export function retentionKeepCount(): number {
-  return numberEnv('PLAN_LOOP_RETAIN_COUNT', DEFAULT_RETAIN_COUNT);
+  return numberEnv('AGENT_QUORUM_RETAIN_COUNT', DEFAULT_RETAIN_COUNT);
 }
 
 // Bound the ledger by removing only terminal records (state on disk is not

@@ -1,19 +1,21 @@
 # CLI
 
-One `plan-loop` bin maps 1:1 onto the four reference scripts. This dispatch is
-a deliberate surface adaptation from the reference (an npm package cannot ship
-four script names): a first argument of exactly `launch`, `status`, or
-`intervene` routes to that entry point; anything else — including any file
-path — is the core run. A literal bare `launch`/`status`/`intervene` filename
-is shadowed; `./launch` or `launch.md` is not. Within each entry point the
-flags, positionals, unknown-flag rejection, and exit codes are identical to
-the reference scripts, with one further documented deviation: an explicit
-`-h`/`--help` prints usage to **stdout** and exits **0** in every entry point
-(the reference run/intervene scripts replied on stderr with exit 1).
-Error-path usage output keeps the reference streams and exit codes.
-`plan-loop --help` with no other arguments prints the global help
-(subcommands, core-run flags, and the effective defaults from the resolved
-`plan-loop.json`); `plan-loop --version`/`-V` prints the package version.
+`agent-quorum` is one bin with an umbrella dispatcher. The first argument selects
+an entry point: a reserved run-lifecycle command (`launch`, `status`, `show`,
+`logs`, `prune`, `intervene`) or a **stage** from the stage registry (`plan` is
+the only stage today). There is no default fallthrough — an unrecognized first
+token prints the global help to stderr and exits non-zero. After the subcommand
+token a single leading `--` is dropped, so a `pnpm run <script> -- <flags>`
+forwarding case reaches the stage parser with its flags intact.
+
+Within each entry point the flags, positionals, unknown-flag rejection, and exit
+codes are identical to the reference scripts, with one documented deviation: an
+explicit `-h`/`--help` prints usage to **stdout** and exits **0** (the reference
+run/intervene scripts replied on stderr with exit 1). Error-path usage output
+keeps the reference streams and exit codes. `agent-quorum` with no arguments (or
+`--help`) prints the global help (stages, run-lifecycle commands, and the
+effective defaults from the resolved `agent-quorum.json`); `agent-quorum
+--version`/`-V` prints the package version.
 
 ANSI color is emitted only when the target stream is a TTY and `NO_COLOR` is
 unset or empty ([no-color.org](https://no-color.org) semantics) — redirected
@@ -21,15 +23,15 @@ output and `run.log` stay escape-free; the log text itself is unchanged.
 Provider stream logs are metadata-only: tool names, target paths, command and
 text sizes, retry/stall markers, status, and counts are logged, but prompt,
 plan, source, tool-argument, and raw provider stderr bodies are not mirrored to
-normal output. On a non-zero provider exit, `plan-loop` emits one compact
+normal output. On a non-zero provider exit, `agent-quorum` emits one compact
 `<role>/<provider> call failed` summary with status, captured stderr line
 count, and a classified reason when one is recognized.
 
-## Core run — `plan-loop [flags] <plan.md>`
+## Plan stage — `agent-quorum plan [flags] <plan.md>`
 
 ```text
-plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>
-plan-loop [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
+agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>
+agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
 ```
 
 | Flag                             | Purpose                                                 |
@@ -50,8 +52,8 @@ keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
 After the fix pass and before the single `FINAL:` status, a deterministic split
-policy (`PLAN_LOOP_SPLIT`, `PLAN_LOOP_SPLIT_MIN_PHASES`, sized by
-`PLAN_LOOP_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records
+policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
+`AGENT_QUORUM_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records
 `plan.split.json` and, when it fires, emits and validates a `plan.package/`.
 `summary.md` adds a `split_decision` line and, when a package is present,
 `package_dir`, `package_documents`, and `package_validation` lines. The final
@@ -87,14 +89,14 @@ Exit codes:
 | 7    | clarification gate cancelled or failed               |
 | 143  | TERM/INT teardown                                    |
 
-## `plan-loop launch`
+## `agent-quorum launch`
 
 ```text
-plan-loop launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>
+agent-quorum launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>
 ```
 
 Backgrounds the run in its own process group, rotates `run.log`, exports
-`CI=true` (and `PLAN_LOOP_RESUME=1` for `--resume`), verifies liveness, and
+`CI=true` (and `AGENT_QUORUM_RESUME=1` for `--resume`), verifies liveness, and
 prints pid/log/work plus follow/stop hints. Usage errors exit 2; resume workdir
 resolution exits 3 (none found) or 4 (ambiguous).
 
@@ -114,7 +116,7 @@ Each run reports its `runId` at start (the `run <id> (<name>)` log line, the
 `launch` `run:` block, and `RunResult`/`LaunchResult`), so an older same-named
 run stays reachable by `id`/`--last`.
 
-## `plan-loop status [PID]`
+## `agent-quorum status [PID]`
 
 With a PID — **any** process in the run's tree, including provider children —
 walks the parent chain to the root run, resolves its workdir, and prints the
@@ -125,20 +127,20 @@ With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same
 scriptable listing (`name [state] <shortId> … workdir`) and never blocks.
 Discovery sources the durable ledger (records whose pid is alive with a
-matching pgid and start token); a `ps` scan (`PLAN_LOOP_STATUS_SCAN_PS=0`
+matching pgid and start token); a `ps` scan (`AGENT_QUORUM_STATUS_SCAN_PS=0`
 disables it) remains a secondary path for records-less live trees.
 
-`plan-loop status --watch [selector]` re-renders the run's status until it
+`agent-quorum status --watch [selector]` re-renders the run's status until it
 reaches a terminal state (a non-TTY emits a single snapshot); with no selector
 it watches the most-recent live run.
 
-Exits 2 for an unknown PID, 3 for a live PID outside any plan-loop tree.
+Exits 2 for an unknown PID, 3 for a live PID outside any agent-quorum tree.
 
 POSIX `ps` and `lsof` are the port's deliberate external-binary exceptions
 (`lsof` only resolves a run's workdir from its open `run.log` handle); tree,
 elapsed, and workdir rendering degrade gracefully without them.
 
-## `plan-loop show <selector>` / `plan-loop logs <selector> [-f]`
+## `agent-quorum show <selector>` / `agent-quorum logs <selector> [-f]`
 
 `show` prints a run's `workdir`, `plan.final.md`, `summary.md`, and `run.log`
 paths plus a one-line state, resolved by the selector grammar above; an
@@ -149,20 +151,20 @@ live run until it ends). A run that streamed to its console has no `run.log`;
 `logs` then prints a clear one-line message pointing at the workdir and exits 0
 rather than hanging.
 
-## `plan-loop prune [--keep N] [--max-age DAYS] [--dry-run]`
+## `agent-quorum prune [--keep N] [--max-age DAYS] [--dry-run]`
 
 Bounds the run ledger by removing **terminal** records beyond `--keep` most
-recent (default `PLAN_LOOP_RETAIN_COUNT`, 50) or older than `--max-age` days
-(default `PLAN_LOOP_RETAIN_DAYS`, 30); `--dry-run` reports what it would remove.
+recent (default `AGENT_QUORUM_RETAIN_COUNT`, 50) or older than `--max-age` days
+(default `AGENT_QUORUM_RETAIN_DAYS`, 30); `--dry-run` reports what it would remove.
 Functional workdirs are never deleted — prune only removes ledger records. Runs
 also self-prune at start, so the store stays bounded without manual upkeep.
 
-## `plan-loop intervene`
+## `agent-quorum intervene`
 
 ```text
-plan-loop intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>
-plan-loop intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>
-plan-loop intervene (--work <workdir> | <selector>) [--target ...] --stdin
+agent-quorum intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>
+agent-quorum intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>
+agent-quorum intervene (--work <workdir> | <selector>) [--target ...] --stdin
 ```
 
 Appends `{id, ts, target, message}` to `operator-interventions.jsonl`. The

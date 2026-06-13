@@ -1,10 +1,10 @@
 import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { nonEmptyFile } from '../runtime/files.js';
+import { nonEmptyFile } from '../../runtime/files.js';
 import path from 'node:path';
-import { HaltError } from '../runtime/halt.js';
-import { err, log } from '../runtime/log.js';
-import { providerRun } from '../providers/provider.js';
-import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
+import { providerRun } from '../../providers/provider.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import { operatorInterventionsContext } from './interventions.js';
 import {
   normalizePlanDocument,
@@ -17,8 +17,8 @@ import {
   sanitizeUpdateJson,
   sanitizeUpdateMetaJson,
   validateSchema,
-} from './schema.js';
-import { readStripped, type RunContext } from './run-context.js';
+} from '../../core/schema.js';
+import { readStripped, type RunContext } from '../../core/run-context.js';
 
 const ONE_SHOT_OUTPUT_MODE =
   'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +

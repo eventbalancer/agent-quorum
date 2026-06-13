@@ -39,7 +39,7 @@ function seedFinishedRun(
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
   writeFileSync(path.join(workDir, 'summary.md'), '# summary\n');
   if (withLog) {
-    writeFileSync(path.join(workDir, 'run.log'), '[plan-loop] seeded log line\n');
+    writeFileSync(path.join(workDir, 'run.log'), '[agent-quorum] seeded log line\n');
   }
   const record = writeRunRecord(stateDir, draft(name, workDir, startedAt));
   finalizeRunRecord(stateDir, record.runId, {
@@ -51,11 +51,11 @@ function seedFinishedRun(
 }
 
 function env(): Record<string, string | undefined> {
-  return { PLAN_LOOP_STATE_DIR: stateDir };
+  return { AGENT_QUORUM_STATE_DIR: stateDir };
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-runstest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-runstest.'));
   stateDir = path.join(tmp, 'state');
   mkdirSync(stateDir, { recursive: true });
 });
@@ -87,14 +87,14 @@ describe('logs (AC-5)', () => {
     seedFinishedRun('beta', true);
     const result = runCli(['logs', 'beta'], env());
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('[plan-loop] seeded log line');
+    expect(result.stdout).toContain('[agent-quorum] seeded log line');
   });
 
   it('follows a terminal run’s log with -f and exits without hanging', () => {
     seedFinishedRun('gamma', true);
     const result = runCli(['logs', '--last', '-f'], env());
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('[plan-loop] seeded log line');
+    expect(result.stdout).toContain('[agent-quorum] seeded log line');
   });
 
   it('degrades with a clear message and exit 0 when the run produced no log', () => {

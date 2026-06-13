@@ -47,13 +47,13 @@ type EnvOverrides = Record<string, string | undefined>;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-    PLAN_LOOP_WORK_DIR: work,
-    PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-    PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-    PLAN_LOOP_CLARIFY: '0',
-    PLAN_LOOP_RETRY_COUNT: '0',
-    PLAN_LOOP_RESUME: undefined,
+    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_WORK_DIR: work,
+    AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+    AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+    AGENT_QUORUM_CLARIFY: '0',
+    AGENT_QUORUM_RETRY_COUNT: '0',
+    AGENT_QUORUM_RESUME: undefined,
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     ...extra,
   };
@@ -86,14 +86,14 @@ async function killDetachedRun(pid: number): Promise<void> {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-apitest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-apitest.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   work = path.join(tmp, 'work');
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'plan-loop.json'));
+  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'API Input');
   emptyCritique(path.join(tmp, 'empty.json'));
   resetConfigCache();
@@ -147,12 +147,12 @@ describe('runPlanLoop (in-process)', () => {
     expect(result.name).toBe('work');
     const runLog = path.join(canonicalWork, 'run.log');
     expect(existsSync(runLog)).toBe(true);
-    expect(readFileSync(runLog, 'utf8')).toContain('[plan-loop]');
+    expect(readFileSync(runLog, 'utf8')).toContain('[agent-quorum]');
   });
 
   it('keeps two same-input runs in distinct workdirs, each addressable by its runId', async () => {
     const defaultWorkEnv = baseEnv({
-      PLAN_LOOP_WORK_DIR: undefined,
+      AGENT_QUORUM_WORK_DIR: undefined,
       FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
     });
     const options = {
@@ -242,7 +242,7 @@ describe('runPlanLoop (in-process)', () => {
     writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
 
     const result = await withEnvAsync(
-      baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'), PLAN_LOOP_RESUME: '1' }),
+      baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'), AGENT_QUORUM_RESUME: '1' }),
       () =>
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
@@ -296,21 +296,21 @@ describe('getRunStatus (in-process)', () => {
   it('reports no active runs against an empty registry', async () => {
     const result = await withEnvAsync(
       {
-        PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-        PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-        PLAN_LOOP_STATUS_SCAN_PS: '0',
+        AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+        AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+        AGENT_QUORUM_STATUS_SCAN_PS: '0',
       },
       () => getRunStatus(),
     );
     expect(result.exitCode).toBe(0);
-    expect(capture.text()).toContain('no plan-loop runs currently active');
+    expect(capture.text()).toContain('no agent-quorum runs currently active');
   });
 
-  it('rejects a dead PID with exit 2 and a live non-plan-loop PID with exit 3', async () => {
+  it('rejects a dead PID with exit 2 and a live non-agent-quorum PID with exit 3', async () => {
     const env = {
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
     const dead = await withEnvAsync(env, () => getRunStatus(999999));
     expect(dead.exitCode).toBe(2);
@@ -341,8 +341,8 @@ describe('launchPlanLoop (in-process)', () => {
     writeHangingCodex();
     const result = await withEnvAsync(
       baseEnv({
-        PLAN_LOOP_LAUNCH_VERIFY_DELAY: '0.3',
-        PLAN_LOOP_WORK_DIR: undefined,
+        AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
+        AGENT_QUORUM_WORK_DIR: undefined,
       }),
       () =>
         launchPlanLoop({
@@ -366,9 +366,9 @@ describe('launchPlanLoop (in-process)', () => {
     expect(result.output).toContain(`run:   ${result.runId ?? ''}`);
 
     const statusEnv = {
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
     let byPid = { exitCode: -1, output: '' };
     for (let attempt = 0; attempt < 50 && byPid.exitCode !== 0; attempt += 1) {
@@ -380,7 +380,7 @@ describe('launchPlanLoop (in-process)', () => {
     expect(byPid.output).toContain(`PID=${pid}`);
     const listing = await withEnvAsync(statusEnv, () => getRunStatus());
     expect(listing.exitCode).toBe(0);
-    expect(listing.output).toContain('found 1 plan-loop run(s)');
+    expect(listing.output).toContain('found 1 agent-quorum run(s)');
 
     await killDetachedRun(pid);
   }, 30_000);
@@ -430,8 +430,8 @@ describe('typed workDir/configFile options', () => {
 
     const result = await withEnvAsync(
       baseEnv({
-        PLAN_LOOP_WORK_DIR: undefined,
-        PLAN_LOOP_CONFIG_FILE: undefined,
+        AGENT_QUORUM_WORK_DIR: undefined,
+        AGENT_QUORUM_CONFIG_FILE: undefined,
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
       }),
       async () => {
@@ -468,9 +468,9 @@ describe('typed workDir/configFile options', () => {
 
     const result = await withEnvAsync(
       baseEnv({
-        PLAN_LOOP_LAUNCH_VERIFY_DELAY: '0.3',
-        PLAN_LOOP_WORK_DIR: undefined,
-        PLAN_LOOP_CONFIG_FILE: undefined,
+        AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
+        AGENT_QUORUM_WORK_DIR: undefined,
+        AGENT_QUORUM_CONFIG_FILE: undefined,
       }),
       async () => {
         const envBefore = JSON.stringify(process.env);
@@ -518,9 +518,9 @@ describe('library selector API (AC-7, AC-12)', () => {
     const home = path.join(tmp, 'home');
     const result = await withEnvAsync(
       baseEnv({
-        PLAN_LOOP_WORK_DIR: undefined,
-        PLAN_LOOP_PLANS_DIR: undefined,
-        PLAN_LOOP_STATE_DIR: undefined,
+        AGENT_QUORUM_WORK_DIR: undefined,
+        AGENT_QUORUM_PLANS_DIR: undefined,
+        AGENT_QUORUM_STATE_DIR: undefined,
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
       }),
       () =>
@@ -557,9 +557,9 @@ describe('library selector API (AC-7, AC-12)', () => {
 
   it('getRunStatus(pid) keeps its signature and behavior', async () => {
     const env = {
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
     const dead = await withEnvAsync(env, () => getRunStatus(999999));
     expect(dead.exitCode).toBe(2);

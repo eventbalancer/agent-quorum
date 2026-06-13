@@ -41,7 +41,7 @@ describe('exec process groups', () => {
   });
 
   it('waitForExit reports 127 for unknown binaries', async () => {
-    const child = spawnDetached('plan-loop-no-such-binary', [], { stdio: 'ignore' });
+    const child = spawnDetached('agent-quorum-no-such-binary', [], { stdio: 'ignore' });
     expect(await waitForExit(child)).toBe(127);
   });
 });

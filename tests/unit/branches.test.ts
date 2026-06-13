@@ -16,8 +16,12 @@ import {
   markOperatorInterventionsMigrated,
   operatorInterventionsContext,
   operatorInterventionsState,
-} from '../../src/core/interventions.js';
-import { compactCritiqueFile, criticPrompt, topologyContext } from '../../src/core/critic.js';
+} from '../../src/stages/plan/interventions.js';
+import {
+  compactCritiqueFile,
+  criticPrompt,
+  topologyContext,
+} from '../../src/stages/plan/critic.js';
 import { resetConfigCache, resolveRunSettings } from '../../src/core/config.js';
 import { resolveWatchdogKnobs } from '../../src/core/knobs.js';
 import { HaltError } from '../../src/runtime/halt.js';
@@ -56,7 +60,7 @@ interface SanitizedMeta {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-branches.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-branches.'));
   resetConfigCache();
 });
 
@@ -345,7 +349,8 @@ describe('config and knob halts', () => {
       expect(resolveRunSettings({}, onOff).translatePass).toBe(1);
       expect(resolveRunSettings({}, onOff).locale).toBe('ru');
       expect(
-        withEnv({ PLAN_LOOP_TRANSLATE: 'off' }, () => resolveRunSettings({}, onOff)).translatePass,
+        withEnv({ AGENT_QUORUM_TRANSLATE: 'off' }, () => resolveRunSettings({}, onOff))
+          .translatePass,
       ).toBe(0);
       resetConfigCache();
       const localeOn = writeConfig('locale-on.json', (config) => {
@@ -386,10 +391,10 @@ describe('config and knob halts', () => {
     expect(knobs.claude.wallTimeoutSeconds).toBe(1800);
     expect(knobs.translatePass.retryCount).toBe(1);
     expect(() =>
-      withEnv({ PLAN_LOOP_CLAUDE_STALL_TIMEOUT_SECONDS: 'soon' }, () => resolveWatchdogKnobs()),
+      withEnv({ AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS: 'soon' }, () => resolveWatchdogKnobs()),
     ).toThrow(HaltError);
     expect(() =>
-      withEnv({ PLAN_LOOP_CLAUDE_STALL_POLL_SECONDS: '0' }, () => resolveWatchdogKnobs()),
+      withEnv({ AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS: '0' }, () => resolveWatchdogKnobs()),
     ).toThrow(/expects a positive integer/);
   });
 });

@@ -71,7 +71,7 @@ export function renderListing(
   candidates: readonly RunCandidate[],
   options: RenderListingOptions,
 ): string {
-  const lines = [dim(`found ${candidates.length} plan-loop run(s)`, options.color)];
+  const lines = [dim(`found ${candidates.length} agent-quorum run(s)`, options.color)];
   for (const [index, candidate] of candidates.entries()) {
     lines.push(formatLine(candidate, index + 1, options.color));
   }

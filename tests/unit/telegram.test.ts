@@ -14,7 +14,7 @@ describe('Telegram completion notification rendering', () => {
 
     expect(message).toBe(
       [
-        'plan-loop finished: SUCCESS',
+        'agent-quorum finished: SUCCESS',
         'input: input.md',
         'status: clean',
         'iterations: 2',
@@ -33,7 +33,7 @@ describe('Telegram completion notification rendering', () => {
       summaryPath: '/tmp/work/summary.md',
     });
 
-    expect(message).toContain('plan-loop finished: SUCCESS');
+    expect(message).toContain('agent-quorum finished: SUCCESS');
     expect(message).toContain('input: review-plan.md');
     expect(message).toContain('status: needs-review');
     expect(message).toContain('reason: 2 stale line reference(s) remain after fix-pass');
@@ -51,7 +51,7 @@ describe('Telegram completion notification rendering', () => {
 
     expect(message).toBe(
       [
-        'plan-loop finished: FAILED (exit 6)',
+        'agent-quorum finished: FAILED (exit 6)',
         'input: broken.md',
         'status: blocked',
         'reason: plan shape broken (title=0 missing_sections=7 impact_graph_mermaid=0)',

@@ -8,7 +8,7 @@
  * To write artifacts into this repo's dogfood ledger (under .agents/plans/)
  * instead of the user-home default, prefix the artifact root:
  *
- *   PLAN_LOOP_PLANS_DIR=.agents/plans pnpm exec tsx examples/api.ts examples/task.example.md
+ *   AGENT_QUORUM_PLANS_DIR=.agents/plans pnpm exec tsx examples/api.ts examples/task.example.md
  *
  * Running it launches a real loop and needs an authenticated provider CLI.
  */

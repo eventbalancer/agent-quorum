@@ -26,7 +26,7 @@ const yellow = (text: string): string => paint('\x1b[33m', text);
 export const red = (text: string): string => paint('\x1b[31m', text);
 export const dim = (text: string): string => paint('\x1b[2m', text);
 
-// 4-space indent keeps these lines below status's `[plan-loop]` filter so the
+// 4-space indent keeps these lines below status's `[agent-quorum]` filter so the
 // per-event trace never reaches phaseActiveRole / last-event parsing.
 export const TRACE_INDENT = '    ';
 const TRACE_LINE_CAP = 200;

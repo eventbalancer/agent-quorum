@@ -1,9 +1,9 @@
 import { rmSync } from 'node:fs';
-import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
-import { err, log } from '../runtime/log.js';
-import { providerRun } from '../providers/provider.js';
-import type { ProviderRuntime } from '../providers/runtime.js';
-import { readStripped, type RunContext } from './run-context.js';
+import { fileLineCount, nonEmptyFile } from '../../runtime/files.js';
+import { err, log } from '../../runtime/log.js';
+import { providerRun } from '../../providers/provider.js';
+import type { ProviderRuntime } from '../../providers/runtime.js';
+import { readStripped, type RunContext } from '../../core/run-context.js';
 
 // The translator overrides claude AND cursor timeouts plus the retry count,
 // and runs claude with --permission-mode default: its stdout IS the artifact,

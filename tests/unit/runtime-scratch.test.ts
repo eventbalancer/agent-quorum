@@ -7,7 +7,7 @@ import { Scratch } from '../../src/runtime/scratch.js';
 describe('Scratch', () => {
   it('creates a base-prefixed directory under tmpdir, hands out unique files, sweeps', () => {
     const scratch = Scratch.create('mybase');
-    expect(scratch.dir.startsWith(path.join(os.tmpdir(), 'plan-loop-mybase.'))).toBe(true);
+    expect(scratch.dir.startsWith(path.join(os.tmpdir(), 'agent-quorum-mybase.'))).toBe(true);
     expect(existsSync(scratch.dir)).toBe(true);
 
     const a = scratch.file();

@@ -23,7 +23,7 @@ import {
 let tmp: string;
 
 function configPath(name: string): string {
-  return path.join(tmp, `${name}.plan-loop.json`);
+  return path.join(tmp, `${name}.agent-quorum.json`);
 }
 
 function writeSettingsConfig(file: string, settings: JsonObject): void {
@@ -33,7 +33,7 @@ function writeSettingsConfig(file: string, settings: JsonObject): void {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-configtest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-configtest.'));
   resetConfigCache();
 });
 
@@ -60,14 +60,14 @@ describe('run settings resolution', () => {
   it('env overrides a file setting', () => {
     const file = configPath('env-over-setting');
     writeSettingsConfig(file, { iters: 7 });
-    const settings = withEnv({ PLAN_LOOP_MAX_ITERS: '11' }, () => resolveRunSettings({}, file));
+    const settings = withEnv({ AGENT_QUORUM_MAX_ITERS: '11' }, () => resolveRunSettings({}, file));
     expect(settings.maxIters).toBe(11);
   });
 
   it('CLI overrides both env and file settings', () => {
     const file = configPath('cli-over-setting');
     writeSettingsConfig(file, { iters: 7 });
-    const settings = withEnv({ PLAN_LOOP_MAX_ITERS: '11' }, () =>
+    const settings = withEnv({ AGENT_QUORUM_MAX_ITERS: '11' }, () =>
       resolveRunSettings({ maxIters: '3' }, file),
     );
     expect(settings.maxIters).toBe(3);
@@ -125,7 +125,9 @@ describe('role matrix resolution', () => {
     const before = readFileSync(file, 'utf8');
     const capture = captureStderr();
     try {
-      const matrix = withEnv({ PLAN_LOOP_CRITIC_RUNNER: 'codex' }, () => resolveRoleConfig(file));
+      const matrix = withEnv({ AGENT_QUORUM_CRITIC_RUNNER: 'codex' }, () =>
+        resolveRoleConfig(file),
+      );
       expect(matrix.critic.runner).toBe('codex');
       expect(readFileSync(file, 'utf8')).toBe(before);
       const onDisk = JSON.parse(readFileSync(file, 'utf8')) as {
@@ -142,7 +144,9 @@ describe('role matrix resolution', () => {
     writePlanLoopConfig(file, 'critic:codex:gpt-5.5');
     const capture = captureStderr();
     try {
-      const matrix = withEnv({ PLAN_LOOP_CRITIC_RUNNER: 'claude' }, () => resolveRoleConfig(file));
+      const matrix = withEnv({ AGENT_QUORUM_CRITIC_RUNNER: 'claude' }, () =>
+        resolveRoleConfig(file),
+      );
       expect(matrix.critic.runner).toBe('claude');
       expect(matrix.critic.model).toBe('gpt-5.5');
     } finally {
@@ -186,7 +190,7 @@ describe('role matrix resolution', () => {
     const file = configPath('missing-config');
     const capture = captureStderr();
     try {
-      expect(() => resolveRoleConfig(file)).toThrow(/plan-loop config: file not found/);
+      expect(() => resolveRoleConfig(file)).toThrow(/agent-quorum config: file not found/);
     } finally {
       capture.restore();
     }
@@ -236,7 +240,7 @@ describe('role matrix resolution', () => {
 });
 
 describe('role permissions resolution', () => {
-  it('role tool permissions resolve from plan-loop.json (array and string forms)', () => {
+  it('role tool permissions resolve from agent-quorum.json (array and string forms)', () => {
     const file = configPath('role-permissions');
     const config = defaultPlanLoopConfig();
     const roles = config.roles as Record<string, JsonObject>;

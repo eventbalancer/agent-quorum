@@ -6,7 +6,7 @@ import { err, log } from '../runtime/log.js';
 import type { Role, Runner } from '../types.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 
-const PLAN_LOOP_ROLES: readonly Role[] = ['critic', 'creator', 'fixer', 'reviewer', 'translator'];
+const PLAN_ROLES: readonly Role[] = ['critic', 'creator', 'fixer', 'reviewer', 'translator'];
 
 const RUNNERS: readonly string[] = ['codex', 'claude', 'cursor'];
 const SETTINGS_KEYS = [
@@ -84,11 +84,11 @@ function halt(message: string): never {
 }
 
 export function configFilePath(): string {
-  const override = process.env.PLAN_LOOP_CONFIG_FILE;
+  const override = process.env.AGENT_QUORUM_CONFIG_FILE;
   if (override) {
     return override;
   }
-  return path.join(packageRoot(), 'plan-loop.json');
+  return path.join(packageRoot(), 'agent-quorum.json');
 }
 
 let validatedFile: string | undefined;
@@ -104,7 +104,7 @@ function configWarnUnknown(config: JsonObject): void {
     if (key === 'version' || key === 'roles' || key === 'settings') {
       continue;
     }
-    log(`WARNING: plan-loop.json ignoring unknown top-level key '${key}'`);
+    log(`WARNING: agent-quorum.json ignoring unknown top-level key '${key}'`);
   }
   const settings = config.settings;
   if (isJsonObject(settings)) {
@@ -112,18 +112,18 @@ function configWarnUnknown(config: JsonObject): void {
       if (SETTINGS_KEYS.includes(key)) {
         continue;
       }
-      log(`WARNING: plan-loop.json ignoring unknown setting '${key}'`);
+      log(`WARNING: agent-quorum.json ignoring unknown setting '${key}'`);
     }
   }
   const roles = config.roles;
   if (isJsonObject(roles)) {
     for (const key of Object.keys(roles).sort()) {
-      if ((PLAN_LOOP_ROLES as readonly string[]).includes(key)) {
+      if ((PLAN_ROLES as readonly string[]).includes(key)) {
         continue;
       }
-      log(`WARNING: plan-loop.json ignoring unknown role '${key}'`);
+      log(`WARNING: agent-quorum.json ignoring unknown role '${key}'`);
     }
-    for (const role of PLAN_LOOP_ROLES) {
+    for (const role of PLAN_ROLES) {
       const roleConfig = roles[role];
       if (!isJsonObject(roleConfig)) {
         continue;
@@ -132,7 +132,7 @@ function configWarnUnknown(config: JsonObject): void {
         if (ROLE_FIELD_KEYS.includes(key)) {
           continue;
         }
-        log(`WARNING: plan-loop.json ignoring unknown field '${role}.${key}'`);
+        log(`WARNING: agent-quorum.json ignoring unknown field '${role}.${key}'`);
       }
     }
   }
@@ -160,30 +160,30 @@ function roleField(config: JsonObject, role: string, field: string): JsonValue |
   return roleConfig[field];
 }
 
-export function validatePlanLoopConfig(file: string): JsonObject {
+export function validateAgentQuorumConfig(file: string): JsonObject {
   if (validatedFile === file && validatedConfig !== undefined) {
     return validatedConfig;
   }
   if (!existsSync(file)) {
-    halt(`plan-loop config: file not found: ${file}`);
+    halt(`agent-quorum config: file not found: ${file}`);
   }
   let parsed: JsonValue;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   } catch {
-    halt(`plan-loop.json is not valid JSON: ${file}`);
+    halt(`agent-quorum.json is not valid JSON: ${file}`);
   }
   const config: JsonObject = isJsonObject(parsed) ? parsed : {};
 
   configWarnUnknown(config);
   if (!('version' in config)) {
-    halt('plan-loop config: missing required field version');
+    halt('agent-quorum config: missing required field version');
   }
   if (!isJsonObject(config.settings)) {
-    halt('plan-loop config: missing required object settings');
+    halt('agent-quorum config: missing required object settings');
   }
   if (!isJsonObject(config.roles)) {
-    halt('plan-loop config: missing required object roles');
+    halt('agent-quorum config: missing required object roles');
   }
 
   for (const field of [
@@ -195,18 +195,18 @@ export function validatePlanLoopConfig(file: string): JsonObject {
     'retryDelaySeconds',
   ]) {
     if (!(field in config.settings)) {
-      halt(`plan-loop config: missing required field settings.${field}`);
+      halt(`agent-quorum config: missing required field settings.${field}`);
     }
   }
 
-  for (const role of PLAN_LOOP_ROLES) {
+  for (const role of PLAN_ROLES) {
     if (!isJsonObject(config.roles[role])) {
-      halt(`plan-loop config: missing required object roles.${role}`);
+      halt(`agent-quorum config: missing required object roles.${role}`);
     }
     for (const field of ['runner', 'model', 'reasoning']) {
       const value = roleField(config, role, field);
       if (typeof value !== 'string' || value.length === 0) {
-        halt(`plan-loop config: missing required field roles.${role}.${field}`);
+        halt(`agent-quorum config: missing required field roles.${role}.${field}`);
       }
     }
   }
@@ -215,7 +215,7 @@ export function validatePlanLoopConfig(file: string): JsonObject {
     for (const field of ['tools', 'disallowedTools']) {
       if (!isValidToolField(roleField(config, role, field))) {
         halt(
-          `plan-loop config: missing required field roles.${role}.${field} (string or non-empty string array)`,
+          `agent-quorum config: missing required field roles.${role}.${field} (string or non-empty string array)`,
         );
       }
     }
@@ -228,7 +228,7 @@ export function validatePlanLoopConfig(file: string): JsonObject {
   ]) {
     if (!isValidToolField(roleField(config, 'creator', field))) {
       halt(
-        `plan-loop config: missing required field roles.creator.${field} (string or non-empty string array)`,
+        `agent-quorum config: missing required field roles.creator.${field} (string or non-empty string array)`,
       );
     }
   }
@@ -277,7 +277,7 @@ function resolveSetting(
   if (fileVal) {
     return fileVal;
   }
-  halt(`plan-loop config: missing required setting settings.${key}`);
+  halt(`agent-quorum config: missing required setting settings.${key}`);
 }
 
 function parseBooleanSetting(raw: string, key: string): 0 | 1 {
@@ -287,7 +287,7 @@ function parseBooleanSetting(raw: string, key: string): 0 | 1 {
   if (raw === 'false' || raw === '0' || raw === 'off' || raw === 'no') {
     return 0;
   }
-  halt(`plan-loop config: settings.${key} must be true or false (got '${raw}')`);
+  halt(`agent-quorum config: settings.${key} must be true or false (got '${raw}')`);
 }
 
 // Default locale when nothing requests one: operator interaction and the
@@ -303,7 +303,7 @@ function normalizeLocale(raw: string): string {
     return '';
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(locale)) {
-    halt(`plan-loop config: settings.locale must be a locale tag (got '${raw}')`);
+    halt(`agent-quorum config: settings.locale must be a locale tag (got '${raw}')`);
   }
   return locale;
 }
@@ -318,7 +318,7 @@ interface ResolvedLocales {
   fileLocale: string;
 }
 
-// Translate-pass precedence: an explicit --translate / PLAN_LOOP_TRANSLATE /
+// Translate-pass precedence: an explicit --translate / AGENT_QUORUM_TRANSLATE /
 // settings.translate toggle wins at its level; otherwise a requested locale
 // implies the pass unless it is English. cli > env > file throughout.
 function resolveTranslatePass(
@@ -332,7 +332,7 @@ function resolveTranslatePass(
   if (locales.cliLocale !== '') {
     return localeNeedsTranslation(locales.cliLocale) ? 1 : 0;
   }
-  const envTranslate = process.env.PLAN_LOOP_TRANSLATE ?? '';
+  const envTranslate = process.env.AGENT_QUORUM_TRANSLATE ?? '';
   if (envTranslate !== '') {
     return parseBooleanSetting(envTranslate, 'translate');
   }
@@ -347,27 +347,27 @@ function resolveTranslatePass(
 }
 
 export function resolveRunSettings(cli: CliSettings, file: string = configFilePath()): RunSettings {
-  const config = validatePlanLoopConfig(file);
+  const config = validateAgentQuorumConfig(file);
 
-  const maxIters = resolveSetting(cli.maxIters, 'PLAN_LOOP_MAX_ITERS', 'iters', config);
+  const maxIters = resolveSetting(cli.maxIters, 'AGENT_QUORUM_MAX_ITERS', 'iters', config);
   const effort = resolveSetting(cli.effort, undefined, 'effort', config);
   const diffThreshold = resolveSetting(
     undefined,
-    'PLAN_LOOP_DIFF_THRESHOLD',
+    'AGENT_QUORUM_DIFF_THRESHOLD',
     'diffThreshold',
     config,
   );
-  const retryCount = resolveSetting(undefined, 'PLAN_LOOP_RETRY_COUNT', 'retryCount', config);
+  const retryCount = resolveSetting(undefined, 'AGENT_QUORUM_RETRY_COUNT', 'retryCount', config);
   const retryDelaySeconds = resolveSetting(
     undefined,
-    'PLAN_LOOP_RETRY_DELAY_SECONDS',
+    'AGENT_QUORUM_RETRY_DELAY_SECONDS',
     'retryDelaySeconds',
     config,
   );
 
   const fixPass = parseBooleanSetting(resolveSetting(cli.fix, undefined, 'fix', config), 'fix');
   const cliLocale = normalizeLocale(cli.locale ?? '');
-  const envLocale = normalizeLocale(process.env.PLAN_LOOP_LOCALE ?? '');
+  const envLocale = normalizeLocale(process.env.AGENT_QUORUM_LOCALE ?? '');
   const fileLocale = normalizeLocale(configFileSetting(config, 'locale'));
   const requestedLocale = cliLocale || envLocale || fileLocale;
   const translatePass = resolveTranslatePass(cli, config, { cliLocale, envLocale, fileLocale });
@@ -377,17 +377,19 @@ export function resolveRunSettings(cli: CliSettings, file: string = configFilePa
     : requestedLocale || DEFAULT_LOCALE;
 
   if (!/^[0-9]+$/.test(maxIters) || Number(maxIters) <= 0) {
-    halt(`plan-loop config: iters must be a positive integer (got '${maxIters}')`);
+    halt(`agent-quorum config: iters must be a positive integer (got '${maxIters}')`);
   }
   if (!/^[0-9]+$/.test(diffThreshold)) {
-    halt(`plan-loop config: diffThreshold must be a non-negative integer (got '${diffThreshold}')`);
+    halt(
+      `agent-quorum config: diffThreshold must be a non-negative integer (got '${diffThreshold}')`,
+    );
   }
   if (!/^[0-9]+$/.test(retryCount)) {
-    halt(`plan-loop config: retryCount must be a non-negative integer (got '${retryCount}')`);
+    halt(`agent-quorum config: retryCount must be a non-negative integer (got '${retryCount}')`);
   }
   if (!/^[0-9]+$/.test(retryDelaySeconds)) {
     halt(
-      `plan-loop config: retryDelaySeconds must be a non-negative integer (got '${retryDelaySeconds}')`,
+      `agent-quorum config: retryDelaySeconds must be a non-negative integer (got '${retryDelaySeconds}')`,
     );
   }
 
@@ -412,24 +414,24 @@ function configFileValue(config: JsonObject, role: string, field: string): strin
 }
 
 export function resolveRoleConfig(file: string = configFilePath()): RoleMatrix {
-  const config = validatePlanLoopConfig(file);
+  const config = validateAgentQuorumConfig(file);
   const matrix: Partial<RoleMatrix> = {};
-  for (const role of PLAN_LOOP_ROLES) {
+  for (const role of PLAN_ROLES) {
     const upper = role.toUpperCase();
-    const envRunner = process.env[`PLAN_LOOP_${upper}_RUNNER`];
+    const envRunner = process.env[`AGENT_QUORUM_${upper}_RUNNER`];
     const runner =
       envRunner !== undefined && envRunner !== ''
         ? envRunner
         : configFileValue(config, role, 'runner');
     if (!RUNNERS.includes(runner)) {
       halt(
-        `plan-loop config: role '${role}' has invalid runner '${runner}' (expected codex, claude, or cursor)`,
+        `agent-quorum config: role '${role}' has invalid runner '${runner}' (expected codex, claude, or cursor)`,
       );
     }
-    const envModel = process.env[`PLAN_LOOP_${upper}_MODEL`];
+    const envModel = process.env[`AGENT_QUORUM_${upper}_MODEL`];
     const model =
       envModel !== undefined && envModel !== '' ? envModel : configFileValue(config, role, 'model');
-    const envReasoning = process.env[`PLAN_LOOP_${upper}_REASONING`];
+    const envReasoning = process.env[`AGENT_QUORUM_${upper}_REASONING`];
     const reasoning =
       envReasoning !== undefined && envReasoning !== ''
         ? envReasoning
@@ -437,8 +439,8 @@ export function resolveRoleConfig(file: string = configFilePath()): RoleMatrix {
     matrix[role] = { runner: runner as Runner, model, reasoning };
   }
   const full = matrix as RoleMatrix;
-  log('config: effective role matrix (env > plan-loop.json):');
-  for (const role of PLAN_LOOP_ROLES) {
+  log('config: effective role matrix (env > agent-quorum.json):');
+  for (const role of PLAN_ROLES) {
     const entry = full[role];
     log(`  → ${role}: runner=${entry.runner} model=${entry.model} reasoning=${entry.reasoning}`);
   }
@@ -455,16 +457,16 @@ function resolveToolConfigValue(config: JsonObject, role: string, field: string)
   } else if (typeof value === 'string') {
     rendered = value;
   } else {
-    halt(`plan-loop config: role '${role}' ${field} must be a string or array`);
+    halt(`agent-quorum config: role '${role}' ${field} must be a string or array`);
   }
   if (rendered === '') {
-    halt(`plan-loop config: role '${role}' ${field} is required and must be non-empty`);
+    halt(`agent-quorum config: role '${role}' ${field} is required and must be non-empty`);
   }
   return rendered;
 }
 
 export function resolveRolePermissions(file: string = configFilePath()): RolePermissions {
-  const config = validatePlanLoopConfig(file);
+  const config = validateAgentQuorumConfig(file);
 
   const critic: RoleTools = {
     tools: resolveToolConfigValue(config, 'critic', 'tools'),

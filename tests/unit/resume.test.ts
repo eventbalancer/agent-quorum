@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { archiveResumeStale, lastStablePlan, resolveResumeWorkdir } from '../../src/core/resume.js';
+import { archiveResumeStale, lastStablePlan } from '../../src/stages/plan/resume.js';
+import { resolveResumeWorkdir } from '../../src/core/resume.js';
 import type { ResumeState } from '../../src/core/run-context.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import { captureStderr, writeStructuredPlanFile, writeUpdate } from '../helpers/harness.js';
@@ -12,7 +13,7 @@ let work: string;
 let schema: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-resumetest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-resumetest.'));
   work = path.join(tmp, 'work');
   mkdirSync(work);
   schema = path.join(tmp, 'update.schema.json');
@@ -145,7 +146,7 @@ describe('resume workdir resolution', () => {
       const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'ghost');
       expect(result).toEqual({ kind: 'none' });
       expect(capture.text()).toContain('resume: no existing workdir with state for ghost');
-      expect(capture.text()).toContain('set PLAN_LOOP_WORK_DIR to override');
+      expect(capture.text()).toContain('set AGENT_QUORUM_WORK_DIR to override');
     } finally {
       capture.restore();
     }

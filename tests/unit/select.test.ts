@@ -36,7 +36,7 @@ function runIdOf(resolved: ResolvedRun | undefined): string | undefined {
 }
 
 beforeEach(() => {
-  stateDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-select.'));
+  stateDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-select.'));
 });
 
 afterEach(() => {

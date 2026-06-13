@@ -9,20 +9,20 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { loadPlanLoopDotenv, packageRoot, projectRoot } from '../runtime/env.js';
-import { fileLineCount } from '../runtime/files.js';
-import { installSignalTeardown, ownPgid } from '../runtime/exec.js';
-import { HaltError } from '../runtime/halt.js';
-import { disableRunLogSink, enableRunLogSink, err, log } from '../runtime/log.js';
-import { resolveArtifactRoots } from '../runtime/paths.js';
-import { procStartToken } from '../runtime/proc.js';
-import { Scratch } from '../runtime/scratch.js';
+import { loadAgentQuorumDotenv, packageRoot, projectRoot } from '../../runtime/env.js';
+import { fileLineCount } from '../../runtime/files.js';
+import { installSignalTeardown, ownPgid } from '../../runtime/exec.js';
+import { HaltError } from '../../runtime/halt.js';
+import { disableRunLogSink, enableRunLogSink, err, log } from '../../runtime/log.js';
+import { resolveArtifactRoots } from '../../runtime/paths.js';
+import { procStartToken } from '../../runtime/proc.js';
+import { Scratch } from '../../runtime/scratch.js';
 import {
   cleanupRunRegistry,
   nowUtcStamp,
   writeRunMetadata,
   type RunMetadata,
-} from '../core/artifacts.js';
+} from '../../core/artifacts.js';
 import {
   deriveRunName,
   finalizeRunRecord,
@@ -31,8 +31,8 @@ import {
   runNameFromWorkdir,
   writeRunRecord,
   type RunState,
-} from '../core/run-store.js';
-import { runClarificationGate } from '../core/clarify.js';
+} from '../../core/run-store.js';
+import { runClarificationGate } from './clarify.js';
 import {
   configFilePath,
   resolveRoleConfig,
@@ -40,14 +40,14 @@ import {
   resolveRunSettings,
   runnersInUse,
   type CliSettings,
-} from '../core/config.js';
-import { runCreatorCreate } from '../core/creator.js';
-import { effortMatrix } from '../core/effort.js';
-import { runFixPass } from '../core/fix-pass.js';
-import { markOperatorInterventionsMigrated } from '../core/interventions.js';
-import { resolveWatchdogKnobs } from '../core/knobs.js';
-import { runIterationLoop } from '../core/loop.js';
-import { preflightRunners } from '../core/preflight.js';
+} from '../../core/config.js';
+import { runCreatorCreate } from './creator.js';
+import { effortMatrix } from '../../core/effort.js';
+import { runFixPass } from './fix-pass.js';
+import { markOperatorInterventionsMigrated } from './interventions.js';
+import { resolveWatchdogKnobs } from '../../core/knobs.js';
+import { runIterationLoop } from './loop.js';
+import { preflightRunners } from './preflight.js';
 import {
   DEFAULT_SPLIT_MIN_PHASES,
   emitPlanPackage,
@@ -58,25 +58,31 @@ import {
   validatePlanPackage,
   type PackageHealth,
   type SplitDecision,
-} from '../core/plan-package.js';
+} from './plan-package.js';
 import {
   planDocumentShapeHealth,
   planHasTitleHeading,
   type PlanShapeHealth,
-} from '../core/plan-shape.js';
-import { prepareResume } from '../core/resume.js';
-import { skillPaths, type RunContext } from '../core/run-context.js';
-import { buildRunReport, writeSummary, type RunReport } from '../core/summary.js';
-import { telegramNotifyCompletion, type TelegramCompletionNotification } from '../core/telegram.js';
-import { runTranslatePass } from '../core/translate-pass.js';
+} from './plan-shape.js';
+import { prepareResume } from './resume.js';
+import { skillPaths, type RunContext } from '../../core/run-context.js';
+import { buildRunReport, writeSummary, type RunReport } from './summary.js';
+import {
+  telegramNotifyCompletion,
+  type TelegramCompletionNotification,
+} from '../../core/telegram.js';
+import { runTranslatePass } from './translate-pass.js';
 import {
   EMPTY_FINDINGS_COUNTS,
   readFindingsCounts,
   validateFinalPlan,
   type FindingsCounts,
-} from '../core/validate-plan.js';
-import { RUN_USAGE } from './help.js';
-import type { RunMode, RunOverrides } from '../types.js';
+} from './validate-plan.js';
+import type { RunMode, RunOverrides } from '../../types.js';
+
+export const RUN_USAGE =
+  'usage: agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
+  '       agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>\n';
 
 function usage(): never {
   process.stderr.write(RUN_USAGE);
@@ -408,7 +414,7 @@ export async function runPlanLoopCli(
   args: readonly string[],
   overrides: RunOverrides = {},
 ): Promise<RunOutcome> {
-  loadPlanLoopDotenv();
+  loadAgentQuorumDotenv();
   const parsed = parseRunArgs(args);
 
   const configFile = overrides.configFile ?? configFilePath();
@@ -428,8 +434,8 @@ export async function runPlanLoopCli(
   mkdirSync(runStateDir, { recursive: true });
   runStateDir = canonicalDir(runStateDir);
 
-  const explicitWork = overrides.workDir ?? process.env.PLAN_LOOP_WORK_DIR;
-  const forwardedName = process.env.PLAN_LOOP_RUN_NAME;
+  const explicitWork = overrides.workDir ?? process.env.AGENT_QUORUM_WORK_DIR;
+  const forwardedName = process.env.AGENT_QUORUM_RUN_NAME;
   const explicitName =
     forwardedName !== undefined && forwardedName !== '' ? forwardedName : undefined;
   let work: string;
@@ -451,7 +457,7 @@ export async function runPlanLoopCli(
 
   const pgid = ownPgid();
   const startToken = procStartToken(process.pid) ?? '';
-  const forwardedRunId = process.env.PLAN_LOOP_RUN_ID;
+  const forwardedRunId = process.env.AGENT_QUORUM_RUN_ID;
   const startedAt = nowUtcStamp();
   let runId = '';
   const finalizeRun = (state: RunState, exitCode: number, finalStatus?: string): void => {
@@ -467,7 +473,7 @@ export async function runPlanLoopCli(
   };
 
   try {
-    if (process.env.PLAN_LOOP_STDIO_IS_RUNLOG !== '1') {
+    if (process.env.AGENT_QUORUM_STDIO_IS_RUNLOG !== '1') {
       enableRunLogSink(logPath);
     }
     runId = writeRunRecord(
@@ -572,7 +578,7 @@ export async function runPlanLoopCli(
       }
     }
 
-    const cursorBin = process.env.PLAN_LOOP_CURSOR_BIN ?? 'cursor-agent';
+    const cursorBin = process.env.AGENT_QUORUM_CURSOR_BIN ?? 'cursor-agent';
     const required = runnersInUse(matrix, settings.fixPass, settings.translatePass);
     const preflightFailure = preflightRunners(required, cursorBin);
     if (preflightFailure !== undefined) {
@@ -606,15 +612,15 @@ export async function runPlanLoopCli(
         creatorSessionFile,
         markdownSchemaPath: skills.markdownSchema,
         cursorBin,
-        ...(process.env.PLAN_LOOP_PROVIDER_DIAGNOSTICS === '1'
+        ...(process.env.AGENT_QUORUM_PROVIDER_DIAGNOSTICS === '1'
           ? { diagnosticsDir: path.join(work, 'diagnostics') }
           : {}),
       },
       passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
-      maxPlanLines: Number(process.env.PLAN_LOOP_MAX_PLAN_LINES ?? 900),
+      maxPlanLines: Number(process.env.AGENT_QUORUM_MAX_PLAN_LINES ?? 900),
       split: {
-        mode: resolveSplitMode(process.env.PLAN_LOOP_SPLIT),
-        minPhases: Number(process.env.PLAN_LOOP_SPLIT_MIN_PHASES ?? DEFAULT_SPLIT_MIN_PHASES),
+        mode: resolveSplitMode(process.env.AGENT_QUORUM_SPLIT),
+        minPhases: Number(process.env.AGENT_QUORUM_SPLIT_MIN_PHASES ?? DEFAULT_SPLIT_MIN_PHASES),
       },
       lastCritiqueIter: -1,
       resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
@@ -664,7 +670,7 @@ export async function runPlanLoopCli(
       }
 
       let startIter = 0;
-      if (process.env.PLAN_LOOP_RESUME === '1') {
+      if (process.env.AGENT_QUORUM_RESUME === '1') {
         startIter = prepareResume(ctx);
       }
       if (startIter > 0) {

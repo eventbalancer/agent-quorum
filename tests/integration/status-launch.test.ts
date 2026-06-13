@@ -65,13 +65,13 @@ async function launchHangingRun(name: string): Promise<LaunchedRun> {
     ['launch', '--effort', 'low', '--iters', '1', input, '--no-fix', '--no-translate'],
     {
       PATH: `${fake}:${process.env.PATH ?? ''}`,
-      PLAN_LOOP_CONFIG_FILE: path.join(tmp, 'plan-loop.json'),
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_CLARIFY: '0',
-      PLAN_LOOP_RETRY_COUNT: '0',
-      PLAN_LOOP_LAUNCH_VERIFY_DELAY: '0.3',
-      PLAN_LOOP_WORK_DIR: undefined,
+      AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_CLARIFY: '0',
+      AGENT_QUORUM_RETRY_COUNT: '0',
+      AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
+      AGENT_QUORUM_WORK_DIR: undefined,
       SLOW_CODEX_PID_FILE: pidBase,
       FAKE_CODEX_PROMPT: path.join(tmp, `${name}.codex.prompt`),
     },
@@ -102,13 +102,13 @@ async function launchHangingRun(name: string): Promise<LaunchedRun> {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-statustest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-statustest.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   writeSlowCodex();
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'plan-loop.json'));
+  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
 });
 
 afterEach(async () => {
@@ -134,13 +134,13 @@ describe('launch + status (Finding F4, AC-5)', () => {
     expect(runA.work).toBe(path.join(tmp, 'plans', 'loop-alpha'));
 
     const logContent = readFileSync(runA.log, 'utf8');
-    expect(logContent).toContain('[plan-loop]');
+    expect(logContent).toContain('[agent-quorum]');
     expect(logContent).not.toContain('\x1b[');
 
     const statusEnv = {
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
 
     const byGrandchild = runCli(['status', String(runA.grandchildPid)], statusEnv);
@@ -149,13 +149,15 @@ describe('launch + status (Finding F4, AC-5)', () => {
     expect(byGrandchild.stdout).toContain(`PID=${runA.pid}`);
     expect(byGrandchild.stdout).toContain(`WORK: ${realpathSync(runA.work)}`);
 
-    const nonPlanLoop = runCli(['status', String(process.pid)], statusEnv);
-    expect(nonPlanLoop.status).toBe(3);
-    expect(nonPlanLoop.stderr).toContain(`PID ${process.pid} is not part of a plan-loop tree`);
+    const nonAgentQuorum = runCli(['status', String(process.pid)], statusEnv);
+    expect(nonAgentQuorum.status).toBe(3);
+    expect(nonAgentQuorum.stderr).toContain(
+      `PID ${process.pid} is not part of an agent-quorum tree`,
+    );
 
     const runB = await launchHangingRun('beta');
 
-    // A stale registry entry whose pid now belongs to a non-plan-loop process
+    // A stale registry entry whose pid now belongs to a non-agent-quorum process
     // (this vitest worker) must be ignored by the no-argument discovery.
     writeFileSync(
       path.join(tmp, 'state', `${process.pid}.tsv`),
@@ -164,7 +166,7 @@ describe('launch + status (Finding F4, AC-5)', () => {
 
     const listAll = runCli(['status'], statusEnv);
     expect(listAll.status).toBe(0);
-    expect(listAll.stdout).toContain('found 2 plan-loop run(s)');
+    expect(listAll.stdout).toContain('found 2 agent-quorum run(s)');
     expect(listAll.stdout).toContain('alpha  [running]');
     expect(listAll.stdout).toContain('beta  [running]');
     expect(listAll.stdout).not.toContain('loop-decoy');
@@ -214,9 +216,9 @@ describe('status provider-neutral hints (FR-7)', () => {
   it('derives the stall hint provider and shows a provider-neutral retry hint', async () => {
     const run = await launchHangingRun('gamma');
     const statusEnv = {
-      PLAN_LOOP_PLANS_DIR: path.join(tmp, 'plans'),
-      PLAN_LOOP_STATE_DIR: path.join(tmp, 'state'),
-      PLAN_LOOP_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
 
     // The neutralized P1 retry trace token triggers the provider-neutral hint.
@@ -227,7 +229,7 @@ describe('status provider-neutral hints (FR-7)', () => {
     expect(retry.stdout).not.toContain('claude is retrying');
 
     // A cursor stall names cursor in the hint, not the old hardcoded claude.
-    appendFileSync(run.log, '[plan-loop] cursor stream stalled: no byte progress\n');
+    appendFileSync(run.log, '[agent-quorum] cursor stream stalled: no byte progress\n');
     const stall = runCli(['status', String(run.grandchildPid)], statusEnv);
     expect(stall.status).toBe(0);
     expect(stall.stdout).toContain('(watchdog terminated a recent cursor call, see run.log)');

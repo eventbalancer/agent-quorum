@@ -49,16 +49,16 @@ function ttyStream(): PassThrough & { isTTY?: boolean } {
 }
 
 beforeEach(() => {
-  stateDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-picker.'));
-  savedStateDir = process.env.PLAN_LOOP_STATE_DIR;
-  process.env.PLAN_LOOP_STATE_DIR = stateDir;
+  stateDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-picker.'));
+  savedStateDir = process.env.AGENT_QUORUM_STATE_DIR;
+  process.env.AGENT_QUORUM_STATE_DIR = stateDir;
 });
 
 afterEach(() => {
   if (savedStateDir === undefined) {
-    Reflect.deleteProperty(process.env, 'PLAN_LOOP_STATE_DIR');
+    Reflect.deleteProperty(process.env, 'AGENT_QUORUM_STATE_DIR');
   } else {
-    process.env.PLAN_LOOP_STATE_DIR = savedStateDir;
+    process.env.AGENT_QUORUM_STATE_DIR = savedStateDir;
   }
   rmSync(stateDir, { recursive: true, force: true });
 });
@@ -94,15 +94,15 @@ describe('listCandidates', () => {
       );
       finalizeRunRecord(stateDir, done.runId, { state: 'finished', exitCode: 0 });
     }
-    const saved = process.env.PLAN_LOOP_RETAIN_COUNT;
-    process.env.PLAN_LOOP_RETAIN_COUNT = '1';
+    const saved = process.env.AGENT_QUORUM_RETAIN_COUNT;
+    process.env.AGENT_QUORUM_RETAIN_COUNT = '1';
     try {
       expect(listCandidates().filter((candidate) => !candidate.isLive)).toHaveLength(1);
     } finally {
       if (saved === undefined) {
-        Reflect.deleteProperty(process.env, 'PLAN_LOOP_RETAIN_COUNT');
+        Reflect.deleteProperty(process.env, 'AGENT_QUORUM_RETAIN_COUNT');
       } else {
-        process.env.PLAN_LOOP_RETAIN_COUNT = saved;
+        process.env.AGENT_QUORUM_RETAIN_COUNT = saved;
       }
     }
   });
@@ -113,7 +113,7 @@ describe('renderListing', () => {
     writeRunRecord(stateDir, draft({ ...liveOverrides(), name: 'foo' }));
     const candidates = listCandidates();
     const plain = renderListing(candidates, { color: false });
-    expect(plain).toContain('found 1 plan-loop run(s)');
+    expect(plain).toContain('found 1 agent-quorum run(s)');
     expect(plain).toContain('foo  [running]');
     expect(plain.includes(ESC)).toBe(false);
     expect(renderListing(candidates, { color: true }).includes(ESC)).toBe(true);

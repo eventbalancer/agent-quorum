@@ -44,7 +44,7 @@ function readJson(file: string): unknown {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-schematest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-schematest.'));
 });
 
 afterEach(() => {
@@ -199,16 +199,16 @@ describe('in-process schema validation', () => {
     }
   });
 
-  it('PLAN_LOOP_AJV_BIN is warned-and-ignored (adapted: Finding F8)', () => {
+  it('AGENT_QUORUM_AJV_BIN is warned-and-ignored (adapted: Finding F8)', () => {
     const schema = writeJson('ajvbin.schema.json', { required: ['ok'] });
     const valid = writeJson('ajvbin.valid.json', { ok: true });
     const capture = captureStderr();
     try {
-      const result = withEnv({ PLAN_LOOP_AJV_BIN: '/nonexistent/ajv' }, () =>
+      const result = withEnv({ AGENT_QUORUM_AJV_BIN: '/nonexistent/ajv' }, () =>
         validateSchema(valid, schema),
       );
       expect(result).toBe(true);
-      expect(capture.text()).toContain('PLAN_LOOP_AJV_BIN is ignored');
+      expect(capture.text()).toContain('AGENT_QUORUM_AJV_BIN is ignored');
     } finally {
       capture.restore();
     }

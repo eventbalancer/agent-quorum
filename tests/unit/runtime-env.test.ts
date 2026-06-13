@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadPlanLoopDotenv } from '../../src/runtime/env.js';
+import { findPackageRoot, loadAgentQuorumDotenv } from '../../src/runtime/env.js';
+
+const LEGACY_CONFIG_NAME = `${['plan', 'loop'].join('-')}.json`;
 
 const TRACKED_KEYS = [
   'PL_TEST_PLAIN',
@@ -21,8 +23,8 @@ let root: string;
 let otherDir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-envtest.'));
-  otherDir = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-envother.'));
+  root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-envtest.'));
+  otherDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-envother.'));
   for (const key of TRACKED_KEYS) {
     Reflect.deleteProperty(process.env, key);
   }
@@ -36,7 +38,7 @@ afterEach(() => {
   }
 });
 
-describe('loadPlanLoopDotenv', () => {
+describe('loadAgentQuorumDotenv', () => {
   it('loads keys with reference parsing semantics', () => {
     writeFileSync(
       path.join(root, '.env'),
@@ -53,7 +55,7 @@ describe('loadPlanLoopDotenv', () => {
         '1BADKEY=skipped',
       ].join('\n'),
     );
-    loadPlanLoopDotenv(root);
+    loadAgentQuorumDotenv(root);
     expect(process.env.PL_TEST_PLAIN).toBe('alpha');
     expect(process.env.PL_TEST_EXPORT).toBe('beta');
     expect(process.env.PL_TEST_DQ).toBe('quoted value');
@@ -71,26 +73,40 @@ describe('loadPlanLoopDotenv', () => {
     );
     process.env.PL_TEST_REAL = 'fromenv';
     process.env.PL_TEST_EMPTY = '';
-    loadPlanLoopDotenv(root);
+    loadAgentQuorumDotenv(root);
     expect(process.env.PL_TEST_REAL).toBe('fromenv');
     expect(process.env.PL_TEST_EMPTY).toBe('fromfile');
   });
 
   it('is a no-op when the package root has no .env', () => {
     expect(() => {
-      loadPlanLoopDotenv(root);
+      loadAgentQuorumDotenv(root);
     }).not.toThrow();
   });
 
   it('never reads a .env beside an overridden config file (Finding F3)', () => {
     writeFileSync(path.join(otherDir, '.env'), 'PL_TEST_OTHERDIR=leaked\n');
-    writeFileSync(path.join(otherDir, 'plan-loop.json'), '{}\n');
-    process.env.PLAN_LOOP_CONFIG_FILE = path.join(otherDir, 'plan-loop.json');
+    writeFileSync(path.join(otherDir, 'agent-quorum.json'), '{}\n');
+    process.env.AGENT_QUORUM_CONFIG_FILE = path.join(otherDir, 'agent-quorum.json');
     try {
-      loadPlanLoopDotenv(root);
+      loadAgentQuorumDotenv(root);
       expect(process.env.PL_TEST_OTHERDIR).toBeUndefined();
     } finally {
-      delete process.env.PLAN_LOOP_CONFIG_FILE;
+      delete process.env.AGENT_QUORUM_CONFIG_FILE;
     }
+  });
+});
+
+describe('findPackageRoot', () => {
+  it('resolves a directory holding agent-quorum.json and package.json', () => {
+    writeFileSync(path.join(root, 'agent-quorum.json'), '{}\n');
+    writeFileSync(path.join(root, 'package.json'), '{}\n');
+    expect(findPackageRoot(root)).toBe(root);
+  });
+
+  it('does not match a directory holding only the legacy config filename', () => {
+    writeFileSync(path.join(otherDir, LEGACY_CONFIG_NAME), '{}\n');
+    writeFileSync(path.join(otherDir, 'package.json'), '{}\n');
+    expect(() => findPackageRoot(otherDir)).toThrow(/package root not found/);
   });
 });

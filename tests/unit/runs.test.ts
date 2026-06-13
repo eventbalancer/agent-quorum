@@ -19,7 +19,7 @@ function seed(name: string, withLog: boolean): string {
   mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
   if (withLog) {
-    writeFileSync(path.join(workDir, 'run.log'), '[plan-loop] line one\n');
+    writeFileSync(path.join(workDir, 'run.log'), '[agent-quorum] line one\n');
   }
   const draft: RunRecordDraft = {
     name,
@@ -55,18 +55,18 @@ function collect(): { out: (text: string) => void; text: () => string } {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-runsunit.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-runsunit.'));
   stateDir = path.join(tmp, 'state');
   mkdirSync(stateDir, { recursive: true });
-  savedStateDir = process.env.PLAN_LOOP_STATE_DIR;
-  process.env.PLAN_LOOP_STATE_DIR = stateDir;
+  savedStateDir = process.env.AGENT_QUORUM_STATE_DIR;
+  process.env.AGENT_QUORUM_STATE_DIR = stateDir;
 });
 
 afterEach(() => {
   if (savedStateDir === undefined) {
-    Reflect.deleteProperty(process.env, 'PLAN_LOOP_STATE_DIR');
+    Reflect.deleteProperty(process.env, 'AGENT_QUORUM_STATE_DIR');
   } else {
-    process.env.PLAN_LOOP_STATE_DIR = savedStateDir;
+    process.env.AGENT_QUORUM_STATE_DIR = savedStateDir;
   }
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -84,7 +84,7 @@ describe('runShowCli', () => {
   it('prints usage for --help', () => {
     const sink = collect();
     expect(runShowCli(['--help'], sink.out)).toBe(0);
-    expect(sink.text()).toContain('plan-loop show');
+    expect(sink.text()).toContain('agent-quorum show');
   });
 
   it('throws HaltError(2) when nothing resolves', () => {
@@ -97,14 +97,14 @@ describe('runLogsCli', () => {
     seed('beta', true);
     const sink = collect();
     expect(await runLogsCli(['beta'], sink.out)).toBe(0);
-    expect(sink.text()).toContain('[plan-loop] line one');
+    expect(sink.text()).toContain('[agent-quorum] line one');
   });
 
   it('follows a terminal run and drains the log without hanging', async () => {
     seed('gamma', true);
     const sink = collect();
     expect(await runLogsCli(['--last', '-f'], sink.out)).toBe(0);
-    expect(sink.text()).toContain('[plan-loop] line one');
+    expect(sink.text()).toContain('[agent-quorum] line one');
   });
 
   it('degrades to a clear message and exit 0 when there is no run.log', async () => {
@@ -131,7 +131,7 @@ describe('runPruneCli', () => {
   it('prints usage for --help and rejects unknown flags', () => {
     const help = collect();
     expect(runPruneCli(['--help'], help.out)).toBe(0);
-    expect(help.text()).toContain('plan-loop prune');
+    expect(help.text()).toContain('agent-quorum prune');
     expect(() => runPruneCli(['--bogus'], () => undefined)).toThrow(HaltError);
   });
 });

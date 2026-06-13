@@ -220,7 +220,7 @@ export class StreamLogFilter {
 
   constructor(thinkingEvery?: number) {
     this.thinkingEvery =
-      thinkingEvery ?? Number(process.env.PLAN_LOOP_CLAUDE_THINKING_LOG_EVERY ?? 3);
+      thinkingEvery ?? Number(process.env.AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY ?? 3);
   }
 
   line(line: string): string[] {

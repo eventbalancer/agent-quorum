@@ -64,7 +64,7 @@ function strippedFile(file: string): string {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-provider.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-provider.'));
   fake = path.join(tmp, 'bin');
   writeFakeBin(fake);
   scratch = Scratch.create('provider-test');

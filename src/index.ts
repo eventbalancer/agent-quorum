@@ -3,7 +3,7 @@ import { HaltError } from './runtime/halt.js';
 import { resolveArtifactRoots } from './runtime/paths.js';
 import { runInterveneCli } from './cli/intervene.js';
 import { runLaunchCli } from './cli/launch.js';
-import { runPlanLoopCli, type RunOutcome } from './cli/run.js';
+import { runPlanLoopCli, type RunOutcome } from './stages/plan/run.js';
 import { runStatusCli } from './cli/status.js';
 import {
   parseSelector,
@@ -179,7 +179,7 @@ function captureCommand(run: (write: (text: string) => void) => number): Command
 }
 
 // The core plan → critique → update loop, byte-contract identical to the
-// reference plan-loop.sh run. Returns the exit code; never calls process.exit.
+// reference agent-quorum.sh run. Returns the exit code; never calls process.exit.
 export async function runPlanLoop(options: RunPlanLoopOptions): Promise<RunResult> {
   try {
     return toRunResult(await runPlanLoopCli(commonArgs(options), runOverrides(options)));
@@ -217,7 +217,7 @@ export async function launchPlanLoop(options: LaunchPlanLoopOptions): Promise<La
 }
 
 // Status snapshot: a pid (any process in the run's tree) or no query to list
-// every currently running plan-loop run.
+// every currently running agent-quorum run.
 export function getRunStatus(query?: number): CommandResult {
   return captureCommand((write) => runStatusCli(query === undefined ? [] : [String(query)], write));
 }

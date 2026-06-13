@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractPlanCodeSpans, validateFinalPlan } from '../../src/core/validate-plan.js';
+import { extractPlanCodeSpans, validateFinalPlan } from '../../src/stages/plan/validate-plan.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import { captureStderr } from '../helpers/harness.js';
 
@@ -66,7 +66,7 @@ function readFindings(): Findings {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'plan-loop-validatetest.'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-validatetest.'));
   setupProject();
 });
 
