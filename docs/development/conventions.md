@@ -470,6 +470,29 @@ Make breaking changes additively when there are external consumers of `src/index
 - Ask before changing reachable but suspicious logic.
 - Typecheck after small cleanup batches so false positives are easy to isolate.
 
+## Test Network Isolation
+
+The test suite runs behind an always-on network guard
+(`tests/helpers/network-guard.mjs`) so a run can never perform a real external
+network side effect, regardless of any credentials or `.env` values present on
+the machine. The guard blocks every outbound connection whose destination host
+is not loopback (`127.0.0.0/8`, `::1`, `localhost`) or an IPC socket; loopback
+classification is by numeric IP literal, so a hostname like `127.example.test`
+is treated as remote.
+
+- It installs in-process in each worker through `vitest` `setupFiles`, and in
+  every spawned **Node** child through an inherited `NODE_OPTIONS=--import` that
+  the guard self-appends.
+- A test that needs a server must bind `127.0.0.1` (the Telegram stub already
+  does); local servers and the in-process stub keep working unchanged.
+- A blocked attempt is identifiable by the `agent-quorum network guard` marker
+  on `stderr` and a rejected/`AGENT_QUORUM_NETWORK_BLOCKED` error.
+- Any new test that spawns a Node process must let it inherit `process.env` (the
+  default) for the guard to apply.
+- Reach is Node-only: `NODE_OPTIONS=--import` does not reach non-Node children.
+  The suite spawns only non-egressing bash fake bins; if a test ever spawns a
+  non-Node command that can egress, it needs its own isolation.
+
 ## Verification
 
 Scale verification to risk and blast radius.

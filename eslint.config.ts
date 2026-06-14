@@ -41,5 +41,13 @@ export default defineConfig(
       ],
     },
   },
+  {
+    files: ['**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+    },
+  },
   prettier,
 );
