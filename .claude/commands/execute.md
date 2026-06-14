@@ -19,6 +19,7 @@ slash-command form.
 
 ```text
 /execute <plan-path>
+/execute --worktree <branch|path> <plan-path>
 Use $execute <plan-path>
 Use $execute for <plan-path>
 ```
@@ -34,6 +35,36 @@ markdown plan file or a `plan.package/` directory. Accept absolute paths,
 - If the argument names a plan run directory and exactly one implementation
   plan or one `plan.package/` is obvious, use it; otherwise stop and ask for the
   exact path.
+
+## Worktree selection gate
+
+When more than one session worktree may exist, target the right one before
+touching a working tree. This skill follows the shared protocol in
+`docs/development/worktree-selection-gate.md`; the canonical rules live there and
+this section only wires the skill into them. The gate has no observable behavior
+in a single-worktree checkout.
+
+- **Default (interactive):** enumerate candidate worktrees and present each with
+  its git identifier (branch and path, verbatim), its recorded task description
+  or an explicit `(no task description recorded)` indicator, and an active-edit
+  marker; act only on the operator-selected worktree.
+- **Unambiguous skip:** present nothing and proceed in place when exactly one
+  candidate exists or the skill is invoked inside a linked session worktree; the
+  primary checkout is a dispatch context, not a candidate.
+- **Explicit target:** `--worktree <branch|path>` bypasses the menu only. Match
+  it exactly against `git worktree list --porcelain` and stop on zero or multiple
+  matches. It still requires confirmation when the target may be actively edited
+  by another session.
+- **Confirmation:** selecting a worktree another session may be editing requires
+  explicit operator confirmation before any action.
+- **Handoff:** enter the selected worktree and confirm that
+  `git rev-parse --show-toplevel` equals its path before any git, file, or
+  verification command; reserve `git -C <path>` for read-only inspection of other
+  candidates. Stop if the handoff cannot be confirmed.
+
+See `docs/development/worktree-selection-gate.md` for candidate discovery, the
+durable-record contract keyed by worktree, the conservative active-edit signal,
+and the presentation surface.
 
 ## Package-Aware Execution
 
@@ -91,7 +122,12 @@ git-ignored except for `.gitkeep`.
 
 ### Step 0 - Bootstrap
 
-1. Resolve and verify the checkout:
+1. Apply the worktree selection gate to choose the target worktree, but resolve
+   and read `<plan-path>` against the invocation checkout (Step 0 item 2) before
+   entering the selected worktree; then enter and verify it and run the
+   implementation and journal inside it. The gate is a silent no-op in a
+   single-worktree checkout. Stop if `<plan-path>` cannot be resolved or read
+   against the invocation checkout. Resolve and verify the checkout:
 
    ```sh
    git rev-parse --show-toplevel

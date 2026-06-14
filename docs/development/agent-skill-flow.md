@@ -36,6 +36,13 @@ The workflow Claude commands and Codex skills are mirrored byte-for-byte:
 When one side changes, update the other side in the same change and verify the
 pairs with `cmp`.
 
+The working-tree-dependent skills `tidy`, `ship`, and `execute` additionally
+share the [Worktree selection gate](worktree-selection-gate.md): before acting,
+each resolves and enters the operator's intended session worktree. The
+worktree-agnostic skills `issues`, `requirements`, and `solution-handoff` (and
+`prompt-architect`) do not present the gate, because they never act on a
+checkout's working tree.
+
 ## Artifact Root
 
 All workflow artifacts stay inside the repository-local `.agents` directory:
@@ -170,6 +177,8 @@ Outputs:
 
 Rules:
 
+- resolve and enter the target worktree via the Worktree selection gate before
+  acting;
 - treat the plan as the spec;
 - write only deviations, blockers, and verification issues in the journal;
 - adapt stale references only when the intended target is clear;
@@ -189,6 +198,8 @@ Outputs:
 
 Rules:
 
+- resolve and enter the target worktree via the Worktree selection gate before
+  acting;
 - work only inside the dirty set plus documented mirror counterparts;
 - preserve behavior; surface anything needing wider edits as separate work;
 - reconcile mirror pairs and docs when names, paths, or contracts change;
@@ -208,6 +219,8 @@ Outputs:
 
 Rules:
 
+- resolve and enter the target worktree via the Worktree selection gate before
+  acting;
 - act only in the `agent-quorum` checkout; keep unrelated dirt out of scope;
 - show the exact irreversible plan before staging, committing, pushing, tagging,
   or triggering publish workflows;

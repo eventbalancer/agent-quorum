@@ -19,6 +19,7 @@ slash-command form accepted `/tidy`; in Codex, parse the user's prompt after
 Use $tidy
 Use $tidy for <path> [<path>...]
 Use $tidy in <repo-or-subdir>
+Use $tidy --worktree <branch|path>
 ```
 
 Empty scope means every dirty file in the current `agent-quorum` checkout. Path
@@ -27,9 +28,41 @@ checkout, generated artifacts, lockfiles, and unrelated cleanup unless the file
 is a documented mirror counterpart or a new helper extracted from an already
 dirty file.
 
+## Worktree selection gate
+
+When more than one session worktree may exist, target the right one before
+touching a working tree. This skill follows the shared protocol in
+`docs/development/worktree-selection-gate.md`; the canonical rules live there and
+this section only wires the skill into them. The gate has no observable behavior
+in a single-worktree checkout.
+
+- **Default (interactive):** enumerate candidate worktrees and present each with
+  its git identifier (branch and path, verbatim), its recorded task description
+  or an explicit `(no task description recorded)` indicator, and an active-edit
+  marker; act only on the operator-selected worktree.
+- **Unambiguous skip:** present nothing and proceed in place when exactly one
+  candidate exists or the skill is invoked inside a linked session worktree; the
+  primary checkout is a dispatch context, not a candidate.
+- **Explicit target:** `--worktree <branch|path>` bypasses the menu only. Match
+  it exactly against `git worktree list --porcelain` and stop on zero or multiple
+  matches. It still requires confirmation when the target may be actively edited
+  by another session.
+- **Confirmation:** selecting a worktree another session may be editing requires
+  explicit operator confirmation before any action.
+- **Handoff:** enter the selected worktree and confirm that
+  `git rev-parse --show-toplevel` equals its path before any git, file, or
+  verification command; reserve `git -C <path>` for read-only inspection of other
+  candidates. Stop if the handoff cannot be confirmed.
+
+See `docs/development/worktree-selection-gate.md` for candidate discovery, the
+durable-record contract keyed by worktree, the conservative active-edit signal,
+and the presentation surface.
+
 ## Workflow
 
-1. **Identify scope.** Use read-only history commands:
+1. **Identify scope.** First resolve and enter the target worktree with the
+   worktree selection gate above (a silent no-op in a single-worktree checkout),
+   then operate inside it. Use read-only history commands:
 
    ```bash
    git status --porcelain=v1 --untracked-files=all

@@ -28,6 +28,7 @@ tagging, deleting tags, or triggering publish-related workflows.
 /ship <path> [<path>...]
 /ship --dry-run [<path>...]
 /ship --no-push [<path>...]
+/ship --worktree <branch|path>
 /ship --release patch|minor|major|X.Y.Z
 /ship --release vX.Y.Z
 /ship --release --dry-run patch|minor|major|X.Y.Z
@@ -41,9 +42,41 @@ repository has no reconciler.
 Unknown flags are not passed through to another tool. Stop, explain the
 accepted arguments, and ask for the intended operation.
 
+## Worktree selection gate
+
+When more than one session worktree may exist, target the right one before
+touching a working tree. This skill follows the shared protocol in
+`docs/development/worktree-selection-gate.md`; the canonical rules live there and
+this section only wires the skill into them. The gate has no observable behavior
+in a single-worktree checkout.
+
+- **Default (interactive):** enumerate candidate worktrees and present each with
+  its git identifier (branch and path, verbatim), its recorded task description
+  or an explicit `(no task description recorded)` indicator, and an active-edit
+  marker; act only on the operator-selected worktree.
+- **Unambiguous skip:** present nothing and proceed in place when exactly one
+  candidate exists or the skill is invoked inside a linked session worktree; the
+  primary checkout is a dispatch context, not a candidate.
+- **Explicit target:** `--worktree <branch|path>` bypasses the menu only. Match
+  it exactly against `git worktree list --porcelain` and stop on zero or multiple
+  matches. It still requires confirmation when the target may be actively edited
+  by another session.
+- **Confirmation:** selecting a worktree another session may be editing requires
+  explicit operator confirmation before any action.
+- **Handoff:** enter the selected worktree and confirm that
+  `git rev-parse --show-toplevel` equals its path before any git, file, or
+  verification command; reserve `git -C <path>` for read-only inspection of other
+  candidates. Stop if the handoff cannot be confirmed.
+
+See `docs/development/worktree-selection-gate.md` for candidate discovery, the
+durable-record contract keyed by worktree, the conservative active-edit signal,
+and the presentation surface.
+
 ## Step 0 - Preflight and route
 
-1. Resolve and verify the checkout:
+1. Apply the worktree selection gate first: resolve, enter, and verify the target
+   worktree (a silent no-op in a single-worktree checkout), then run every command
+   below inside it. Resolve and verify the checkout:
 
    ```sh
    git rev-parse --show-toplevel
