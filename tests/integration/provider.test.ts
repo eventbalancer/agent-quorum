@@ -63,6 +63,11 @@ function strippedFile(file: string): string {
   return readFileSync(file, 'utf8').replace(/\n+$/, '');
 }
 
+function permissionModeFromArgv(record: readonly string[]): string {
+  const index = record.indexOf('--permission-mode');
+  return record[index + 1] ?? '';
+}
+
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-provider.'));
   fake = path.join(tmp, 'bin');
@@ -125,7 +130,7 @@ describe('claude argv contract', () => {
         '--append-system-prompt',
         strippedFile(CRITIC_SKILL),
         '--permission-mode',
-        'plan',
+        'default',
         '--model',
         'claude-sonnet-4-6',
         '--json-schema',
@@ -143,14 +148,14 @@ describe('claude argv contract', () => {
     expect(readFileSync(out, 'utf8')).toBe(strippedFile(critique));
   });
 
-  it('creator create receives the configured Bash grant verbatim (Finding F9)', async () => {
+  it('creator create is read-only by toolset (no Bash granted; Bash denied)', async () => {
     const created = path.join(tmp, 'created.md');
     writeStructuredPlanFile(created, 'Created');
     const out = path.join(tmp, 'plan.v0.md');
     const argvLog = path.join(tmp, 'claude.argv');
     const providerRuntime = makeRuntime();
-    const createTools = 'Read,Grep,Glob,Bash';
-    const createDisallowed = 'Write,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion';
+    const createTools = 'Read,Grep,Glob';
+    const createDisallowed = 'Write,Bash,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion';
 
     const status = await withEnvAsync(
       {
@@ -178,12 +183,108 @@ describe('claude argv contract', () => {
     const toolsIdx = record.indexOf('--tools');
     const allowedIdx = record.indexOf('--allowed-tools');
     const disallowedIdx = record.indexOf('--disallowed-tools');
-    const permIdx = record.indexOf('--permission-mode');
     expect(record[toolsIdx + 1]).toBe(createTools);
     expect(record[allowedIdx + 1]).toBe(createTools);
+    expect(record[toolsIdx + 1]).not.toContain('Bash');
+    expect(record[allowedIdx + 1]).not.toContain('Bash');
     expect(record[disallowedIdx + 1]).toBe(createDisallowed);
-    expect(record[permIdx + 1]).toBe('plan');
+    expect(record[disallowedIdx + 1]).toContain('Bash');
+    expect(permissionModeFromArgv(record)).toBe('default');
     expect(readFileSync(out, 'utf8')).toBe(readFileSync(created, 'utf8'));
+  });
+
+  it('CLAUDE_PERMISSION_MODE=plan overrides the default for creator create and critic', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Created');
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const createArgv = path.join(tmp, 'create.argv');
+    const criticArgv = path.join(tmp, 'critic.argv');
+    const providerRuntime = makeRuntime({
+      matrix: {
+        ...fixtureMatrix(),
+        critic: { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'xhigh' },
+      },
+    });
+
+    const createStatus = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        CLAUDE_PERMISSION_MODE: 'plan',
+        FAKE_CLAUDE_MARKDOWN_RESULT: created,
+        FAKE_CLAUDE_ARGV_LOG: createArgv,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          path.join(tmp, 'plan.v0.md'),
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'Create.\n',
+        ),
+    );
+    expect(createStatus).toBe(0);
+    const createRecord = argvRecords(createArgv)[0] ?? [];
+    expect(permissionModeFromArgv(createRecord)).toBe('plan');
+
+    const criticStatus = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        CLAUDE_PERMISSION_MODE: 'plan',
+        FAKE_CLAUDE_JSON_RESULT: critique,
+        FAKE_CLAUDE_ARGV_LOG: criticArgv,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'critique.out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          TOOLS,
+          DISALLOWED,
+          'PROMPT BODY\n',
+        ),
+    );
+    expect(criticStatus).toBe(0);
+    const criticRecord = argvRecords(criticArgv)[0] ?? [];
+    expect(permissionModeFromArgv(criticRecord)).toBe('plan');
+  });
+
+  it('an explicit runtime claudePermissionMode wins over CLAUDE_PERMISSION_MODE', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Created');
+    const argvLog = path.join(tmp, 'claude.argv');
+    const providerRuntime = makeRuntime({ claudePermissionMode: 'plan' });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        CLAUDE_PERMISSION_MODE: 'default',
+        FAKE_CLAUDE_MARKDOWN_RESULT: created,
+        FAKE_CLAUDE_ARGV_LOG: argvLog,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          path.join(tmp, 'plan.v0.md'),
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'Create.\n',
+        ),
+    );
+    expect(status).toBe(0);
+    const record = argvRecords(argvLog)[0] ?? [];
+    expect(permissionModeFromArgv(record)).toBe('plan');
   });
 });
 

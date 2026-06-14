@@ -19,8 +19,8 @@ single retry wrapper:
 - **codex** — stateless `codex exec --sandbox read-only` with `--output-schema`;
   markdown-mode roles go through a `plan_markdown` wrapper schema.
 - **claude** — `claude -p --verbose --output-format stream-json` with
-  `--append-system-prompt`, `--permission-mode plan` (the translator overrides
-  to `default`), config-driven `--tools/--allowed-tools/--disallowed-tools`,
+  `--append-system-prompt`, `--permission-mode default` (overridable via
+  `CLAUDE_PERMISSION_MODE`), config-driven `--tools/--allowed-tools/--disallowed-tools`,
   and `--session-id/--resume` session continuity with a stall-resume-once then
   re-establish self-heal.
 - **cursor** — `cursor-agent -p --output-format stream-json` with
@@ -38,9 +38,10 @@ logs by default; `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
 `$WORK/diagnostics/` directory that captures each call's raw streams chunk-wise
 through a best-effort sink that never fails or alters the call.
 
-Write prevention: no role is ever granted Write/Edit/NotebookEdit. Shell access
-exists only where the packaged config grants it — creator create mode — under
-claude's plan permission mode.
+Write prevention: the read-only guarantee is enforced by toolset and is
+independent of permission mode. No role is ever granted Write/Edit/NotebookEdit
+or executable Bash — every role, including the creator, lists those in its
+disallowed tools.
 
 ## The loop
 

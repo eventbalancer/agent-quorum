@@ -49,7 +49,7 @@ When a comment genuinely needs more than a line, give it structure instead of a 
 // The positional selects the provider:
 //
 //   codex    gpt-5.5
-//   claude   haiku
+//   claude   sonnet
 //   cursor   composer-2.5
 ```
 

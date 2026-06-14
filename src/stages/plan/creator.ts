@@ -4,6 +4,7 @@ import path from 'node:path';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
 import { providerRun } from '../../providers/provider.js';
+import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import { operatorInterventionsContext } from './interventions.js';
 import {
@@ -68,6 +69,29 @@ function creatorUpdatePrompt(
   );
 }
 
+const PLAN_MODE_STUB_DIAGNOSTIC =
+  'captured plan.v0.md is not a complete plan and the claude creator ran under Claude Code plan mode: ' +
+  'a weak model has likely presented a stub here and persisted the full plan under ~/.claude/plans/ instead of returning it. ' +
+  'Use a stronger creator model (opus class) or run the creator in default permission mode (unset CLAUDE_PERMISSION_MODE or set it to "default").';
+
+function isClaudeCreatorPlanMode(ctx: RunContext): boolean {
+  return (
+    ctx.provider.matrix.creator.runner === 'claude' &&
+    resolveClaudePermissionMode(ctx.provider) === 'plan'
+  );
+}
+
+function requireCreatorCreateShape(ctx: RunContext, outFile: string): void {
+  if (planDocumentShapeOk(outFile)) {
+    return;
+  }
+  if (isClaudeCreatorPlanMode(ctx)) {
+    err(PLAN_MODE_STUB_DIAGNOSTIC);
+    throw new HaltError(PLAN_MODE_STUB_DIAGNOSTIC, 4, true);
+  }
+  requirePlanDocumentShape(outFile);
+}
+
 export async function runCreatorCreate(
   ctx: RunContext,
   promptFile: string,
@@ -106,7 +130,7 @@ export async function runCreatorCreate(
   }
   normalizePlanDocument(outFile);
   validatePlanDocumentShape(outFile);
-  requirePlanDocumentShape(outFile);
+  requireCreatorCreateShape(ctx, outFile);
 }
 
 async function runCreatorUpdateOneShot(

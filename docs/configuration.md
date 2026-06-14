@@ -116,6 +116,35 @@ The shared forbidden-shell scan that gates `plan.final.md` and every
 `AGENT_QUORUM_<ROLE>_REASONING` for `CRITIC`, `CREATOR`, `FIXER`, `REVIEWER`,
 `TRANSLATOR`.
 
+### Claude permission mode
+
+`CLAUDE_PERMISSION_MODE` passes through to Claude Code's `--permission-mode` for
+every claude-runner role and controls how a `-p` capture is read.
+
+| Value     | Effect                                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------- |
+| `default` | Claude Code returns the requested artifact (the markdown plan or schema JSON) as the result.                         |
+| `plan`    | Claude Code _presents_ a plan: a weak model returns only a stub and persists the full plan under `~/.claude/plans/`. |
+
+Unset resolves to `default`. The precedence is per-role runtime override > this
+variable > `default`. It affects all claude-runner roles; the translator is
+always `default`. Only `default` and `plan` are documented and recommended here;
+other Claude Code modes pass through verbatim but are unsupported. Under `plan`
+mode a weak claude creator can fail the CREATE shape gate with a targeted
+diagnostic (see [`cli.md`](cli.md), exit code 4); `default` lets weak claude
+models return a complete plan.
+
+### Recommended minimum creator tier
+
+The creator must return a complete plan in one `-p` capture. Reliable minimum
+creator tiers per provider:
+
+| Provider | Minimum reliable creator model | Notes                                                                 |
+| -------- | ------------------------------ | --------------------------------------------------------------------- |
+| claude   | opus class (`claude-opus-4-8`) | Weak claude models need `default` permission mode and may still stub. |
+| codex    | cheap default (`gpt-5.5`)      | Reliable creator at the default tier.                                 |
+| cursor   | cheap default (`composer-2.5`) | Reliable creator at the default tier.                                 |
+
 ### Watchdog knobs
 
 Claude: `AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS` (600),

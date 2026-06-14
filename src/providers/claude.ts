@@ -11,7 +11,11 @@ import {
 } from './stream-runner.js';
 import type { DiagnosticSink, TraceContext } from './trace.js';
 import { claudeProgressEvent } from './watchdog.js';
-import type { ProviderRuntime } from './runtime.js';
+import {
+  resolveClaudePermissionMode,
+  stripTrailingNewlines,
+  type ProviderRuntime,
+} from './runtime.js';
 
 const CLAUDE_STALL_RESUME_PROMPT =
   'The previous Claude Code CLI turn in this same session was interrupted by the agent-quorum watchdog because it stopped making progress within the configured limit.\n' +
@@ -166,8 +170,6 @@ async function claudeRunOnce(
   return status;
 }
 
-// Translator overrides permission mode to "default": plan mode framing collides
-// when stdout is the artifact.
 function claudeInvokeArgs(
   providerRuntime: ProviderRuntime,
   skillFile: string,
@@ -177,18 +179,17 @@ function claudeInvokeArgs(
   effort: string,
   schemaFile?: string,
 ): string[] {
-  const permissionMode =
-    providerRuntime.claudePermissionMode ?? process.env.CLAUDE_PERMISSION_MODE ?? 'plan';
+  const permissionMode = resolveClaudePermissionMode(providerRuntime);
   const args = [
     '--append-system-prompt',
-    readFileSync(skillFile, 'utf8').replace(/\n+$/, ''),
+    stripTrailingNewlines(readFileSync(skillFile, 'utf8')),
     '--permission-mode',
     permissionMode,
     '--model',
     model,
   ];
   if (schemaFile !== undefined && schemaFile !== '') {
-    args.push('--json-schema', readFileSync(schemaFile, 'utf8').replace(/\n+$/, ''));
+    args.push('--json-schema', stripTrailingNewlines(readFileSync(schemaFile, 'utf8')));
   }
   args.push(
     '--effort',

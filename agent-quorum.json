@@ -30,9 +30,10 @@
       "runner": "claude",
       "model": "claude-opus-4-8",
       "reasoning": "xhigh",
-      "createTools": ["Read", "Grep", "Glob", "Bash"],
+      "createTools": ["Read", "Grep", "Glob"],
       "createDisallowedTools": [
         "Write",
+        "Bash",
         "Edit",
         "NotebookEdit",
         "Agent",

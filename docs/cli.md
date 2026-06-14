@@ -78,17 +78,17 @@ run notifies from its child core run.
 
 Exit codes:
 
-| Code | Meaning                                              |
-| ---- | ---------------------------------------------------- |
-| 0    | converged — clean or needs-review (see `summary.md`) |
-| 1    | usage error or failed preflight                      |
-| 3    | schema-invalid critique / update / update metadata   |
-| 4    | empty or shape-broken creator output; resume failure |
-| 5    | workspace-rule violation in the final plan           |
-| 6    | final plan or package blocked (broken shape/package) |
-| 7    | clarification gate cancelled or failed               |
-| 8    | clarification gate transport/conflict failure        |
-| 143  | TERM/INT teardown                                    |
+| Code | Meaning                                                                            |
+| ---- | ---------------------------------------------------------------------------------- |
+| 0    | converged — clean or needs-review (see `summary.md`)                               |
+| 1    | usage error or failed preflight                                                    |
+| 3    | schema-invalid critique / update / update metadata                                 |
+| 4    | empty or shape-broken creator output (incl. claude plan-mode stub); resume failure |
+| 5    | workspace-rule violation in the final plan                                         |
+| 6    | final plan or package blocked (broken shape/package)                               |
+| 7    | clarification gate cancelled or failed                                             |
+| 8    | clarification gate transport/conflict failure                                      |
+| 143  | TERM/INT teardown                                                                  |
 
 ## `agent-quorum launch`
 

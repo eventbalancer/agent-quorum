@@ -243,13 +243,18 @@ writes to `.agents/plans/smoke-<provider>/`.
 
 ```sh
 pnpm run smoke:codex     # all roles on codex gpt-5.5
-pnpm run smoke:claude    # all roles on claude haiku
+pnpm run smoke:claude    # all roles on claude sonnet
 pnpm run smoke:cursor    # all roles on cursor composer-2.5
 ```
 
 Each is a single low-effort iteration with no fix or translate pass. A pass ends
 with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving `plan.final.md`
-and `summary.md` in the workdir. Override the model, reasoning, or input:
+and `summary.md` in the workdir. `smoke:claude` runs on `sonnet`: in `default`
+permission mode a cheap claude creator returns a complete plan, but the `haiku`
+critic still emits schema-invalid critique JSON, so `sonnet` is the smallest
+claude tier that turns the whole loop green (see the recommended creator-tier
+table in [`configuration.md`](../configuration.md)). Override the model,
+reasoning, or input:
 
 ```sh
 SMOKE_MODEL=sonnet SMOKE_REASONING=high pnpm run smoke:claude

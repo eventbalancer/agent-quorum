@@ -3,7 +3,7 @@
 # provider's cheap model. The positional selects the provider:
 #
 #   codex    gpt-5.5
-#   claude   haiku
+#   claude   sonnet
 #   cursor   composer-2.5
 #
 # All roles use the selected provider; the run is a single low-effort iteration
@@ -19,7 +19,7 @@ readonly SMOKE_ROLES=(CRITIC CREATOR FIXER REVIEWER TRANSLATOR)
 provider="${1:-$DEFAULT_PROVIDER}"
 case "$provider" in
   codex) default_model=gpt-5.5 ;;
-  claude) default_model=haiku ;;
+  claude) default_model=sonnet ;;
   cursor) default_model=composer-2.5 ;;
   *)
     echo "usage: scripts/smoke.sh [codex|claude|cursor]" >&2

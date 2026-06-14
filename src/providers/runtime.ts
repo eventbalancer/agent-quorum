@@ -35,3 +35,10 @@ export function roleSessionFile(providerRuntime: ProviderRuntime, role: Role): s
 export function stripTrailingNewlines(text: string): string {
   return text.replace(/\n+$/, '');
 }
+
+// In -p capture every claude role's result IS the artifact, so the default is
+// "default", not "plan" (plan mode makes weak models present a stub and persist
+// the real plan to ~/.claude/plans/). Precedence: runtime override > env > default.
+export function resolveClaudePermissionMode(providerRuntime: ProviderRuntime): string {
+  return providerRuntime.claudePermissionMode ?? process.env.CLAUDE_PERMISSION_MODE ?? 'default';
+}
