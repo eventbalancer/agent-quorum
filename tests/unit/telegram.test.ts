@@ -1,5 +1,31 @@
-import { describe, expect, it } from 'vitest';
-import { renderTelegramCompletionNotification } from '../../src/core/telegram.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  renderTelegramCompletionNotification,
+  TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS,
+  telegramGetUpdates,
+} from '../../src/channels/telegram/index.js';
+import { withEnvAsync } from '../helpers/harness.js';
+
+const GATE_ENV = {
+  AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
+  AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+  AGENT_QUORUM_TELEGRAM_API_BASE: 'http://127.0.0.1:1',
+};
+
+function mockFetchJson(status: number, body: unknown): void {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }));
+}
+
+function chatMessage(updateId: number, extra: Record<string, unknown> = {}): unknown {
+  return {
+    update_id: updateId,
+    message: { chat: { id: 42 }, text: 'hi', ...extra },
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('Telegram completion notification rendering', () => {
   it('renders a clean success without an unnecessary reason', () => {
@@ -84,5 +110,116 @@ describe('Telegram completion notification rendering', () => {
 
     expect(message).toContain('input: task.md');
     expect(message).not.toContain('/tmp/secret/project');
+  });
+});
+
+describe('telegramGetUpdates transport classification', () => {
+  it('classifies a non-2xx 409 as conflict', async () => {
+    mockFetchJson(409, {
+      ok: false,
+      error_code: 409,
+      description: 'Conflict: terminated by other getUpdates',
+    });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('conflict');
+      expect(result.failure.errorCode).toBe(409);
+      expect(result.failure.description).toContain('Conflict');
+    }
+  });
+
+  it('classifies an HTTP-200 ok:false error_code 401 as unauthorized', async () => {
+    mockFetchJson(200, { ok: false, error_code: 401, description: 'Unauthorized' });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('unauthorized');
+      expect(result.failure.errorCode).toBe(401);
+    }
+  });
+
+  it('prefers the body error_code over the HTTP status (500 body 409 → conflict)', async () => {
+    mockFetchJson(500, { ok: false, error_code: 409, description: 'proxied conflict' });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('conflict');
+      expect(result.failure.errorCode).toBe(409);
+      expect(result.failure.status).toBe(500);
+    }
+  });
+
+  it('classifies a bare ok:false envelope without a code', async () => {
+    mockFetchJson(200, { ok: false, description: 'something off' });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('envelope');
+      expect(result.failure.description).toBe('something off');
+    }
+  });
+
+  it('classifies an abort as a timeout', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      Object.assign(new Error('aborted'), { name: 'TimeoutError' }),
+    );
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('timeout');
+    }
+  });
+
+  it('classifies an unparseable 2xx body as parse', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<<not json>>', { status: 200 }));
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.kind).toBe('parse');
+    }
+  });
+
+  it('derives nextOffset from a non-chat update id between chat updates', async () => {
+    mockFetchJson(200, {
+      ok: true,
+      result: [
+        chatMessage(10),
+        { update_id: 11, message: { chat: { id: 999 }, text: 'other chat' } },
+      ],
+    });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.updates).toHaveLength(1);
+      expect(result.updates[0]?.updateId).toBe(10);
+      expect(result.nextOffset).toBe(12);
+    }
+  });
+
+  it('parses reply_to_message.message_id as a number', async () => {
+    mockFetchJson(200, {
+      ok: true,
+      result: [chatMessage(20, { reply_to_message: { message_id: 7 } })],
+    });
+    const result = await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 0));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.updates[0]?.replyToMessageId).toBe(7);
+    }
+  });
+
+  it('honors an httpTimeoutSeconds override for the HTTP abort', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    mockFetchJson(200, { ok: true, result: [] });
+    await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 50, { httpTimeoutSeconds: 3 }));
+    expect(timeoutSpy).toHaveBeenCalledWith(3000);
+  });
+
+  it('defaults the HTTP abort to the long-poll duration plus slack', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    mockFetchJson(200, { ok: true, result: [] });
+    await withEnvAsync(GATE_ENV, () => telegramGetUpdates(0, 50));
+    expect(timeoutSpy).toHaveBeenCalledWith((50 + TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS) * 1000);
   });
 });

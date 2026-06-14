@@ -70,7 +70,7 @@ import { buildRunReport, writeSummary, type RunReport } from './summary.js';
 import {
   telegramNotifyCompletion,
   type TelegramCompletionNotification,
-} from '../../core/telegram.js';
+} from '../../channels/telegram/index.js';
 import { runTranslatePass } from './translate-pass.js';
 import {
   EMPTY_FINDINGS_COUNTS,
@@ -648,14 +648,11 @@ export async function runPlanLoopCli(
         }
         const v0 = path.join(work, 'plan.v0.md');
         if (!existsSync(v0) || statSync(v0).size === 0) {
-          const gateOk = await runClarificationGate(ctx, inputPath);
-          if (!gateOk) {
-            finalizeRun('failed', 7);
-            await notifyCompletion({
-              exitCode: 7,
-              reason: 'clarification gate cancelled or failed',
-            });
-            return { exitCode: 7, report: { workDir: work, runId, name } };
+          const gate = await runClarificationGate(ctx, inputPath);
+          if (!gate.ok) {
+            finalizeRun('failed', gate.exitCode);
+            await notifyCompletion({ exitCode: gate.exitCode, reason: gate.reason });
+            return { exitCode: gate.exitCode, report: { workDir: work, runId, name } };
           }
           log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
           await runCreatorCreate(ctx, inputPath, v0);

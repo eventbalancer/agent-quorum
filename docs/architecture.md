@@ -98,6 +98,8 @@ artifacts (only when `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1`), `creator.session-id
 and `stale.<timestamp>/` archives on resume (which now also archive `plan.split.json`,
 `package-findings.json`, and `plan.package/`). A registry copy of
 `run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
+`clarify.offset` stores the run's cursor into the shared Telegram clarification
+journal, not a raw Telegram bot offset.
 
 Every run is also addressable through a durable ledger: each run mints a
 sortable, non-digit-leading `runId` and a disambiguated `name`, uses a

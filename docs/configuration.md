@@ -152,15 +152,34 @@ same credentials also enable the prompt-mode clarification gate unless
 `AGENT_QUORUM_CLARIFY=0` disables that gate; setting `AGENT_QUORUM_CLARIFY=0` does
 not disable completion notifications.
 
-| Variable                                | Meaning                                                                       |
-| --------------------------------------- | ----------------------------------------------------------------------------- |
-| `AGENT_QUORUM_CLARIFY`                  | `1` force on, `0` force off, `auto` (default: on when Telegram is configured) |
-| `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`       | bot token (secret — keep in `.env`)                                           |
-| `AGENT_QUORUM_TELEGRAM_CHAT_ID`         | numeric chat id                                                               |
-| `AGENT_QUORUM_TELEGRAM_API_BASE`        | Bot API base override (tests inject a stub)                                   |
-| `AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT`    | long-poll seconds per getUpdates (50)                                         |
-| `AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT`    | HTTP timeout seconds (70)                                                     |
-| `AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS` | max total wait for answers (86400)                                            |
+Multiple prompt-mode runs can share one bot token and chat. Each question is
+correlated by Telegram reply-to metadata, so reply directly to the question
+message when more than one run is active in the chat. Plain, untargeted replies
+are accepted only when a single live run is using that bot and chat.
+
+Receive-side Telegram failures are surfaced separately from operator
+cancellation: a persistent unauthorized token, network/timeout failure, or
+`getUpdates` conflict exits with code 8. A persistent 409 conflict names the
+concurrent `getUpdates` consumer class in the diagnostic.
+
+| Variable                                               | Meaning                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `AGENT_QUORUM_CLARIFY`                                 | `1` force on, `0` force off, `auto` (default: on when Telegram is configured) |
+| `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`                      | bot token (secret — keep in `.env`)                                           |
+| `AGENT_QUORUM_TELEGRAM_CHAT_ID`                        | numeric chat id                                                               |
+| `AGENT_QUORUM_TELEGRAM_API_BASE`                       | Bot API base override (tests inject a stub)                                   |
+| `AGENT_QUORUM_TELEGRAM_STATE_DIR`                      | shared broker state root (`os.tmpdir()` by default)                           |
+| `AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT`                   | long-poll seconds per getUpdates (50)                                         |
+| `AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT`                   | HTTP timeout seconds (70)                                                     |
+| `AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS` | receive failure window before exit 8 (120)                                    |
+| `AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS`        | initial receive retry backoff seconds (2, exponential capped at 30)           |
+| `AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS`                | max total wait for answers (86400)                                            |
+
+The clarification broker stores shared coordination files under
+`<state-root>/agent-quorum/telegram/<token-chat-hash>/`. The directory is `0700`,
+files are `0600`, and the journal can contain operator reply text. It is
+compacted below the minimum live run cursor and removed when the last live run
+for that bot and chat exits.
 
 ### Status / launch
 

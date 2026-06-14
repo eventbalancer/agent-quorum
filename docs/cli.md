@@ -87,6 +87,7 @@ Exit codes:
 | 5    | workspace-rule violation in the final plan           |
 | 6    | final plan or package blocked (broken shape/package) |
 | 7    | clarification gate cancelled or failed               |
+| 8    | clarification gate transport/conflict failure        |
 | 143  | TERM/INT teardown                                    |
 
 ## `agent-quorum launch`

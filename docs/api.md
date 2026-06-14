@@ -198,6 +198,7 @@ enum ExitCode {
   RuleViolation = 5,
   Blocked = 6,
   ClarifyCancelled = 7,
+  ClarifyTransportFailure = 8,
   SignalTeardown = 143,
 }
 ```

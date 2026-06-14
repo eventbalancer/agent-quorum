@@ -38,6 +38,35 @@ Do not write comments that:
 
 Public API docs (the exported `runPlanLoop` surface in `src/index.ts`) may explain invariants, units, failure modes, and external contracts. Do not write parameter-by-parameter docblocks that repeat the type signature.
 
+### Comment Structure and Length
+
+A comment that earns its place is still short. Lead with one line stating the non-obvious fact, then stop. Growing past a line or two is itself exceptional and must be justified by information the code cannot carry — an enumeration, a provider mapping, an external contract — never by restating the code in prose.
+
+When a comment genuinely needs more than a line, give it structure instead of a run-on paragraph: a summary line, then an aligned block or mapping the reader can scan.
+
+```ts
+// One end-to-end smoke run of the plan loop on a single provider's cheap model.
+// The positional selects the provider:
+//
+//   codex    gpt-5.5
+//   claude   haiku
+//   cursor   composer-2.5
+```
+
+Avoid prose that buries the one fact mid-sentence:
+
+```ts
+// A classified receive/transport failure. `errorCode` is the Bot API
+// `error_code` from the response body; `status` is the HTTP status. Classification
+// prefers the body error_code over the HTTP status (a proxy can diverge them).
+```
+
+Tighten to the single fact names and types cannot express:
+
+```ts
+// `errorCode` (Bot API body) and `status` (HTTP) can diverge behind a proxy; classification prefers errorCode.
+```
+
 ## Git
 
 Commit format:
@@ -121,13 +150,14 @@ agent-quorum is a standalone CLI that orchestrates the Codex, Claude Code, and C
 Source layers, outer depends on inner:
 
 ```text
-cli -> core -> providers -> runtime
+cli -> core -> {providers, channels} -> runtime
 ```
 
 - `src/cli/` owns argument parsing and command entry points (`main`, `run`, `launch`, `intervene`, `help`). It resolves settings and builds the `RunContext`; it holds no orchestration logic.
 - `src/core/` owns the orchestration domain: config resolution, the iteration loop, the critic/creator/fixer/reviewer/translate passes, the clarification gate, plan validation, resume, summaries, and the run context. Pure decision logic lives here.
 - `src/providers/` owns the three provider adapters (codex, claude, cursor) behind a single `providerRun` entry point that owns retry, streaming, and the watchdog. Provider-specific quirks stay here.
 - `src/runtime/` owns low-level technical primitives: process exec and teardown, env/dotenv loading, logging, filesystem helpers, scratch dirs, and the `HaltError` exit contract. No domain knowledge.
+- `src/channels/` owns operator communication channels — the Telegram Bot API client and completion-notification rendering today. It is the external messaging transport the clarification gate and completion notifier consume; it depends only on `runtime/` and `core/` JSON types, and holds no orchestration logic.
 - `skills/` holds the role prompt skills and their JSON schemas, validated with ajv. Treat a skill `*.schema.json` as a contract: changing it changes the provider I/O shape.
 
 Rules:
@@ -226,6 +256,42 @@ type WaitOutcome =
   | { readonly kind: 'deadline' };
 ```
 
+Extract a multi-member union into its own named `type` instead of inlining it on a field, parameter, or return. A union of three or more members — string-literal sets, discriminated object unions, or mixed alternatives — earns a name; do not spell it out where it is used. Name the literal set after the domain concept it enumerates (`TelegramFailureKind`, not `Kind`).
+
+```ts
+export type TelegramFailureKind =
+  | 'http'
+  | 'conflict'
+  | 'unauthorized'
+  | 'network'
+  | 'timeout'
+  | 'envelope'
+  | 'parse';
+
+export interface TelegramFailure {
+  readonly kind: TelegramFailureKind;
+  readonly status?: number;
+}
+```
+
+Avoid inlining the same set on the field:
+
+```ts
+export interface TelegramFailure {
+  readonly kind:
+    | 'http'
+    | 'conflict'
+    | 'unauthorized'
+    | 'network'
+    | 'timeout'
+    | 'envelope'
+    | 'parse';
+  readonly status?: number;
+}
+```
+
+A two-member union local to one signature (`string | undefined`, `'get' | 'post'`) can stay inline.
+
 ### Type Safety
 
 Use `unknown` plus narrowing at boundaries (parsed JSON, provider output, env). Do not use `any` — `strictTypeChecked` already forbids it; do not cast it back in with `as`.
@@ -270,6 +336,91 @@ const LEGACY_TRANSLATE_LOCALE = 'ru';
 ```
 
 Inline literals only when they are local and self-evident (`0`, `1`, `''`).
+
+### Shape-Varying Literals
+
+Do not build a single object literal whose structure switches on a mode flag through inline ternaries and conditional spreads. When a boolean selects between two different shapes, branch first and return each shape explicitly.
+
+Avoid:
+
+```ts
+const response = await fetch(options.get ? `${url}?${query}` : url, {
+  method: options.get ? 'GET' : 'POST',
+  ...(options.get ? {} : { headers, body: query }),
+  signal,
+});
+```
+
+Prefer a helper that returns the variant directly, so each branch reads as one concrete request:
+
+```ts
+function buildRequest(options): { url: string; init: RequestInit } {
+  if (options.get) {
+    return { url: `${url}?${query}`, init: { method: 'GET', signal } };
+  }
+  return { url, init: { method: 'POST', headers, body: query, signal } };
+}
+```
+
+This is distinct from the conditional spread used to omit a single optional field under `exactOptionalPropertyTypes` (`...(status !== undefined ? { status } : {})`), which stays allowed: there the shape is constant and only one field's presence varies. The rule targets literals whose overall structure — which keys exist, what the method is — flips on a flag.
+
+### Object Literal Layout
+
+Once an object literal carries a conditional spread or three or more fields, write it multi-line with one field per line. Prettier preserves the multi-line form whenever a newline follows the opening brace, so the layout is the author's to set — keep it expanded rather than letting fields collapse onto one line. This is not lint-enforced; honor it when you write or touch the literal.
+
+```ts
+return {
+  kind,
+  ...(status !== undefined ? { status } : {}),
+  ...(errorCode !== undefined ? { errorCode } : {}),
+  ...(description !== undefined ? { description } : {}),
+};
+```
+
+Avoid collapsing a conditional-spread literal onto one line even when it fits:
+
+```ts
+return { kind: 'envelope', ...(description !== undefined ? { description } : {}) };
+```
+
+A flat literal of one or two plain fields (`{ ok: true, body }`) stays inline.
+
+### Call Arguments
+
+Do not inline a complex argument at a call site. Bind a multi-field object literal, an array of objects, or a non-trivial computed expression to a named `const` (or extract a builder helper) on the lines before the call, then pass the name. Name it after the operand and the callee, not generically (`getUpdatesParams`, not `params`). The call should read as a verb over named operands, not as a wall of nested literals. A flat one- or two-field literal with no computation may stay inline.
+
+Avoid burying the operands inside the call:
+
+```ts
+const result = await telegramCall(
+  'getUpdates',
+  {
+    offset: String(offset),
+    timeout: String(timeout),
+    allowed_updates: '["message"]',
+  },
+  {
+    get: true,
+    timeoutSeconds: options.httpTimeoutSeconds ?? timeout + TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS,
+  },
+);
+```
+
+Name the operands first, so the call is one readable line. Bind the call's own result to a name derived from the callee (`telegramCallResult`, not `result`) rather than a bare `result`/`res`/`data`:
+
+```ts
+const getUpdatesParams = {
+  offset: String(offset),
+  timeout: String(timeout),
+  allowed_updates: '["message"]',
+};
+const httpTimeoutSeconds =
+  options.httpTimeoutSeconds ?? timeout + TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS;
+const telegramCallResult = await telegramCall('getUpdates', getUpdatesParams, {
+  get: true,
+  timeoutSeconds: httpTimeoutSeconds,
+});
+```
 
 ### Booleans and Declarations
 
