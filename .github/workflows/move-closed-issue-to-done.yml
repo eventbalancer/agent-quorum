@@ -1,4 +1,5 @@
 name: move closed issue to done
+run-name: 'Move issue #${{ github.event.issue.number }} to Done'
 
 on:
   issues:
