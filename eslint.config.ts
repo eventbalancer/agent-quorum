@@ -19,12 +19,133 @@ export default defineConfig(
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
     },
   },
-  // Stage boundary: shared layers stay stage-agnostic. Only the
-  // composition roots (src/cli/main.ts, src/stages/registry.ts,
-  // src/index.ts) may import src/stages/**. main.ts is excluded below;
-  // registry.ts and src/index.ts fall outside this block's files entirely.
+  // Inward-only layer boundary (cli -> core -> {providers, channels} -> runtime).
+  // Each per-layer block forbids importing outward layers; runtime, the innermost
+  // layer, forbids every other layer. providers/channels may reach core only
+  // through core/json (any import) and core/config (type-only, for the RoleMatrix
+  // type). The stages boundary holds for every layer: only the composition roots
+  // (src/cli/main.ts, src/stages/registry.ts, src/index.ts) may import
+  // src/stages/**, and they fall outside these globs (main.ts is ignored below).
   {
-    files: ['src/runtime/**/*.ts', 'src/providers/**/*.ts', 'src/core/**/*.ts', 'src/cli/**/*.ts'],
+    files: ['src/runtime/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/core/**', '**/core'],
+              message: 'Inward-only: runtime is the innermost layer and must not import core.',
+            },
+            {
+              group: ['**/providers/**', '**/providers'],
+              message: 'Inward-only: runtime is the innermost layer and must not import providers.',
+            },
+            {
+              group: ['**/channels/**', '**/channels'],
+              message: 'Inward-only: runtime is the innermost layer and must not import channels.',
+            },
+            {
+              group: ['**/cli/**', '**/cli'],
+              message: 'Inward-only: runtime is the innermost layer and must not import cli.',
+            },
+            {
+              group: ['**/stages/**', '**/stages'],
+              message:
+                'Shared layers must not import src/stages/**; wire stages through main.ts, registry.ts, or index.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/providers/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/cli/**', '**/cli'],
+              message: 'Inward-only: providers must not import cli.',
+            },
+            {
+              group: ['**/stages/**', '**/stages'],
+              message:
+                'Shared layers must not import src/stages/**; wire stages through main.ts, registry.ts, or index.ts.',
+            },
+            {
+              group: ['**/core/**', '!**/core/json.js', '!**/core/config.js'],
+              message:
+                'Inward-only: providers may import core only via core/json (any) or core/config (type-only).',
+            },
+            {
+              group: ['**/core/config.js'],
+              allowTypeImports: true,
+              message:
+                'Inward-only: providers may import only the type from core/config (import type), not its values.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/channels/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/cli/**', '**/cli'],
+              message: 'Inward-only: channels must not import cli.',
+            },
+            {
+              group: ['**/stages/**', '**/stages'],
+              message:
+                'Shared layers must not import src/stages/**; wire stages through main.ts, registry.ts, or index.ts.',
+            },
+            {
+              group: ['**/core/**', '!**/core/json.js', '!**/core/config.js'],
+              message:
+                'Inward-only: channels may import core only via core/json (any) or core/config (type-only).',
+            },
+            {
+              group: ['**/core/config.js'],
+              allowTypeImports: true,
+              message:
+                'Inward-only: channels may import only the type from core/config (import type), not its values.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/core/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/cli/**', '**/cli'],
+              message: 'Inward-only: core must not import cli.',
+            },
+            {
+              group: ['**/stages/**', '**/stages'],
+              message:
+                'Shared layers must not import src/stages/**; wire stages through main.ts, registry.ts, or index.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/cli/**/*.ts'],
     ignores: ['src/cli/main.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
@@ -42,6 +163,29 @@ export default defineConfig(
     },
   },
   {
+    files: ['src/core/**/*.ts', 'src/providers/**/*.ts'],
+    rules: {
+      'no-console': 'error',
+    },
+  },
+  {
+    files: [
+      'src/**/{helpers,common,misc,utils}.ts',
+      'src/{helpers,common,misc,utils}.ts',
+      'src/**/{helpers,common,misc,utils}/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Program',
+          message:
+            'Generic catch-all module names (helpers/common/misc/utils) are banned under src/; use a precise domain name. See docs/development/conventions.md.',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
@@ -50,4 +194,12 @@ export default defineConfig(
     },
   },
   prettier,
+  // Re-enable curly after prettier: eslint-config-prettier sets curly: 0, but
+  // brace presence is a structural rule the linter owns, not formatting.
+  {
+    files: ['src/**/*.ts'],
+    rules: {
+      curly: ['error', 'all'],
+    },
+  },
 );

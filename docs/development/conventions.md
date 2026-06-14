@@ -129,9 +129,25 @@ it.
 ## Linting and Editor Tooling
 
 - ESLint is flat-config only (`eslint.config.ts`). Do not add `.eslintrc*` files.
-- The config layers `@eslint/js` recommended, `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked`, and `eslint-config-prettier` last. Prettier owns formatting; ESLint owns correctness and style-of-types.
+- The config layers `@eslint/js` recommended, `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked`, the per-layer architecture and convention blocks, and `eslint-config-prettier` as the last formatting-disabling entry. The sole config object after `eslint-config-prettier` re-enables `curly` — a structural brace rule it switches off, owned by ESLint, not Prettier. Prettier owns formatting; ESLint owns correctness and style-of-types.
 - `strictTypeChecked` bans `any` (`no-explicit-any`), unsafe assignments, and floating promises. `stylisticTypeChecked` enforces `@typescript-eslint/consistent-type-definitions` (`interface` for object shapes) among others. Do not disable these per-line to dodge a real finding — fix the code.
 - Type-aware linting uses `projectService`; new files must be inside the `tsconfig.json` `include` globs (`src`, `tests`) or lint will not type-check them.
+
+### Enforcement Boundary Map
+
+Each project convention has exactly one owner. This table is the authoritative map; when a section below names an owner, it points here. Machine-checked conventions block `pnpm run lint` / `pnpm run check`; the rest are human review.
+
+| Convention                                                                  | Owner        | Mechanism                                                         | Notes                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pure formatting (quotes, semicolons, spacing, trailing commas, print width) | Prettier     | `.prettierrc`, `pnpm run format-check`                            | No formatting rule in ESLint                                                                                                                                                                                                                                                                                                                                          |
+| Control-flow block shape (braces)                                           | ESLint       | `curly: ['error', 'all']` on `src/**`                             | Multi-line expansion nuance beyond brace presence is out of machine scope (human review)                                                                                                                                                                                                                                                                              |
+| Logging boundary (`console.*` in core/providers)                            | ESLint       | `no-console: error` on `src/core/**`, `src/providers/**`          | —                                                                                                                                                                                                                                                                                                                                                                     |
+| Inward-only layer imports                                                   | ESLint       | `@typescript-eslint/no-restricted-imports` per layer + stages ban | Machine-forbids the `cli` edge for `core`/`providers`/`channels`, the full outward set for `runtime`, `stages` for all layers, and `providers`/`channels -> core` except `core/json` (any) and `core/config` (type-only); `core/config` value imports are rejected; `core -> {providers, channels}` is inward and allowed; lateral `providers <-> channels` is review |
+| Generic module names (helpers/common/misc/utils)                            | ESLint       | `no-restricted-syntax` `Program` selector on banned-name globs    | Banned under `src/`                                                                                                                                                                                                                                                                                                                                                   |
+| Object literal layout                                                       | human review | Prettier preserves an already-multi-line literal                  | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
+| Complex call arguments                                                      | human review | —                                                                 | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
+| Boolean naming                                                              | human review | —                                                                 | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
+| Source comments                                                             | human review | —                                                                 | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
 
 ## TypeScript Compiler
 
@@ -162,7 +178,7 @@ cli -> core -> {providers, channels} -> runtime
 
 Rules:
 
-- Dependencies point inward only. `runtime/` imports nothing from `core/`, `providers/`, or `cli/`; `core/` does not import `cli/`.
+- Dependencies point inward only. `runtime/` imports nothing from `core/`, `providers/`, or `cli/`; `core/` does not import `cli/`. ESLint machine-enforces this direction per layer with `@typescript-eslint/no-restricted-imports` — the `cli` edge for `core`/`providers`/`channels`, the full outward set for `runtime`, the `stages` boundary for every layer, and `providers`/`channels -> core` except `core/json` (any import) and `core/config` (type-only); see the Enforcement Boundary Map.
 - A helper used by one pass lives with that pass in `core/`, not in a shared bucket. Promote to a shared module only when a second consumer appears.
 - Provider calls go through `providerRun`; never spawn a provider CLI directly from `core/` or `cli/`.
 
@@ -184,7 +200,7 @@ Rules:
 
 ## Naming and Structure
 
-Use domain names first, then technical role names. Prefer a precise file name (`translate-pass.ts`, `validate-plan.ts`, `clarify.ts`) over a catch-all. Avoid new generic `helpers`, `common`, `misc`, or `utils` buckets; `src/runtime/` already holds the genuinely generic primitives.
+Use domain names first, then technical role names. Prefer a precise file name (`translate-pass.ts`, `validate-plan.ts`, `clarify.ts`) over a catch-all. Avoid new generic `helpers`, `common`, `misc`, or `utils` buckets; `src/runtime/` already holds the genuinely generic primitives. The `helpers`/`common`/`misc`/`utils` ban under `src/` is ESLint-enforced (`no-restricted-syntax`); see the Enforcement Boundary Map.
 
 Do not abbreviate domain terms in project-owned names. Prefer `traceContext`, not `traceCtx`; `providerRuntime`, not `rt`; `runContext`, not `ctx`; `iteration`, not `iter`; and `previousCritiques`, not `prevCritiques`.
 
@@ -211,7 +227,7 @@ if (!settings) return null;
 for (const role of roles) preflight(role);
 ```
 
-This applies to every `if` / `else if` / `else` / `for` / `while` / `do…while` / `try` / `catch` / `finally`, and to function and method bodies. When you touch a file, bring the lines you change into this shape.
+This applies to every `if` / `else if` / `else` / `for` / `while` / `do…while` / `try` / `catch` / `finally`, and to function and method bodies. When you touch a file, bring the lines you change into this shape. ESLint enforces brace presence with `curly: ['error', 'all']` on `src/**`; the multi-line expansion nuance beyond brace presence stays human review. See the Enforcement Boundary Map.
 
 ### Arrow Functions
 
@@ -436,7 +452,7 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 ## Logging
 
-- Log through `src/runtime/log.ts` (`log` / `err`); do not call `console.*` directly in `core/` or `providers/`.
+- Log through `src/runtime/log.ts` (`log` / `err`); do not call `console.*` directly in `core/` or `providers/`. ESLint enforces this with `no-console` on `src/core/**` and `src/providers/**`; see the Enforcement Boundary Map.
 - Logs carry run metadata — role, provider, model, status, line counts, latency — not plan bodies, prompts, or secrets.
 - The provider trace is metadata-only on both streams: tool-argument values, assistant prose, raw command bodies, and free-text retry/stderr reasons render as a kind, size, target path, command descriptor, or classified token — never the body. Raw stdout/stderr is reachable only behind the opt-in `AGENT_QUORUM_PROVIDER_DIAGNOSTICS` escape hatch (see [`docs/configuration.md`](../configuration.md)).
 
