@@ -119,6 +119,20 @@ repository-local skill changes that do not publish a new npm version.
 
 4. Verify with the narrowest command that proves the scoped change:
 
+   Before verification, discover the originating GitHub issue, if any, using
+   the same source order later used for the commit message: execution journal,
+   source requirements document, current branch name, then the operator. When an
+   originating issue is associated with the change set and is still open, ensure
+   its project-board item is `In Progress` before verification, staging, or
+   commit if no earlier skill already did so. Use GitHub through `gh`: discover
+   the repository's linked ProjectV2 board with `gh api graphql`, add the issue
+   item if it is absent, resolve the `Status` single-select field and the
+   `In Progress` option with `gh project field-list`, then set the item with
+   `gh project item-edit`. If several linked projects exist, ask the operator
+   which board to use before continuing. If `gh`, the linked board, `Status`, or
+   `In Progress` is unavailable, stop and report the blocker instead of
+   continuing to ship an issue-linked change without the board transition.
+
    - docs or repository-local skills only:
 
      ```sh
@@ -144,9 +158,11 @@ repository-local skill changes that do not publish a new npm version.
 
    ```sh
    cmp -s .claude/commands/requirements.md .agents/skills/requirements/SKILL.md
+   cmp -s .claude/commands/issues.md .agents/skills/issues/SKILL.md
    cmp -s .claude/commands/solution-handoff.md .agents/skills/solution-handoff/SKILL.md
    cmp -s .claude/commands/prompt-architect.md .agents/skills/prompt-architect/SKILL.md
    cmp -s .claude/commands/execute.md .agents/skills/execute/SKILL.md
+   cmp -s .claude/commands/tidy.md .agents/skills/tidy/SKILL.md
    cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
    ```
 
@@ -161,12 +177,13 @@ repository-local skill changes that do not publish a new npm version.
      write a plain hyphen `-` instead of `—`. Keep the body concise and factual;
    - no `Co-Authored-By` lines.
 
-   Link the originating GitHub issue. Discover it, in order, from: the execution
-   journal under `.agents/execution-journals/` (the `Issue` field), the source
-   requirements document `Issue:` header, the current branch name, or the
-   operator. When an originating issue is found, the commit body must include
-   `Closes #<n>` when this change fully resolves it, or `Refs #<n>` when it
-   touches the issue without resolving it; do not commit without one of them.
+   Link the originating GitHub issue. Use the issue discovered before
+   verification when available; otherwise discover it, in order, from: the
+   execution journal under `.agents/execution-journals/` (the `Issue` field),
+   the source requirements document `Issue:` header, the current branch name, or
+   the operator. When an originating issue is found, the commit body must
+   include `Closes #<n>` when this change fully resolves it, or `Refs #<n>` when
+   it touches the issue without resolving it; do not commit without one of them.
    When it is unclear whether the change closes the issue, ask the operator
    before committing. Omit the line only when no issue is associated.
 

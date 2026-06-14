@@ -109,16 +109,28 @@ git-ignored except for `.gitkeep`.
 3. Read the plan end-to-end before editing. Extract the title from the first
    `# ` heading; if no title exists, use the plan filename stem.
 
-4. Create the journal file from the template before code changes. Do not
+4. Determine the originating GitHub issue from the plan, its source prompt or
+   requirements document (the `Issue:` header), or the operator. When an
+   originating issue is known, move its project-board item to `In Progress`
+   before preflight or code changes. Use GitHub through `gh`: discover the
+   repository's linked ProjectV2 board with `gh api graphql`, add the issue item
+   if it is absent, resolve the `Status` single-select field and the
+   `In Progress` option with `gh project field-list`, then set the item with
+   `gh project item-edit`. If several linked projects exist, ask the operator
+   which board to use before continuing. If `gh`, the linked board, `Status`, or
+   `In Progress` is unavailable, stop and report the blocker instead of
+   continuing to work the issue without the board transition.
+
+5. Create the journal file from the template before code changes. Do not
    overwrite an existing journal; append a numeric suffix before `.md` if the
    date and slug collide.
 
-5. Read `AGENTS.md`, `CLAUDE.md` when present, and
+6. Read `AGENTS.md`, `CLAUDE.md` when present, and
    `docs/development/conventions.md` before editing. Read additional docs named
    by the plan, such as architecture, API, CLI, configuration, release, or skill
    flow docs.
 
-6. Confirm the plan is implementation-ready. If it is a prompt, requirements
+7. Confirm the plan is implementation-ready. If it is a prompt, requirements
    draft, partial investigation, or ambiguous design note, stop and route it
    through `/prompt-architect` or `/requirements` instead of guessing.
 
@@ -184,12 +196,10 @@ cause. If a check cannot be run, log why and report the residual risk.
 2. Set `Status` to `done`, or `partial` if anything remains blocked.
 3. Delete empty `Deviations` or `Issues` sections. A clean run should produce a
    near-empty journal.
-4. Determine the originating GitHub issue from the plan, its source prompt or
-   requirements document (the `Issue:` header), or the operator. Record it in the
-   journal `Issue` field as `Closes #<n>` when this work fully resolves the
-   issue, or `Refs #<n>` when it is partial, blocked, or related. Record `none`
-   only when no issue is associated. This is what `/ship` reads to link the
-   commit.
+4. Record the originating GitHub issue in the journal `Issue` field as
+   `Closes #<n>` when this work fully resolves the issue, or `Refs #<n>` when it
+   is partial, blocked, or related. Record `none` only when no issue is
+   associated. This is what `/ship` reads to link the commit.
 5. Do not stage, commit, push, create branches, or open PRs. The finished state
    is implemented changes, verification results, and the journal.
 

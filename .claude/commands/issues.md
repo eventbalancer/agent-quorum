@@ -183,6 +183,12 @@ Report the created issue URLs, their board placement, and any skipped/duplicate
 clusters in the operator's conversation language. Do not stage, commit, push,
 open PRs, or start `agent-quorum`.
 
+Newly created issues stay in the backlog column. Do not move them to
+`In Progress` from this skill. The first downstream skill that accepts a
+specific issue for work (`/requirements`, `/solution-handoff`,
+`/prompt-architect`, `/execute`, or `/ship`) owns the mandatory transition to
+`In Progress` before doing issue work.
+
 ## Issue contract
 
 The issue title and body are written in English (committed/external artifact).

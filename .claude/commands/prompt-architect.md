@@ -111,6 +111,21 @@ issue reference for downstream delivery.
 
 Use the remaining arguments as the request.
 
+### Step 0.05 — Mark originating issue in progress
+
+Run this step as soon as an originating GitHub issue is known: immediately after
+issue-mode detection, or after requirements/plan metadata reveals an `Issue:`
+reference. Do it before repository context gathering, actuality checks,
+composing prompt content, or launching `agent-quorum`.
+
+Use GitHub through `gh`: discover the repository's linked ProjectV2 board with
+`gh api graphql`, add the issue item if it is absent, resolve the `Status`
+single-select field and the `In Progress` option with `gh project field-list`,
+then set the item with `gh project item-edit`. If several linked projects exist,
+ask the operator which board to use before continuing. If `gh`, the linked
+board, `Status`, or `In Progress` is unavailable, stop and report the blocker
+instead of continuing to work the issue without the board transition.
+
 ### Step 0.1 — Gather repository context
 
 This command runs inside `agent-quorum`; there is no repo resolver. Gather

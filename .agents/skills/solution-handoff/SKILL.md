@@ -83,6 +83,19 @@ For an approved requirements handoff, collect from the document instead:
 
 ## Instructions
 
+### Step 0 — Mark originating issue in progress
+
+If the investigation or approved requirements document carries an originating
+GitHub issue, move that issue's project-board item to `In Progress` before
+building or delegating handoff prompts. Use GitHub through `gh`: discover the
+repository's linked ProjectV2 board with `gh api graphql`, add the issue item if
+it is absent, resolve the `Status` single-select field and the `In Progress`
+option with `gh project field-list`, then set the item with
+`gh project item-edit`. If several linked projects exist, ask the operator which
+board to use before continuing. If `gh`, the linked board, `Status`, or
+`In Progress` is unavailable, stop and report the blocker instead of continuing
+to work the issue without the board transition.
+
 ### Step 1 — Build the investigation dossier
 
 Assemble a structured block from the inputs above. Record confirmed facts only;

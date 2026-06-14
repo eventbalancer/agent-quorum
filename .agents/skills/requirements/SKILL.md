@@ -68,6 +68,16 @@ request, or a harvested investigation tracked under one — record its
 `<org/repo#n>` reference in the `Issue:` field so the delivery chain can close it.
 Set `Issue: none` when no issue is associated.
 
+When an originating GitHub issue is found, mark the work visible on the project
+board before reconnaissance, drafting, or clarification. Use GitHub through
+`gh`: discover the repository's linked ProjectV2 board with `gh api graphql`,
+add the issue item if it is absent, resolve the `Status` single-select field and
+the `In Progress` option with `gh project field-list`, then set the item with
+`gh project item-edit`. If several linked projects exist, ask the operator which
+board to use before continuing. If `gh`, the linked board, `Status`, or
+`In Progress` is unavailable, stop and report the blocker instead of continuing
+to work the issue without the board transition.
+
 ### Step 2 — Product and technical reconnaissance
 
 Run bounded reconnaissance to ground the requirements and discover forks. Do not
