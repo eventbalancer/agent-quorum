@@ -60,7 +60,8 @@ Rules:
 - No trailing period.
 - No `Co-Authored-By` lines.
 - Use English.
-- When the work was done as part of a GitHub issue, add a `Closes #<n>` line in the commit body so the issue auto-closes on merge (`Refs #<n>` when it touches the issue without resolving it).
+- Subject and body use plain ASCII printable characters only. No emoji and no decorative Unicode (em or en dashes, smart quotes, arrows, box drawing); write a plain hyphen `-` instead of `—`. Keep the body concise and factual.
+- When the work originates from or resolves a GitHub issue, the commit body must link it: `Closes #<n>` when the change fully resolves the issue so it auto-closes on merge, or `Refs #<n>` when the change touches the issue without resolving it. Omit only when no issue is associated.
 
 Do not use force pushes, `--no-verify`, or `--allow-unrelated`. Never commit or push without explicit instruction.
 

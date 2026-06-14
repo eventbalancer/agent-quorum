@@ -67,13 +67,17 @@ Collect only what is already in the conversation:
   runtime, skills/schemas, docs, tests;
 - hypotheses, explicitly labeled;
 - related symptoms already patched in the session;
-- open questions the designer must answer.
+- open questions the designer must answer;
+- the GitHub issue the work is tracked under, if any, as an `<org/repo#n>`
+  reference.
 
 For an approved requirements handoff, collect from the document instead:
 
 - approved scope, decisions, functional requirements, acceptance criteria, and
   open items;
 - evidence and assumptions recorded in the document;
+- the originating issue reference (the document's `Issue:` field), so the
+  eventual commit or PR can close it;
 - the requirement document path, so `/prompt-architect` can instruct the next
   agent to read it in full.
 
@@ -112,7 +116,8 @@ Strong relatedness signals:
 ### Step 4 — Compose one prompt per cluster via prompt-architect
 
 For each cluster, delegate composition to `/prompt-architect`. Pass the cluster
-dossier and a result contract. Do not copy prompt-architect's XML rules here.
+dossier, the originating issue reference, and a result contract. Do not copy
+prompt-architect's XML rules here.
 
 Result contract per cluster:
 
@@ -172,6 +177,8 @@ confirmation.
 6. Artifacts are English; operator messages use the operator's conversation
    language.
 7. `/prompt-architect` owns prompt XML and run-profile formatting.
+8. Every handoff carries the originating GitHub issue reference, or notes that
+   none applies, so delivery can close it.
 
 ## Output artifacts
 

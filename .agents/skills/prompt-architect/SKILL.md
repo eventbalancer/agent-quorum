@@ -104,7 +104,8 @@ gh issue view <N> --repo <org>/<repo> --json number,title,body,state,labels,upda
 ```
 
 If `gh` is unavailable or the issue cannot be fetched, carry the URL as
-unverified context and surface the gap.
+unverified context and surface the gap. Record `<org/repo#n>` as the originating
+issue reference for downstream delivery.
 
 **Priority 2: free-text.**
 
@@ -158,7 +159,8 @@ tell the agent to read this file in full before any work. Embed only:
 - status;
 - 1-3 sentence summary;
 - referenced files;
-- unresolved Open items, if any.
+- unresolved Open items, if any;
+- the originating issue reference (the `Issue:` field), if present.
 
 Do not paste the full requirements body into the prompt.
 
@@ -228,6 +230,12 @@ Use XML-tagged blocks:
 Omit empty sub-tags. Tag names stay English; block content uses `OUTPUT_LANG`.
 File paths, identifiers, commands, and verbatim quotes stay as-is.
 
+When an originating issue is known (issue mode, or the requirements `Issue:`
+field), record it in `<known_context>` and note that the eventual commit or PR
+must link it with `Closes #<n>` when the change fully resolves the issue, or
+`Refs #<n>` when it does not. The downstream agent designs the change; delivery
+links the issue at `/ship` time.
+
 Phrasing:
 
 - Use positive imperatives over prohibitions.
@@ -274,11 +282,15 @@ overwriting existing files. The file contains this shape:
 
     # <Human-readable title>
 
+    - Issue: <org/repo#n or none>
+
     ~~~xml
     <the generated prompt XML>
     ~~~
 
-Create the directory if missing. On collision append `-2`, `-3`, etc.
+Record the originating issue reference in the saved prompt header so the plan
+and delivery can link it. Create the directory if missing. On collision append
+`-2`, `-3`, etc.
 
 After saving, output in the operator's conversation language:
 

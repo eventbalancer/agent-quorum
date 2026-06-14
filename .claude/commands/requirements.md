@@ -63,6 +63,11 @@ Determine the input mode:
 Classify the request: new capability, changed behavior, defect class, docs/API,
 config/tooling, release/process, or role-skill/schema contract.
 
+When the task originates from a GitHub issue — an issue URL or number in the
+request, or a harvested investigation tracked under one — record its
+`<org/repo#n>` reference in the `Issue:` field so the delivery chain can close it.
+Set `Issue: none` when no issue is associated.
+
 ### Step 2 — Product and technical reconnaissance
 
 Run bounded reconnaissance to ground the requirements and discover forks. Do not
@@ -156,9 +161,10 @@ unavailable, ask in plain chat and keep `Status: draft` until explicit approval.
 
 On "approve and hand off", invoke `/solution-handoff` with a dossier framed from
 the approved requirements document and pass the document path. The handoff must
-preserve the problem, approved scope, decisions, acceptance criteria, and open
-items without adding an implementation solution. `/solution-handoff` then
-delegates prompt composition to `/prompt-architect`.
+preserve the problem, approved scope, decisions, acceptance criteria, open
+items, and the originating issue reference (the `Issue:` field) without adding an
+implementation solution. `/solution-handoff` then delegates prompt composition to
+`/prompt-architect`.
 
 On "approve only", report the saved path and the manual continuation:
 
@@ -178,6 +184,7 @@ as-is.
 - Status: draft | approved
 - Date: <YYYY-MM-DD>
 - Source: raw request | harvest (<which upstream>) | cold call
+- Issue: <org/repo#n when the work originates from or will resolve a GitHub issue, else none>
 - Target repository: agent-quorum
 
 ## Context

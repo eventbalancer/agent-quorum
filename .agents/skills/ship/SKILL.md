@@ -156,9 +156,19 @@ repository-local skill changes that do not publish a new npm version.
      or `build`;
    - optional scope when it improves clarity;
    - subject lowercase, imperative, at most 72 characters, no trailing period;
-   - include `Closes #<n>` in the body only when the change resolves an issue;
-     use `Refs #<n>` for related work;
+   - subject and body use plain ASCII printable characters only: no emoji and no
+     decorative Unicode (em or en dashes, smart quotes, arrows, box drawing);
+     write a plain hyphen `-` instead of `—`. Keep the body concise and factual;
    - no `Co-Authored-By` lines.
+
+   Link the originating GitHub issue. Discover it, in order, from: the execution
+   journal under `.agents/execution-journals/` (the `Issue` field), the source
+   requirements document `Issue:` header, the current branch name, or the
+   operator. When an originating issue is found, the commit body must include
+   `Closes #<n>` when this change fully resolves it, or `Refs #<n>` when it
+   touches the issue without resolving it; do not commit without one of them.
+   When it is unclear whether the change closes the issue, ask the operator
+   before committing. Omit the line only when no issue is associated.
 
 7. Present the irreversible plan before executing:
 
@@ -168,6 +178,7 @@ repository-local skill changes that do not publish a new npm version.
    FILES       <exact scoped files>
    VERIFY      <commands run and result>
    COMMIT      <header>
+   ISSUE       Closes #<n> | Refs #<n> | none
    PUSH        yes|no
    EXCLUDED    <dirty files intentionally left out>
    RISKS       <unrun checks or unusual state>

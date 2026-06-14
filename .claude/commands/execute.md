@@ -184,8 +184,12 @@ cause. If a check cannot be run, log why and report the residual risk.
 2. Set `Status` to `done`, or `partial` if anything remains blocked.
 3. Delete empty `Deviations` or `Issues` sections. A clean run should produce a
    near-empty journal.
-4. If the plan is tied to a GitHub issue, record the issue number in the journal
-   so a future commit can include `Closes #<n>` or `Refs #<n>`.
+4. Determine the originating GitHub issue from the plan, its source prompt or
+   requirements document (the `Issue:` header), or the operator. Record it in the
+   journal `Issue` field as `Closes #<n>` when this work fully resolves the
+   issue, or `Refs #<n>` when it is partial, blocked, or related. Record `none`
+   only when no issue is associated. This is what `/ship` reads to link the
+   commit.
 5. Do not stage, commit, push, create branches, or open PRs. The finished state
    is implemented changes, verification results, and the journal.
 
@@ -194,11 +198,12 @@ cause. If a check cannot be run, log why and report the residual risk.
 ```markdown
 # Exec - <plan-title>
 
-| Field  | Value        |
-| ------ | ------------ |
-| Plan   | `<filename>` |
-| Date   | <YYYY-MM-DD> |
-| Status | in-progress  |
+| Field  | Value                          |
+| ------ | ------------------------------ |
+| Plan   | `<filename>`                   |
+| Date   | <YYYY-MM-DD>                   |
+| Issue  | Closes #<n> / Refs #<n> / none |
+| Status | in-progress                    |
 
 ---
 
