@@ -48,6 +48,7 @@ async function cursorStream(
     renderLine: (line) => filter.line(line),
     progressEvent: cursorProgressEvent,
     traceContext,
+    liveness: true,
     ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),
   });
   const output = extractResultField(result.streamLines, 'result');

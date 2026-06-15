@@ -162,6 +162,19 @@ Passes: `AGENT_QUORUM_FIX_PASS_TIMEOUT_SECONDS` (900),
 `AGENT_QUORUM_FIX_PASS_RETRY_COUNT` (1), and the `AGENT_QUORUM_TRANSLATE_PASS_*`
 equivalents.
 
+### Liveness heartbeat
+
+`AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS` (default `30`) sets the wall-clock
+cadence for the liveness line that `run.log` emits while an otherwise-silent
+codex or cursor call is in flight, so an actively-working reasoning phase is
+distinguishable from a stalled one. It is on by default and applies to the codex
+and cursor runners; `0` disables it. The line ceases when the call ends and never
+feeds the watchdog's stall counters, so it cannot defer or mask a real stall.
+
+This is separate from Claude's `thinking... (N heartbeats)` heartbeat, which is
+governed by `AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY` (see Watchdog knobs above)
+and is unaffected by this knob.
+
 ### Provider diagnostics (env layer)
 
 `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` enables opt-in raw capture of each provider
