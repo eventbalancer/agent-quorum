@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +27,7 @@ import {
   generateRunId,
   pruneRuns,
   readRunRecords,
+  readRunRecordsAcross,
   resolveRunState,
   runNameFromWorkdir,
   runRecordPath,
@@ -127,6 +136,61 @@ describe('run records', () => {
     expect(() => writeRunRecord(stateDir, draft(), { fixedRunId: existing.runId })).toThrow(
       HaltError,
     );
+  });
+});
+
+describe('readRunRecordsAcross', () => {
+  it('unions records across stores and dedupes repeated/trailing-slash derivations', () => {
+    const other = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-runstore-b.'));
+    try {
+      const a = writeRunRecord(stateDir, draft({ name: 'alpha' }));
+      const b = writeRunRecord(other, draft({ name: 'beta' }));
+
+      const union = readRunRecordsAcross([stateDir, other]);
+      expect(union.map((entry) => entry.runId).sort()).toEqual([a.runId, b.runId].sort());
+
+      const deduped = readRunRecordsAcross([stateDir, `${stateDir}/`, stateDir]);
+      expect(deduped).toHaveLength(1);
+      expect(deduped[0]?.runId).toBe(a.runId);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('collapses a symlinked duplicate store to a single read', () => {
+    const written = writeRunRecord(stateDir, draft({ name: 'alpha' }));
+    const linkParent = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-runstore-link.'));
+    const link = path.join(linkParent, 'state-link');
+    symlinkSync(stateDir, link);
+    try {
+      const deduped = readRunRecordsAcross([stateDir, link]);
+      expect(deduped).toHaveLength(1);
+      expect(deduped[0]?.runId).toBe(written.runId);
+    } finally {
+      rmSync(linkParent, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a missing or non-directory store without throwing', () => {
+    const written = writeRunRecord(stateDir, draft({ name: 'alpha' }));
+    const missing = path.join(stateDir, 'does-not-exist');
+    const file = path.join(stateDir, 'a-file');
+    writeFileSync(file, 'not a directory\n');
+    const union = readRunRecordsAcross([missing, file, stateDir]);
+    expect(union).toHaveLength(1);
+    expect(union[0]?.runId).toBe(written.runId);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(readRunRecordsAcross([])).toEqual([]);
+  });
+
+  it('never rewrites record files', () => {
+    const written = writeRunRecord(stateDir, draft({ name: 'alpha' }));
+    const file = runRecordPath(stateDir, written.runId);
+    const before = readFileSync(file);
+    readRunRecordsAcross([stateDir, stateDir]);
+    expect(readFileSync(file).equals(before)).toBe(true);
   });
 });
 

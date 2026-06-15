@@ -14,6 +14,7 @@ import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
 import { listCandidates, pickInteractive, renderListing } from './picker.js';
 import { systemProbes } from './probes.js';
 import { parseSelector, resolveSelector, isRunRecord } from './select.js';
+import { matchValueFlag } from './runs.js';
 import { STATUS_USAGE } from './help.js';
 
 function baseToken(token: string): string {
@@ -361,8 +362,7 @@ function pad(value: string, width: number): string {
   return value.length >= width ? value : value + ' '.repeat(width - value.length);
 }
 
-// FR-13: the per-iteration table is computed from $WORK artifacts via the
-// health metric; run.log feeds only the last-event line.
+// The iteration table comes from $WORK artifacts; run.log only feeds last event.
 function printIterTable(work: string, pal: Palette, write: (s: string) => void): void {
   const criticSchema = path.join(packageRoot(), 'skills', 'plan-critic', 'critique.schema.json');
   const maxPlanLines = Number(process.env.AGENT_QUORUM_MAX_PLAN_LINES ?? 900);
@@ -584,68 +584,146 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
   }
 }
 
-// Non-interactive status entry (library + non-TTY CLI). The no-arg case renders
-// the scriptable listing and never blocks. Interactive picking lives in
-// runStatusCliInteractive so the synchronous getRunStatus contract is preserved.
-export function runStatusCli(
-  args: readonly string[],
-  out: (text: string) => void = (text) => process.stdout.write(text),
-): number {
-  const pal = palette();
+interface ParsedStatusArgs {
+  readonly store: string | undefined;
+  readonly token: string | undefined;
+  readonly watch: boolean;
+  readonly help: boolean;
+}
 
-  if (args.length === 0) {
-    const candidates = listCandidates();
-    if (candidates.length === 0) {
-      process.stderr.write('no agent-quorum runs currently active\n');
-      return 0;
+function fail(message: string, code: number): never {
+  process.stderr.write(`${message}\n`);
+  throw new HaltError(message, code, true);
+}
+
+// Captures neutral structure; callers decide whether the token is a pid or selector.
+function parseStatusArgs(args: readonly string[]): ParsedStatusArgs {
+  let store: string | undefined;
+  let token: string | undefined;
+  let watch = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) {
+      continue;
     }
-    out(renderListing(candidates, { color: colorsEnabled(process.stdout) }));
-    return 0;
+    const storeFlag = matchValueFlag(args, index, '--store');
+    if (arg === '-h' || arg === '--help') {
+      return { store, token, watch, help: true };
+    } else if (arg === '--watch') {
+      watch = true;
+    } else if (storeFlag !== undefined) {
+      if (storeFlag.value === undefined || storeFlag.value === '') {
+        fail('status --store requires a directory', 2);
+      }
+      store = storeFlag.value;
+      index = storeFlag.lastIndex;
+    } else if (arg.startsWith('-')) {
+      fail(`unknown flag: ${arg}`, 2);
+    } else if (token === undefined) {
+      token = arg;
+    } else {
+      fail(`unexpected argument: ${arg}`, 2);
+    }
   }
+  return { store, token, watch, help: false };
+}
 
-  if (args[0] === '-h' || args[0] === '--help') {
-    out(STATUS_USAGE);
-    return 0;
+const NO_ACTIVE_RUNS_MESSAGE = 'no agent-quorum runs currently active\n';
+
+function resolveStateDir(store: string): string {
+  return path.resolve(store);
+}
+
+function stateDirsForStore(store: string | undefined): readonly string[] | undefined {
+  if (store === undefined) {
+    return undefined;
   }
+  return [resolveStateDir(store)];
+}
 
-  const pid = Number(args[0]);
+function exitWithNoActiveRuns(): number {
+  process.stderr.write(NO_ACTIVE_RUNS_MESSAGE);
+  return 0;
+}
+
+function renderStatusListing(
+  storeDirs: readonly string[] | undefined,
+  out: (text: string) => void,
+): number {
+  const candidates = listCandidates(storeDirs);
+  if (candidates.length === 0) {
+    return exitWithNoActiveRuns();
+  }
+  out(renderListing(candidates, { color: colorsEnabled(process.stdout) }));
+  return 0;
+}
+
+function renderStatusPid(token: string, out: (text: string) => void): number {
+  const pid = Number(token);
   if (!Number.isInteger(pid) || commandOf(pid) === '') {
-    process.stderr.write(`PID ${args[0] ?? ''} not found\n`);
+    process.stderr.write(`PID ${token} not found\n`);
     throw new HaltError('pid not found', 2, true);
   }
-
   const root = findRootAgentQuorum(pid);
   if (root === undefined) {
     process.stderr.write(`PID ${pid} is not part of an agent-quorum tree\n`);
     throw new HaltError('not an agent-quorum pid', 3, true);
   }
-
-  printStatus(root, pal, out);
+  printStatus(root, palette(), out);
   return 0;
+}
+
+// Non-interactive status entry (library + non-TTY CLI). The no-token case renders
+// the scriptable listing and never blocks. Interactive picking lives in
+// runStatusCliInteractive so the synchronous getRunStatus contract is preserved.
+// `--store` scopes the listing but is invalid with a PID (the PID path inspects
+// its own store candidates, never `--store`).
+function runStatusFromParsed(parsed: ParsedStatusArgs, out: (text: string) => void): number {
+  if (parsed.help) {
+    out(STATUS_USAGE);
+    return 0;
+  }
+  if (parsed.token === undefined) {
+    return renderStatusListing(stateDirsForStore(parsed.store), out);
+  }
+  if (parsed.store !== undefined) {
+    fail('status --store cannot be combined with a PID', 2);
+  }
+  return renderStatusPid(parsed.token, out);
+}
+
+export function runStatusCli(
+  args: readonly string[],
+  out: (text: string) => void = (text) => {
+    process.stdout.write(text);
+  },
+): number {
+  return runStatusFromParsed(parseStatusArgs(args), out);
 }
 
 const WATCH_INTERVAL_MS = 2000;
 
-function watchTarget(token: string | undefined): RunRecord | undefined {
+function watchTarget(token: string | undefined, store: string | undefined): RunRecord | undefined {
   if (token === undefined) {
-    return listCandidates().find((candidate) => candidate.isLive)?.record;
+    return listCandidates(stateDirsForStore(store)).find((candidate) => candidate.isLive)?.record;
   }
   const selector = parseSelector(token);
   if (selector === undefined) {
     return undefined;
   }
-  const resolved = resolveSelector(selector, { stateDir: resolveArtifactRoots().stateDir });
+  const stateDir = store !== undefined ? resolveStateDir(store) : resolveArtifactRoots().stateDir;
+  const resolved = resolveSelector(selector, { stateDir });
   return resolved !== undefined && isRunRecord(resolved) ? resolved : undefined;
 }
 
-// `status --watch [selector]`: re-render printStatus until the run reaches a
-// terminal state (TTY). A non-TTY context emits exactly one snapshot (NFR-2).
+// `status --watch [selector] [--store <dir>]`: re-render printStatus until the
+// run reaches a terminal state. A non-TTY context emits exactly one snapshot.
 async function runStatusWatch(
-  args: readonly string[],
+  parsed: ParsedStatusArgs,
   out: (text: string) => void,
 ): Promise<number> {
   const pal = palette();
-  const record = watchTarget(args.find((arg) => !arg.startsWith('-')));
+  const record = watchTarget(parsed.token, parsed.store);
   if (record === undefined) {
     process.stderr.write('no run to watch\n');
     throw new HaltError('no run to watch', 2, true);
@@ -663,28 +741,27 @@ async function runStatusWatch(
   }
 }
 
-// CLI entry that adds the interactive picker for a no-arg invocation in a TTY:
+// CLI entry that adds the interactive picker for a no-token invocation in a TTY:
 // list candidates, let the operator pick (a sole candidate auto-selects), then
 // show the picked run's status. Every other case delegates to the synchronous
 // entry, so non-TTY and selector/pid invocations are unchanged.
 export async function runStatusCliInteractive(
   args: readonly string[],
-  out: (text: string) => void = (text) => process.stdout.write(text),
+  out: (text: string) => void = (text) => {
+    process.stdout.write(text);
+  },
 ): Promise<number> {
-  if (args.includes('--watch')) {
-    return runStatusWatch(
-      args.filter((arg) => arg !== '--watch'),
-      out,
-    );
+  const parsed = parseStatusArgs(args);
+  if (parsed.watch) {
+    return runStatusWatch(parsed, out);
   }
   const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
-  if (args.length !== 0 || !isInteractive) {
-    return runStatusCli(args, out);
+  if (parsed.token !== undefined || !isInteractive) {
+    return runStatusFromParsed(parsed, out);
   }
-  const candidates = listCandidates();
+  const candidates = listCandidates(stateDirsForStore(parsed.store));
   if (candidates.length === 0) {
-    process.stderr.write('no agent-quorum runs currently active\n');
-    return 0;
+    return exitWithNoActiveRuns();
   }
   const picked = await pickInteractive(candidates, {
     input: process.stdin,

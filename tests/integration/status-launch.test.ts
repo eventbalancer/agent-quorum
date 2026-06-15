@@ -57,7 +57,10 @@ interface LaunchedRun {
   codexPid: number;
 }
 
-async function launchHangingRun(name: string): Promise<LaunchedRun> {
+async function launchHangingRun(
+  name: string,
+  envOverrides: Record<string, string | undefined> = {},
+): Promise<LaunchedRun> {
   const input = path.join(tmp, `${name}.md`);
   writeStructuredPlanFile(input, `Run ${name}`);
   const pidBase = path.join(tmp, `${name}.codex.pid`);
@@ -74,6 +77,7 @@ async function launchHangingRun(name: string): Promise<LaunchedRun> {
       AGENT_QUORUM_WORK_DIR: undefined,
       SLOW_CODEX_PID_FILE: pidBase,
       FAKE_CODEX_PROMPT: path.join(tmp, `${name}.codex.prompt`),
+      ...envOverrides,
     },
   );
   expect(result.status).toBe(0);
@@ -127,7 +131,7 @@ afterEach(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('launch + status (Finding F4, AC-5)', () => {
+describe('launch + status', () => {
   it('resolves a grandchild PID to the root run, lists runs, and tears down without orphans', async () => {
     const runA = await launchHangingRun('alpha');
     expect(existsSync(runA.log)).toBe(true);
@@ -140,16 +144,17 @@ describe('launch + status (Finding F4, AC-5)', () => {
     const statusEnv = {
       AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
       AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
       AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
 
-    const byGrandchild = runCli(['status', String(runA.grandchildPid)], statusEnv);
+    const byGrandchild = runCli(['status', String(runA.grandchildPid)], statusEnv, undefined, tmp);
     expect(byGrandchild.status).toBe(0);
     expect(byGrandchild.stdout).toContain('━━ alpha ━━');
     expect(byGrandchild.stdout).toContain(`PID=${runA.pid}`);
     expect(byGrandchild.stdout).toContain(`WORK: ${realpathSync(runA.work)}`);
 
-    const nonAgentQuorum = runCli(['status', String(process.pid)], statusEnv);
+    const nonAgentQuorum = runCli(['status', String(process.pid)], statusEnv, undefined, tmp);
     expect(nonAgentQuorum.status).toBe(3);
     expect(nonAgentQuorum.stderr).toContain(
       `PID ${process.pid} is not part of an agent-quorum tree`,
@@ -164,7 +169,7 @@ describe('launch + status (Finding F4, AC-5)', () => {
       `pid\t${process.pid}\nwork_dir\t${path.join(tmp, 'plans', 'loop-decoy')}\n`,
     );
 
-    const listAll = runCli(['status'], statusEnv);
+    const listAll = runCli(['status'], statusEnv, undefined, tmp);
     expect(listAll.status).toBe(0);
     expect(listAll.stdout).toContain('found 2 agent-quorum run(s)');
     expect(listAll.stdout).toContain('alpha  [running]');
@@ -191,7 +196,7 @@ describe('launch + status (Finding F4, AC-5)', () => {
         state: 'running',
       })}\n`,
     );
-    const afterDecoy = runCli(['status'], statusEnv);
+    const afterDecoy = runCli(['status'], statusEnv, undefined, tmp);
     expect(afterDecoy.status).toBe(0);
     // The decoy is listed, but its start-token mismatch demotes it to a
     // terminal state — it is never shown as a live/running run.
@@ -212,28 +217,102 @@ describe('launch + status (Finding F4, AC-5)', () => {
   }, 120_000);
 });
 
-describe('status provider-neutral hints (FR-7)', () => {
+describe('status provider-neutral hints', () => {
   it('derives the stall hint provider and shows a provider-neutral retry hint', async () => {
     const run = await launchHangingRun('gamma');
     const statusEnv = {
       AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
       AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
       AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
 
     // The neutralized P1 retry trace token triggers the provider-neutral hint.
     appendFileSync(run.log, '    api retry 2/10 after 1172ms\n');
-    const retry = runCli(['status', String(run.grandchildPid)], statusEnv);
+    const retry = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(retry.status).toBe(0);
     expect(retry.stdout).toContain('(a provider is retrying API calls, waiting not progressing)');
     expect(retry.stdout).not.toContain('claude is retrying');
 
     // A cursor stall names cursor in the hint, not the old hardcoded claude.
     appendFileSync(run.log, '[agent-quorum] cursor stream stalled: no byte progress\n');
-    const stall = runCli(['status', String(run.grandchildPid)], statusEnv);
+    const stall = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(stall.status).toBe(0);
     expect(stall.stdout).toContain('(watchdog terminated a recent cursor call, see run.log)');
     expect(stall.stdout).not.toContain('recent claude call');
+
+    process.kill(run.pid, 'SIGTERM');
+    await sleep(1500);
+    expect(isAlive(run.grandchildPid)).toBe(false);
+  }, 120_000);
+});
+
+describe('cross-store discovery', () => {
+  it('lists a project-local self-planning run with no STATE_DIR/PLANS_DIR at status time', async () => {
+    const projRun = await launchHangingRun('proj', {
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, '.agents', 'plans'),
+      AGENT_QUORUM_STATE_DIR: undefined,
+    });
+    const listEnv = {
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
+      AGENT_QUORUM_PLANS_DIR: undefined,
+      AGENT_QUORUM_STATE_DIR: undefined,
+    };
+
+    const listing = runCli(['status'], listEnv, undefined, tmp);
+    expect(listing.status).toBe(0);
+    expect(listing.stdout).toContain('found 1 agent-quorum run(s)');
+    expect(listing.stdout).toContain('proj  [running]');
+    // Missing known stores still leave discovery at exit 0.
+    expect(existsSync(path.join(tmp, 'home', 'state'))).toBe(false);
+
+    process.kill(projRun.pid, 'SIGTERM');
+    await sleep(1500);
+    expect(isAlive(projRun.grandchildPid)).toBe(false);
+  }, 120_000);
+
+  it('--store scopes the listing to one store, ignoring a live run elsewhere', async () => {
+    const live = await launchHangingRun('delta');
+    const emptyStore = path.join(tmp, 'empty-state');
+    mkdirSync(emptyStore, { recursive: true });
+    const statusEnv = {
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
+    };
+
+    const scoped = runCli(['status', '--store', emptyStore], statusEnv, undefined, tmp);
+    expect(scoped.status).toBe(0);
+    expect(scoped.stderr).toContain('no agent-quorum runs currently active');
+
+    const aggregated = runCli(['status'], statusEnv, undefined, tmp);
+    expect(aggregated.status).toBe(0);
+    expect(aggregated.stdout).toContain('delta  [running]');
+
+    process.kill(live.pid, 'SIGTERM');
+    await sleep(1500);
+    expect(isAlive(live.grandchildPid)).toBe(false);
+  }, 120_000);
+
+  it('status --watch <selector> --store <dir> emits one snapshot resolved from that store', async () => {
+    const run = await launchHangingRun('epsilon');
+    const statusEnv = {
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
+    };
+
+    const snapshot = runCli(
+      ['status', '--watch', 'epsilon', '--store', path.join(tmp, 'state')],
+      statusEnv,
+      undefined,
+      tmp,
+    );
+    expect(snapshot.status).toBe(0);
+    expect(snapshot.stdout).toContain('━━ epsilon ━━');
 
     process.kill(run.pid, 'SIGTERM');
     await sleep(1500);

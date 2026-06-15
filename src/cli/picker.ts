@@ -1,13 +1,13 @@
 import { createInterface } from 'node:readline';
 import {
   compareRunsByRecency,
-  readRunRecords,
+  readRunRecordsAcross,
   resolveRunState,
   retentionKeepCount,
   type RunRecord,
   type RunState,
 } from '../core/run-store.js';
-import { resolveArtifactRoots } from '../runtime/paths.js';
+import { knownStateDirs } from '../runtime/paths.js';
 import { systemProbes } from './probes.js';
 
 export interface RunCandidate {
@@ -29,8 +29,9 @@ const SHORT_RUN_ID_LENGTH = 12;
 
 // Live runs first (most recent), then recent finished runs bounded by the same
 // retention count prune enforces, so the listing never exceeds what is kept.
-export function listCandidates(): RunCandidate[] {
-  const records = readRunRecords(resolveArtifactRoots().stateDir);
+// Reads across all known stores by default; an explicit list scopes the listing.
+export function listCandidates(stateDirs?: readonly string[]): RunCandidate[] {
+  const records = readRunRecordsAcross(stateDirs ?? knownStateDirs());
   const live: RunCandidate[] = [];
   const finished: RunCandidate[] = [];
   for (const record of records) {

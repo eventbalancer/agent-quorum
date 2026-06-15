@@ -127,15 +127,34 @@ artifacts, interventions, the last log event, and follow/stop hints.
 With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same
 scriptable listing (`name [state] <shortId> … workdir`) and never blocks.
-Discovery sources the durable ledger (records whose pid is alive with a
-matching pgid and start token); a `ps` scan (`AGENT_QUORUM_STATUS_SCAN_PS=0`
-disables it) remains a secondary path for records-less live trees.
+Discovery aggregates across all **known stores** — the ambient
+`AGENT_QUORUM_STATE_DIR`/`AGENT_QUORUM_PLANS_DIR`-derived store, the default
+`<home>/state`, and the project-local `<cwd>/.agents/plans/.runs` self-planning
+store — read-only and deduped, so a self-planning run registered under
+`.agents/plans/.runs` is still listed when the ambient environment points
+elsewhere. A record is shown live only when its pid is alive with a matching
+pgid and start token; a `ps` scan (`AGENT_QUORUM_STATUS_SCAN_PS=0` disables it)
+remains a secondary path for records-less live trees.
+
+`agent-quorum status --store <dir>` scopes the listing to a single ledger store —
+the directory whose `runs/` subdir holds records, the same shape as
+`AGENT_QUORUM_STATE_DIR` (so the self-planning store is
+`--store .agents/plans/.runs`). `--store` cannot be combined with a PID (exit 2);
+the PID path inspects its own store candidates.
 
 `agent-quorum status --watch [selector]` re-renders the run's status until it
 reaches a terminal state (a non-TTY emits a single snapshot); with no selector
-it watches the most-recent live run.
+it watches the most-recent live run. `--store <dir>` is valid here: it scopes the
+live-candidate listing (no selector) or the selector resolution (with a selector)
+to that store.
 
-Exits 2 for an unknown PID, 3 for a live PID outside any agent-quorum tree.
+The mode matrix: bare `status` aggregates the listing; `status <PID>` reports a
+PID's tree (`--store` invalid); `status --watch` watches the most-recent live run;
+`status --watch <selector>` watches a resolved run; `--store <dir>` scopes the
+listing or selector resolution in every mode except the PID path.
+
+Exits 2 for an unknown PID, an invalid `--store` form, or `--store` with a PID;
+3 for a live PID outside any agent-quorum tree.
 
 POSIX `ps` and `lsof` are the port's deliberate external-binary exceptions
 (`lsof` only resolves a run's workdir from its open `run.log` handle); tree,

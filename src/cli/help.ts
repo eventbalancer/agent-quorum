@@ -27,6 +27,7 @@ export const STATUS_USAGE =
   'Usage:\n' +
   '  agent-quorum status <PID>          — any PID in the run’s process tree (main or child)\n' +
   '  agent-quorum status                — list runs (interactive picker in a TTY)\n' +
+  '  agent-quorum status --store <dir>  — list only that ledger store (e.g. .agents/plans/.runs)\n' +
   '  agent-quorum status --watch [sel]  — re-render until the run ends (one snapshot non-TTY)\n';
 
 export const PRUNE_USAGE =

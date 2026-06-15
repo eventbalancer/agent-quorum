@@ -447,3 +447,23 @@ export async function withEnvAsync<T>(vars: EnvOverrides, fn: () => MaybePromise
     restoreEnv(saved);
   }
 }
+
+export function withCwd<T>(dir: string, fn: () => T): T {
+  const saved = process.cwd();
+  process.chdir(dir);
+  try {
+    return fn();
+  } finally {
+    process.chdir(saved);
+  }
+}
+
+export async function withCwdAsync<T>(dir: string, fn: () => MaybePromise<T>): Promise<T> {
+  const saved = process.cwd();
+  process.chdir(dir);
+  try {
+    return await Promise.resolve(fn());
+  } finally {
+    process.chdir(saved);
+  }
+}

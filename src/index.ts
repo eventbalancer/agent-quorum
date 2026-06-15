@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { HaltError } from './runtime/halt.js';
-import { resolveArtifactRoots } from './runtime/paths.js';
+import { knownStateDirs, resolveArtifactRoots } from './runtime/paths.js';
 import { runInterveneCli } from './cli/intervene.js';
 import { runLaunchCli } from './cli/launch.js';
 import { runPlanLoopCli, type RunOutcome } from './stages/plan/run.js';
@@ -15,6 +15,7 @@ import {
 import {
   pruneRuns as pruneRunsStore,
   readRunRecords,
+  readRunRecordsAcross,
   type PruneResult,
   type RetentionPolicy,
   type RunRecord,
@@ -26,10 +27,13 @@ export type { Effort, Role, RunMode, RunOverrides, Runner } from './types.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
 export type RunSelector = Selector;
 
-// Root override for lookups so a run created under a custom `home` is reachable
-// without mutating process.env. Resolves through resolveArtifactRoots.
+// Lookup scoping without mutating process.env. `home` overrides only the home
+// root used to derive known stores; the aggregated listing still spans them.
+// `store` is the single-store scope: it bypasses derivation and reads exactly
+// that one ledger directory.
 export interface RunLookupOptions {
   home?: string;
+  store?: string;
 }
 
 export interface RunPlanLoopOptions {
@@ -234,6 +238,9 @@ export function addIntervention(
 }
 
 function lookupStateDir(options?: RunLookupOptions): string {
+  if (options?.store !== undefined) {
+    return options.store;
+  }
   return resolveArtifactRoots(options?.home !== undefined ? { home: options.home } : {}).stateDir;
 }
 
@@ -241,10 +248,17 @@ function toSelector(selector: string | RunSelector): Selector | undefined {
   return typeof selector === 'string' ? parseSelector(selector) : selector;
 }
 
-// List every run record under the resolved root, most-recent state not inferred
-// here (read record.state or pass to status for liveness).
+// Aggregate run records across all known stores (parity with the CLI listing).
+// `home` overrides only the home root and still aggregates; `store` scopes to a
+// single ledger. State is not inferred here (read record.state or pass to status
+// for liveness).
 export function listRuns(options?: RunLookupOptions): RunRecord[] {
-  return readRunRecords(lookupStateDir(options));
+  if (options?.store !== undefined) {
+    return readRunRecords(options.store);
+  }
+  return readRunRecordsAcross(
+    knownStateDirs(options?.home !== undefined ? { home: options.home } : {}),
+  );
 }
 
 // Resolve a selector (string token, or a structured RunSelector for

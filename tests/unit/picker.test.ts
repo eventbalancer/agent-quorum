@@ -14,7 +14,19 @@ import { pgidOf, procStartToken } from '../../src/runtime/proc.js';
 const ESC = String.fromCharCode(27);
 
 let stateDir: string;
-let savedStateDir: string | undefined;
+let homeDir: string;
+let cwdDir: string;
+let savedCwd: string;
+const savedEnv = new Map<string, string | undefined>();
+
+function setEnv(key: string, value: string | undefined): void {
+  savedEnv.set(key, process.env[key]);
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, key);
+  } else {
+    process.env[key] = value;
+  }
+}
 
 function liveOverrides(): Partial<RunRecordDraft> {
   return {
@@ -50,17 +62,28 @@ function ttyStream(): PassThrough & { isTTY?: boolean } {
 
 beforeEach(() => {
   stateDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-picker.'));
-  savedStateDir = process.env.AGENT_QUORUM_STATE_DIR;
-  process.env.AGENT_QUORUM_STATE_DIR = stateDir;
+  homeDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-picker-home.'));
+  cwdDir = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-picker-cwd.'));
+  savedEnv.clear();
+  setEnv('AGENT_QUORUM_STATE_DIR', stateDir);
+  setEnv('AGENT_QUORUM_HOME', homeDir);
+  setEnv('AGENT_QUORUM_PLANS_DIR', undefined);
+  savedCwd = process.cwd();
+  process.chdir(cwdDir);
 });
 
 afterEach(() => {
-  if (savedStateDir === undefined) {
-    Reflect.deleteProperty(process.env, 'AGENT_QUORUM_STATE_DIR');
-  } else {
-    process.env.AGENT_QUORUM_STATE_DIR = savedStateDir;
+  process.chdir(savedCwd);
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, key);
+    } else {
+      process.env[key] = value;
+    }
   }
   rmSync(stateDir, { recursive: true, force: true });
+  rmSync(homeDir, { recursive: true, force: true });
+  rmSync(cwdDir, { recursive: true, force: true });
 });
 
 describe('listCandidates', () => {
@@ -105,6 +128,26 @@ describe('listCandidates', () => {
         process.env.AGENT_QUORUM_RETAIN_COUNT = saved;
       }
     }
+  });
+
+  it('aggregates live runs across known stores by default', () => {
+    const projStore = path.join(cwdDir, '.agents', 'plans', '.runs');
+    writeRunRecord(stateDir, draft({ ...liveOverrides(), name: 'in-state' }));
+    writeRunRecord(projStore, draft({ ...liveOverrides(), name: 'in-project' }));
+
+    const names = listCandidates().map((candidate) => candidate.record.name);
+    expect(names).toHaveLength(2);
+    expect(names).toContain('in-state');
+    expect(names).toContain('in-project');
+  });
+
+  it('scopes the listing to an explicit store, ignoring other stores', () => {
+    const projStore = path.join(cwdDir, '.agents', 'plans', '.runs');
+    writeRunRecord(stateDir, draft({ ...liveOverrides(), name: 'in-state' }));
+    writeRunRecord(projStore, draft({ ...liveOverrides(), name: 'in-project' }));
+
+    const names = listCandidates([stateDir]).map((candidate) => candidate.record.name);
+    expect(names).toEqual(['in-state']);
   });
 });
 

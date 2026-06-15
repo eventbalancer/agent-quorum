@@ -73,8 +73,16 @@ pre-existing `~/.claude/plans` trees (setting `AGENT_QUORUM_HOME=$HOME/.claude/p
 recreates the old location if needed). Setting only `AGENT_QUORUM_PLANS_DIR` keeps
 the legacy single-var layout (`<plans>/.runs` for state).
 
+The no-argument `status` listing and `listRuns` read across all **known stores**
+(the ambient `STATE_DIR`/`PLANS_DIR`-derived store, `<home>/state`, and the
+project-local `<cwd>/.agents/plans/.runs`), deduped and read-only. Setting
+`AGENT_QUORUM_STATE_DIR` therefore no longer implicitly narrows that listing; to
+scope it to one ledger pass `--store <dir>` (CLI) or `{ store }` (library).
+Selector-resolving commands (`show`/`logs`/`intervene`, `status --watch <selector>`)
+and `prune` stay single-store-ambient and accept an explicit store only to scope.
+
 The library API additionally accepts `home`/`workDir`/`configFile` as typed
-options on `runPlanLoop`/`launchPlanLoop`, and a `home` lookup option on
+options on `runPlanLoop`/`launchPlanLoop`, and `home`/`store` lookup options on
 `listRuns`/`getRun`/`getRunLogPath`/`interveneRun`/`pruneRuns`; resolution
 precedence is option > env > default. The CLI contract stays env-first
 ([details](api.md)).

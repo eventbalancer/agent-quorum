@@ -34,7 +34,7 @@ function fail(message: string, code: number): never {
   throw new HaltError(message, code, true);
 }
 
-interface ValueFlagMatch {
+export interface ValueFlagMatch {
   readonly value: string | undefined;
   readonly lastIndex: number;
 }
@@ -43,7 +43,7 @@ interface ValueFlagMatch {
 // arg (undefined for a trailing bare flag) or the inline tail after `=`;
 // `lastIndex` is the final consumed index, so the caller advances its loop cursor
 // to it. Returns undefined when the flag does not match.
-function matchValueFlag(
+export function matchValueFlag(
   args: readonly string[],
   index: number,
   name: string,

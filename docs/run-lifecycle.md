@@ -84,12 +84,16 @@ agent-quorum status <PID>          # the run owning any PID in its process tree
 agent-quorum status --watch --last # re-render until the run ends (one snapshot non-TTY)
 ```
 
-The no-arg listing sources the durable ledger (a record is live only when its
-pid is alive with a matching pgid and start token, so a recycled pid never
-masquerades as a live run). The API exposes the same data without blocking:
+The no-arg listing aggregates the known durable ledger stores (ambient state,
+`<home>/state`, the legacy plans-derived store, and the project-local
+`.agents/plans/.runs` self-planning store). A record is live only when its pid is
+alive with a matching pgid and start token, so a recycled pid never masquerades
+as a live run. Pass `--store <dir>` to scope the listing to one ledger. The API
+exposes the same data without blocking:
 
 ```ts
-const runs = listRuns(); // RunRecord[] under the resolved root
+const runs = listRuns(); // RunRecord[] across all known stores
+const scoped = listRuns({ store: '.agents/plans/.runs' }); // one ledger only
 const run = getRun('my-plan'); // by name, runId/prefix, or { kind: 'last' }
 const snapshot = getRunStatus(pid); // { exitCode, output }; no-arg returns the listing
 ```
