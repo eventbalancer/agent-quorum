@@ -51,6 +51,8 @@
     "worktree:create": "scripts/worktree.sh create",
     "worktree:list": "scripts/worktree.sh list",
     "worktree:touch": "scripts/worktree.sh touch",
+    "worktree:done": "scripts/worktree.sh done",
+    "worktree:reopen": "scripts/worktree.sh reopen",
     "worktree:release": "scripts/worktree.sh release",
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc -p tsconfig.build.json",

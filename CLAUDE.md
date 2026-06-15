@@ -76,21 +76,21 @@ When facts conflict, trust in this order:
 
 ## 3. Required Entry Points
 
-| Task                       | Use                                                                        |
-| -------------------------- | -------------------------------------------------------------------------- |
-| Install dependencies       | `pnpm install --frozen-lockfile`                                           |
-| Build                      | `pnpm run build`                                                           |
-| Typecheck                  | `pnpm run typecheck`                                                       |
-| Lint                       | `pnpm run lint`                                                            |
-| Format check               | `pnpm run format-check`                                                    |
-| Tests                      | `pnpm run test`                                                            |
-| Full verification          | `pnpm run check`                                                           |
-| Local CLI                  | `pnpm run dev -- <args>`                                                   |
-| Public API smoke           | `pnpm run build` then import from `agent-quorum`                           |
-| Self-planning dogfood      | `pnpm run plan:self -- --prompt <prompt.md>`                               |
-| Repo-local binaries        | `pnpm exec <bin>`                                                          |
-| Start a session worktree   | `pnpm run worktree:create <slug> --desc <text>`                            |
-| Session worktree lifecycle | `pnpm run worktree:list` / `worktree:touch <id>` / `worktree:release <id>` |
+| Task                       | Use                                                                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Install dependencies       | `pnpm install --frozen-lockfile`                                                                                           |
+| Build                      | `pnpm run build`                                                                                                           |
+| Typecheck                  | `pnpm run typecheck`                                                                                                       |
+| Lint                       | `pnpm run lint`                                                                                                            |
+| Format check               | `pnpm run format-check`                                                                                                    |
+| Tests                      | `pnpm run test`                                                                                                            |
+| Full verification          | `pnpm run check`                                                                                                           |
+| Local CLI                  | `pnpm run dev -- <args>`                                                                                                   |
+| Public API smoke           | `pnpm run build` then import from `agent-quorum`                                                                           |
+| Self-planning dogfood      | `pnpm run plan:self -- --prompt <prompt.md>`                                                                               |
+| Repo-local binaries        | `pnpm exec <bin>`                                                                                                          |
+| Start a session worktree   | `pnpm run worktree:create <slug> --desc <text>`                                                                            |
+| Session worktree lifecycle | `pnpm run worktree:list` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
 
 ## 4. Git Boundaries
 

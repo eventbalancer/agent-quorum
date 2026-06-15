@@ -10,7 +10,8 @@ The gate consumes the per-session worktree model from
 `session-isolated-delivery-via-worktrees`; it does not define worktree creation,
 naming, location, or the durable task-description record. It changes skill-flow
 behavior only: no public API, CLI bin, configuration, or schema contract changes
-(NFR-2). `--worktree` is a skill-prompt argument, not an `agent-quorum` CLI flag.
+(NFR-2). `--worktree` and `--include-done` are skill-prompt arguments, not
+`agent-quorum` CLI flags.
 
 ## Scope
 
@@ -47,11 +48,50 @@ the same directory in the primary checkout and differ in a linked worktree).
 Inspect any non-selected candidate read-only with `git -C <path> ...`; never
 mutate a candidate during discovery.
 
+## Done worktrees
+
+A session is marked done when `agent-quorum-done.json` exists in its git admin
+directory (written by `pnpm run worktree:done`, removed by
+`pnpm run worktree:reopen`). A done worktree has completed the development flow:
+its tree is kept for reference, but the gate stops attending to it by default so
+future sessions are not distracted by finished work.
+
+Done worktrees are not default candidates:
+
+- they are omitted from the interactive menu and are not counted by the
+  unambiguous-skip rule, so "exactly one candidate" means exactly one non-done
+  session worktree;
+- they remain visible in `pnpm run worktree:list` (shown with a
+  `done (marked <ISO>)` status) and fully inspectable read-only with
+  `git -C <path> ...`;
+- they stay selectable on explicit operator intent: `--worktree <branch|path>`
+  targets one directly, and `--include-done` adds done worktrees back into the
+  menu. Selecting a done worktree is allowed but is confirmed first, and the
+  operator is pointed at `pnpm run worktree:reopen <branch>` when the session is
+  resuming real work.
+
+Two boundary cases:
+
+- **Invoked inside a done worktree.** Standing in the worktree and running the
+  skill is itself explicit selection, so the inside-worktree skip still applies:
+  proceed in place, but report that the worktree is marked done and offer
+  `worktree:reopen` before continued work.
+- **All candidates done.** When every linked session worktree is done and the
+  skill is dispatched from the primary checkout, there is no default target. Do
+  not silently act on the primary checkout: report that all session worktrees
+  are done and ask the operator to pass `--worktree`/`--include-done`, reopen
+  one, or create a new worktree.
+
+The done marker is the third durable carrier alongside `agent-quorum-task.md`
+and `agent-quorum-active-edit.json`; `worktree:release` prunes it with the
+worktree, so a released worktree never lingers as done.
+
 ## Unambiguous-skip rule (FR-5)
 
 Present no menu and proceed on the current tree when the target is unambiguous:
 
-- exactly one candidate worktree exists, or
+- exactly one default candidate worktree exists (done worktrees are excluded;
+  see Done worktrees), or
 - the skill is invoked from inside a linked session worktree (the invocation
   `git rev-parse --show-toplevel` matches a candidate session worktree).
 

@@ -95,7 +95,10 @@ writes the two carriers the [Worktree selection gate](worktree-selection-gate.md
 consumes — the durable task description (`agent-quorum-task.md`) and the active-edit
 marker (`agent-quorum-active-edit.json`) in the worktree's git admin dir — so
 `tidy`, `ship`, and `execute` can target the right worktree and `worktree:release`
-cleans both up.
+cleans both up. After delivery, `/ship` marks the session worktree done (a third
+`agent-quorum-done.json` carrier) so the gate ignores finished work by default,
+while `worktree:reopen` brings it back and `worktree:release` removes it once
+merged.
 
 ## Stage Contracts
 
@@ -226,7 +229,8 @@ commits, pushes, or publishes.
 
 Outputs:
 
-- a change-set flow that verifies, commits, and optionally pushes dirty changes;
+- a change-set flow that verifies, commits, optionally pushes dirty changes, and
+  marks the session worktree done after a successful push;
 - a release flow following `docs/release.md` for version bump, tag, publish
   approval, and a commit-range-based GitHub Release description.
 

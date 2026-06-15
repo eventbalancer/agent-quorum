@@ -12,7 +12,7 @@ never invent package, infra, Docker, migration, or pin-rewrite reconciliation.
 One skill, two flows:
 
 - **Change-set flow**: verify, commit, and optionally push dirty changes in
-  this repository.
+  this repository, then mark the session worktree done after a successful push.
 - **Release flow**: follow `docs/release.md` for version bump, release commit,
   tag, GitHub Actions publish approval, npm verification, and GitHub Release.
 
@@ -28,6 +28,7 @@ tagging, deleting tags, or triggering publish-related workflows.
 /ship <path> [<path>...]
 /ship --dry-run [<path>...]
 /ship --no-push [<path>...]
+/ship --no-done [<path>...]
 /ship --worktree <branch|path>
 /ship --release patch|minor|major|X.Y.Z
 /ship --release vX.Y.Z
@@ -55,8 +56,15 @@ in a single-worktree checkout.
   or an explicit `(no task description recorded)` indicator, and an active-edit
   marker; act only on the operator-selected worktree.
 - **Unambiguous skip:** present nothing and proceed in place when exactly one
-  candidate exists or the skill is invoked inside a linked session worktree; the
-  primary checkout is a dispatch context, not a candidate.
+  non-done candidate exists or the skill is invoked inside a linked session
+  worktree; the primary checkout is a dispatch context, not a candidate.
+- **Done worktrees:** a session marked done (an `agent-quorum-done.json` marker
+  written by `worktree:done`) is skipped by default - omitted from the menu and
+  from the unambiguous-skip count. It stays in `worktree:list` and is selectable
+  with `--worktree` or surfaced with `--include-done`; confirm before acting and
+  offer `worktree:reopen` when resuming work. When every candidate is done, do
+  not act on the primary checkout - ask for `--worktree`/`--include-done`, a
+  reopen, or a new worktree.
 - **Explicit target:** `--worktree <branch|path>` bypasses the menu only. Match
   it exactly against `git worktree list --porcelain` and stop on zero or multiple
   matches. It still requires confirmation when the target may be actively edited
@@ -257,6 +265,22 @@ repository-local skill changes that do not publish a new npm version.
    If push is skipped, report the local commit hash and the exact push command
    the operator can approve later.
 
+10. Mark the session worktree done after a successful push. When the change-set
+    flow ran inside a session worktree (the current branch matches `session/*`)
+    and the branch was pushed, flag the session complete so the selection gate
+    stops offering it by default:
+
+    ```sh
+    pnpm run worktree:done "$(git branch --show-current)"
+    ```
+
+    This is a soft marker: it does not require integration into `main` and only
+    reports that status. Skip it when `--no-done` is passed, when push was
+    skipped (`--no-push` or `PUSH no`), in `--dry-run`, or when shipping from the
+    primary checkout. The worktree stays on disk and inspectable; reopen later
+    with `pnpm run worktree:reopen <branch>`, and remove it with
+    `pnpm run worktree:release <branch>` once it is merged into `main`.
+
 ## Release flow
 
 Use this only when the operator intends to publish a new npm version or create a
@@ -430,6 +454,7 @@ Shipped: agent-quorum
   - commit: <sha or none>
   - push: <remote/branch or skipped>
   - tag: <tag or none>
+  - worktree: marked done <branch> | active (--no-done|push skipped|primary checkout) | n/a
 
 Verified:
   - <command>: <result>
