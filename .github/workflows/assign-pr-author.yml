@@ -1,0 +1,23 @@
+name: assign pr author
+run-name: 'Assign #${{ github.event.pull_request.number }} to @${{ github.event.pull_request.user.login }}'
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  assign:
+    if: github.repository == 'eventbalancer/agent-quorum'
+    name: Assign PR author
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign the author as assignee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-assignee "$AUTHOR" || true
