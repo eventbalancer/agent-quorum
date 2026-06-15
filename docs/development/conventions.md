@@ -140,8 +140,16 @@ Start one with a required task description, so a durable record always exists:
 ```bash
 pnpm run worktree:create <slug> --desc "<what this worktree is for>"
 pnpm run worktree:create <slug> --desc-file path/to/task.md
-pnpm run worktree:create <slug> --desc "..." --from origin/main   # base off the remote
+pnpm run worktree:create <slug> --desc "..." --from <ref>   # branch from an explicit base
 ```
+
+Without `--from`, the default base (`main`) is fast-forwarded to its upstream
+before branching, so a session never starts from a stale `main` regardless of the
+provider CLI driving the loop. The sync is best-effort and fast-forward-only: a
+missing `origin`, no upstream, an offline fetch, a diverged base, or a dirty
+checkout leaves the local ref untouched and the worktree is still created. Passing
+an explicit `--from <ref>` skips the sync and bases the worktree on that ref
+verbatim.
 
 This creates the worktree at `$HOME/.agent-quorum/worktrees/agent-quorum/<slug>`
 on branch `session/<slug>`, runs `pnpm install --frozen-lockfile` there, and
