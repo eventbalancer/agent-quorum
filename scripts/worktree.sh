@@ -195,6 +195,32 @@ read_create_description() {
   printf '%s' "$desc"
 }
 
+# Fast-forward the default local base to its upstream before branching, so a
+# session never starts from a stale main while the loop runs under any provider
+# CLI. Best-effort and fast-forward-only: a missing origin, no upstream, offline
+# fetch, divergence, or a dirty base leaves the local ref untouched and the
+# worktree is still created. Skipped when the operator passes an explicit --from.
+sync_default_base() {
+  local base="$1" upstream current before after
+  git -C "$root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null 2>&1 || return 0
+  upstream="$(git -C "$root" rev-parse --abbrev-ref --symbolic-full-name "$base@{upstream}" 2>/dev/null)" || return 0
+  [ -n "$upstream" ] || return 0
+  git -C "$root" fetch --quiet "${upstream%%/*}" "${upstream#*/}" 2>/dev/null || return 0
+  before="$(git -C "$root" rev-parse --quiet --verify "refs/heads/$base" 2>/dev/null || true)"
+  current="$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [ "$current" = "$base" ]; then
+    git -C "$root" merge --ff-only "$upstream" >/dev/null 2>&1 || return 0
+  else
+    # `.` is the local repo: fast-forward the non-checked-out base to the freshly
+    # fetched upstream (fetch refuses a non-fast-forward branch update).
+    git -C "$root" fetch --quiet . "$upstream:$base" >/dev/null 2>&1 || return 0
+  fi
+  after="$(git -C "$root" rev-parse --quiet --verify "refs/heads/$base" 2>/dev/null || true)"
+  if [ -n "$after" ] && [ "$before" != "$after" ]; then
+    echo "[worktree] fast-forwarded $base to $upstream before branching"
+  fi
+}
+
 cmd_create() {
   if [ "$#" -lt 1 ]; then
     usage_create
@@ -202,7 +228,7 @@ cmd_create() {
   fi
   local slug="$1"
   shift
-  local desc="" desc_file="" from="$DEFAULT_REF" have_desc=0
+  local desc="" desc_file="" from="$DEFAULT_REF" have_desc=0 from_overridden=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --desc)
@@ -217,6 +243,7 @@ cmd_create() {
         ;;
       --from)
         from="${2:-}"
+        from_overridden=1
         shift 2
         ;;
       *)
@@ -245,6 +272,9 @@ cmd_create() {
     exit 1
   fi
   desc_content="$(read_create_description "$desc" "$desc_file")"
+  if [ "$from_overridden" -eq 0 ]; then
+    sync_default_base "$from" || true
+  fi
   git -C "$root" worktree add -b "$branch" "$dir" "$from"
   # A linked worktree's .git is a file, so its own `prepare` skips the
   # `[ -d .git ]` guard; set the relative hook path explicitly here.
