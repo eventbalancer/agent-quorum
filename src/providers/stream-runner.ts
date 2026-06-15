@@ -3,6 +3,7 @@ import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
+import { livenessHeartbeatSeconds, runLivenessHeartbeat } from './heartbeat.js';
 import { StreamState, watchStream, type StreamKnobs } from './watchdog.js';
 
 export interface StreamRunResult {
@@ -21,9 +22,11 @@ export interface StreamRunOptions {
   readonly progressEvent: (line: string) => boolean;
   readonly traceContext: TraceContext;
   readonly diagnosticSink?: DiagnosticSink;
+  readonly liveness?: boolean;
 }
 
 export async function runStreamingCli(options: StreamRunOptions): Promise<StreamRunResult> {
+  const heartbeatSeconds = options.liveness === true ? livenessHeartbeatSeconds() : 0;
   const child = spawnDetached(options.command, [...options.args], {
     cwd: options.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -68,8 +71,10 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
   child.stdin?.end();
 
   const stallPromise = watchStream(child, state, options.knobs);
+  const heartbeat = runLivenessHeartbeat(child, options.traceContext, heartbeatSeconds);
   const status = await waitForExit(child);
   const stallReason = await stallPromise;
+  await heartbeat;
   if (pending !== '') {
     consumeLine(pending);
   }

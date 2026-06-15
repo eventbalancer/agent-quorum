@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { providerRun } from '../../src/providers/provider.js';
+import { HaltError } from '../../src/runtime/halt.js';
 import type { ProviderRuntime } from '../../src/providers/runtime.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { fixtureMatrix } from '../helpers/test-context.js';
@@ -18,6 +19,7 @@ import {
   type StderrCapture,
 } from '../helpers/harness.js';
 
+const LIVENESS_ENV = 'AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS';
 const CRITIC_SKILL = path.join(SKILLS_DIR, 'plan-critic', 'SKILL.md');
 const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json');
 const CREATOR_SKILL = path.join(SKILLS_DIR, 'plan-creator', 'SKILL.md');
@@ -749,6 +751,117 @@ describe('codex argv and retries', () => {
   });
 });
 
+// Mirrors the private phaseActiveRole filter in src/cli/status.ts: the liveness
+// line must not be mistaken for a phase-active marker by `status`.
+const PHASE_ACTIVE_ROLE_PATTERN =
+  /iter=[0-9]+ — (critic|creator)|creating plan v0 from prompt|fix-pass: step [0-9]+ —/;
+
+describe('codex liveness heartbeat', () => {
+  it('emits a liveness line while a silent codex call is in flight (AC-1)', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const out = path.join(tmp, 'out.json');
+    const providerRuntime = makeRuntime();
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        [LIVENESS_ENV]: '1',
+        FAKE_CODEX_SILENT_SECONDS: '3',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          out,
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(capture.text()).toContain('still working');
+    expect(capture.text()).toContain('critic/codex');
+    const heartbeatLine = capture
+      .text()
+      .split('\n')
+      .find((line) => line.includes('still working'));
+    expect(heartbeatLine).toBeDefined();
+    expect(PHASE_ACTIVE_ROLE_PATTERN.test(heartbeatLine ?? '')).toBe(false);
+  }, 30_000);
+
+  it('emits no liveness line when the cadence is disabled with 0 (AC-3)', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const out = path.join(tmp, 'out.json');
+    const providerRuntime = makeRuntime();
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        [LIVENESS_ENV]: '0',
+        FAKE_CODEX_SILENT_SECONDS: '2',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          out,
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(capture.text()).not.toContain('still working');
+  }, 30_000);
+
+  it('halts on an invalid cadence before the codex child is spawned', async () => {
+    const argvLog = path.join(tmp, 'codex.argv');
+    const promptCapture = path.join(tmp, 'codex.prompt');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 3, retryDelaySeconds: 0 } });
+
+    await expect(
+      withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'unused.json'),
+          FAKE_CODEX_ARGV_LOG: argvLog,
+          FAKE_CODEX_PROMPT: promptCapture,
+          [LIVENESS_ENV]: 'abc',
+        },
+        () =>
+          providerRun(
+            providerRuntime,
+            'critic',
+            'json',
+            path.join(tmp, 'out.json'),
+            CRITIC_SKILL,
+            CRITIC_SCHEMA,
+            '',
+            '',
+            'P\n',
+          ),
+      ),
+    ).rejects.toThrow(HaltError);
+
+    expect(existsSync(argvLog)).toBe(false);
+    expect(existsSync(promptCapture)).toBe(false);
+  });
+});
+
 describe('cursor adapter', () => {
   it('builds capability-probed argv, injects prompt hints, captures the session', async () => {
     const critique = path.join(tmp, 'critique.json');
@@ -874,6 +987,178 @@ describe('cursor adapter', () => {
     expect(records[1]).not.toContain('--resume');
     expect(readFileSync(out, 'utf8')).toBe(readFileSync(created, 'utf8'));
     expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
+  });
+});
+
+describe('cursor liveness heartbeat', () => {
+  function cursorRuntime(partial?: Partial<ProviderRuntime>): ProviderRuntime {
+    return makeRuntime({
+      matrix: {
+        ...fixtureMatrix(),
+        creator: { runner: 'cursor', model: 'composer-2.5', reasoning: '' },
+      },
+      ...partial,
+    });
+  }
+
+  it('emits a liveness line while a silent cursor call is in flight (AC-2)', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Cursor Created');
+    const out = path.join(tmp, 'out.md');
+    const providerRuntime = cursorRuntime();
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CURSOR_MARKDOWN_RESULT: created,
+        [LIVENESS_ENV]: '1',
+        FAKE_CURSOR_SILENT_SECONDS: '3',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          out,
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'Go.\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(capture.text()).toContain('creator/cursor still working');
+  }, 30_000);
+
+  it('does not defer the byte-idle watchdog while the heartbeat is active (AC-5)', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Cursor Created');
+    const out = path.join(tmp, 'out.md');
+    const providerRuntime = cursorRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      cursorKnobs: {
+        stallStatus: 124,
+        pollSeconds: 1,
+        graceSeconds: 1,
+        byteTimeoutSeconds: 2,
+        semanticTimeoutSeconds: 0,
+        wallTimeoutSeconds: 0,
+      },
+    });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CURSOR_MARKDOWN_RESULT: created,
+        [LIVENESS_ENV]: '1',
+        FAKE_CURSOR_SILENT_SECONDS: '5',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'markdown',
+          out,
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'Go.\n',
+        ),
+    );
+
+    expect(status).toBe(124);
+    expect(capture.text()).toContain('still working');
+    expect(capture.text()).toContain('cursor stream stalled');
+  }, 30_000);
+
+  it('halts on an invalid cadence before the detached cursor stream spawns', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Cursor Created');
+    const argvLog = path.join(tmp, 'cursor.argv');
+    const promptCapture = path.join(tmp, 'cursor.prompt');
+    const providerRuntime = cursorRuntime({ retry: { retryCount: 3, retryDelaySeconds: 0 } });
+
+    await expect(
+      withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CURSOR_MARKDOWN_RESULT: created,
+          FAKE_CURSOR_ARGV_LOG: argvLog,
+          FAKE_CURSOR_PROMPT: promptCapture,
+          [LIVENESS_ENV]: 'abc',
+        },
+        () =>
+          providerRun(
+            providerRuntime,
+            'creator',
+            'markdown',
+            path.join(tmp, 'out.md'),
+            CREATOR_SKILL,
+            '',
+            TOOLS,
+            DISALLOWED,
+            'Go.\n',
+          ),
+      ),
+    ).rejects.toThrow(HaltError);
+
+    expect(existsSync(argvLog)).toBe(false);
+    expect(existsSync(promptCapture)).toBe(false);
+  });
+});
+
+describe('claude liveness heartbeat (AC-4)', () => {
+  it('never reads the new knob: no liveness line and no halt on an invalid value', async () => {
+    const created = path.join(tmp, 'created.md');
+    writeStructuredPlanFile(created, 'Claude Created');
+    const out = path.join(tmp, 'out.md');
+
+    const validStatus = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_MARKDOWN_RESULT: created,
+        [LIVENESS_ENV]: '1',
+      },
+      () =>
+        providerRun(
+          makeRuntime(),
+          'creator',
+          'markdown',
+          out,
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'X\n',
+        ),
+    );
+    expect(validStatus).toBe(0);
+    expect(capture.text()).not.toContain('still working');
+
+    const invalidStatus = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_MARKDOWN_RESULT: created,
+        [LIVENESS_ENV]: 'abc',
+      },
+      () =>
+        providerRun(
+          makeRuntime(),
+          'creator',
+          'markdown',
+          out,
+          CREATOR_SKILL,
+          '',
+          TOOLS,
+          DISALLOWED,
+          'X\n',
+        ),
+    );
+    expect(invalidStatus).toBe(0);
+    expect(capture.text()).not.toContain('still working');
   });
 });
 

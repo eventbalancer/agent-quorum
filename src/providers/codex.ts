@@ -3,6 +3,7 @@ import { nonEmptyFile } from '../runtime/files.js';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { StreamLogFilter } from './stream-log.js';
+import { livenessHeartbeatSeconds, runLivenessHeartbeat } from './heartbeat.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
 import type { ProviderRuntime } from './runtime.js';
 
@@ -49,6 +50,7 @@ export async function codexRun(
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
+  const heartbeatSeconds = livenessHeartbeatSeconds();
   rmSync(outPath, { force: true });
 
   const child = spawnDetached('codex', codexArgs(model, reasoning, schemaPath, outPath, prompt), {
@@ -72,11 +74,17 @@ export async function codexRun(
     }
   });
 
+  const heartbeat =
+    heartbeatSeconds > 0
+      ? runLivenessHeartbeat(child, traceContext, heartbeatSeconds)
+      : Promise.resolve();
+
   // Always drain so the child never blocks on a full stderr buffer.
   const stderr = new ProviderStderr(traceContext, diagnosticSink);
   const stderrDrained = drainStderr(child.stderr, stderr);
 
   const status = await waitForExit(child);
+  await heartbeat;
   if (pending !== '') {
     writeFilterLines(filter, pending);
   }
