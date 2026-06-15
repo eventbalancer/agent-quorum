@@ -141,13 +141,14 @@ the detached child run, not by the launch parent.
 ## getRunStatus(query?)
 
 ```ts
-const all = getRunStatus(); // list every running agent-quorum run
+const all = getRunStatus(); // scriptable live-first/recent-finished listing
 const one = getRunStatus(12345); // any PID in a run's process tree
 ```
 
 Returns `{ exitCode, output }` with the rendered snapshot; exit 2 for an
-unknown PID, 3 for a PID outside any agent-quorum tree. The signature and behavior
-are unchanged; with no query, `output` is now the scriptable run listing.
+unknown PID, 3 for a PID outside any agent-quorum tree. The signature and PID
+behavior are unchanged; with no query, `output` is now the scriptable run
+listing.
 
 ## addIntervention(workDir, message, target?)
 
@@ -163,7 +164,7 @@ keeps its `(workDir, message, target?)` signature.
 ## Selector lookups
 
 ```ts
-const runs = listRuns(); // every run record under the resolved root
+const runs = listRuns(); // every run record across all known stores
 const run = getRun('my-plan'); // by name, runId (or prefix), or { kind: 'last' }
 const log = getRunLogPath('my-plan'); // run.log path, or undefined if none exists
 interveneRun('my-plan', 'prefer the staged rollout', 'creator');
@@ -179,12 +180,21 @@ selector has no record); `interveneRun` resolves the selector to its workdir
 then delegates to `addIntervention`, returning `{ exitCode: 2 }` when nothing
 matches. `pruneRuns(policy?)` removes terminal records only (never workdirs).
 
-Each lookup accepts a trailing `RunLookupOptions` with `home?` so a run created
-under a custom `home` is reachable without mutating `process.env`:
+Each lookup accepts a trailing `RunLookupOptions` (`{ home?; store? }`) so a run
+created under a custom `home` is reachable without mutating `process.env`:
 
 ```ts
 const run = getRun('my-plan', { home: '/tmp/sandbox' });
+const scoped = listRuns({ store: '.agents/plans/.runs' }); // one ledger only
 ```
+
+`listRuns` mirrors the CLI listing: by default it **aggregates** across all known
+stores (the ambient `STATE_DIR`/`PLANS_DIR`-derived store, `<home>/state`, and the
+project-local `<cwd>/.agents/plans/.runs`), deduped and read-only. `home` overrides
+only the home root and still aggregates; `store` is the single-store scope. The
+selector helpers `getRun`/`getRunLogPath`/`interveneRun` and `pruneRuns` stay
+single-store-ambient (no cwd/project-local aggregation) and honor `store` only to
+scope, while `home` keeps their existing ambient resolution.
 
 ## ExitCode
 

@@ -70,8 +70,8 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('exit-code matrix (AC-3)', () => {
-  it('clean converge-at-v0 exits 0 with the AC-2 artifact set', () => {
+describe('exit-code matrix', () => {
+  it('clean converge-at-v0 exits 0 with the artifact set', () => {
     const result = runCli(
       [
         'plan',
@@ -305,7 +305,7 @@ describe('exit-code matrix (AC-3)', () => {
   }, 60_000);
 });
 
-describe('entry-point dispatch (F12 / AC-1)', () => {
+describe('entry-point dispatch', () => {
   it('intervene records an entry and rejects bad flags', () => {
     const record = runCli(
       ['intervene', '--work', work, '--target', 'critic', 'check', 'the', 'cutover'],
@@ -358,6 +358,30 @@ describe('entry-point dispatch (F12 / AC-1)', () => {
     const result = runCli(['status', '999999'], baseEnv());
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('PID 999999 not found');
+  });
+
+  it('status --store with no value exits 2', () => {
+    const result = runCli(['status', '--store'], baseEnv());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('status --store requires a directory');
+  });
+
+  it('status --store combined with a PID exits 2', () => {
+    const result = runCli(['status', '--store', path.join(tmp, 'state'), '999999'], baseEnv());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('status --store cannot be combined with a PID');
+  });
+
+  it('status rejects an unknown flag with exit 2', () => {
+    const result = runCli(['status', '--bogus'], baseEnv());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('unknown flag: --bogus');
+  });
+
+  it('status --help lists the --store flag', () => {
+    const result = runCli(['status', '--help'], baseEnv());
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('--store <dir>');
   });
 
   it('the plan stage runs the loop under an explicit plan subcommand', () => {
@@ -456,7 +480,7 @@ describe('runner auth preflight', () => {
   });
 });
 
-describe('default artifact root (AC-14, AC-16)', () => {
+describe('default artifact root', () => {
   it('writes functional + system artifacts under ~/.agent-quorum and leaves ~/.claude untouched', () => {
     const home = path.join(tmp, 'home');
     const claudePlans = path.join(home, '.claude', 'plans');

@@ -11,9 +11,9 @@ export interface CliResult {
   stderr: string;
 }
 
-export type EnvOverrides = Record<string, string | undefined>;
+export type EnvOverrides = Readonly<Record<string, string | undefined>>;
 
-export function runCli(args: readonly string[], env: EnvOverrides = {}, input?: string): CliResult {
+function mergedEnv(env: EnvOverrides): NodeJS.ProcessEnv {
   const merged: NodeJS.ProcessEnv = { ...process.env };
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) {
@@ -22,10 +22,20 @@ export function runCli(args: readonly string[], env: EnvOverrides = {}, input?: 
       merged[key] = value;
     }
   }
+  return merged;
+}
+
+export function runCli(
+  args: readonly string[],
+  env: EnvOverrides = {},
+  input?: string,
+  cwd?: string,
+): CliResult {
   const result: SpawnSyncReturns<string> = spawnSync(TSX_BIN, [MAIN_TS, ...args], {
     encoding: 'utf8',
-    env: merged,
+    env: mergedEnv(env),
     ...(input === undefined ? {} : { input }),
+    ...(cwd === undefined ? {} : { cwd }),
     timeout: 120_000,
   });
   return {
@@ -40,16 +50,12 @@ export function runCli(args: readonly string[], env: EnvOverrides = {}, input?: 
 export async function runCliAsync(
   args: readonly string[],
   env: EnvOverrides = {},
+  cwd?: string,
 ): Promise<CliResult> {
-  const merged: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) {
-      Reflect.deleteProperty(merged, key);
-    } else {
-      merged[key] = value;
-    }
-  }
-  const child = spawn(TSX_BIN, [MAIN_TS, ...args], { env: merged });
+  const child = spawn(TSX_BIN, [MAIN_TS, ...args], {
+    env: mergedEnv(env),
+    ...(cwd === undefined ? {} : { cwd }),
+  });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk: Buffer) => {

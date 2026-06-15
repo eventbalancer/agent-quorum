@@ -24,7 +24,8 @@ import {
   runPlanLoop,
 } from '../../src/index.js';
 import { resetConfigCache } from '../../src/core/config.js';
-import { readRunRecords } from '../../src/core/run-store.js';
+import { readRunRecords, writeRunRecord, type RunRecordDraft } from '../../src/core/run-store.js';
+import { pgidOf, procStartToken } from '../../src/runtime/proc.js';
 import {
   captureStderr,
   emptyCritique,
@@ -33,6 +34,9 @@ import {
   writeFakeBin,
   writePlanLoopConfig,
   writeStructuredPlanFile,
+  withCwd,
+  withCwdAsync,
+  withEnv,
   withEnvAsync,
   type StderrCapture,
 } from '../helpers/harness.js';
@@ -56,6 +60,23 @@ function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
     AGENT_QUORUM_RESUME: undefined,
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     ...extra,
+  };
+}
+
+function liveDraft(name: string, store: string): RunRecordDraft {
+  return {
+    name,
+    pid: process.pid,
+    pgid: pgidOf(process.pid) ?? '0',
+    procStartToken: procStartToken(process.pid) ?? 'tok',
+    mode: 'plan',
+    inputPath: path.join(tmp, `${name}.md`),
+    workDir: path.join(store, 'work'),
+    logPath: path.join(store, 'work', 'run.log'),
+    plansDir: path.join(tmp, 'plans'),
+    startedAt: '2026-06-15T00:00:00Z',
+    effort: 'low',
+    state: 'running',
   };
 }
 
@@ -294,13 +315,16 @@ describe('runPlanLoop (in-process)', () => {
 
 describe('getRunStatus (in-process)', () => {
   it('reports no active runs against an empty registry', async () => {
-    const result = await withEnvAsync(
-      {
-        AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
-        AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
-        AGENT_QUORUM_STATUS_SCAN_PS: '0',
-      },
-      () => getRunStatus(),
+    const result = await withCwdAsync(tmp, () =>
+      withEnvAsync(
+        {
+          AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+          AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+          AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+          AGENT_QUORUM_STATUS_SCAN_PS: '0',
+        },
+        () => getRunStatus(),
+      ),
     );
     expect(result.exitCode).toBe(0);
     expect(capture.text()).toContain('no agent-quorum runs currently active');
@@ -368,6 +392,7 @@ describe('launchPlanLoop (in-process)', () => {
     const statusEnv = {
       AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
       AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
       AGENT_QUORUM_STATUS_SCAN_PS: '0',
     };
     let byPid = { exitCode: -1, output: '' };
@@ -378,7 +403,7 @@ describe('launchPlanLoop (in-process)', () => {
     expect(byPid.exitCode).toBe(0);
     expect(byPid.output).toContain('━━ input ━━');
     expect(byPid.output).toContain(`PID=${pid}`);
-    const listing = await withEnvAsync(statusEnv, () => getRunStatus());
+    const listing = await withCwdAsync(tmp, () => withEnvAsync(statusEnv, () => getRunStatus()));
     expect(listing.exitCode).toBe(0);
     expect(listing.output).toContain('found 1 agent-quorum run(s)');
 
@@ -513,7 +538,7 @@ describe('typed workDir/configFile options', () => {
   }, 30_000);
 });
 
-describe('library selector API (AC-7, AC-12)', () => {
+describe('library selector API', () => {
   it('resolves a run created under a custom home via {home} without touching env', async () => {
     const home = path.join(tmp, 'home');
     const result = await withEnvAsync(
@@ -542,7 +567,9 @@ describe('library selector API (AC-7, AC-12)', () => {
     expect(getRun('input', { home })?.runId).toBe(runId);
     expect(getRun(runId, { home })?.name).toBe('input');
     expect(getRunLogPath('input', { home })).toBe(path.join(canonicalWork, 'run.log'));
-    expect(listRuns({ home }).map((record) => record.name)).toContain('input');
+    // home overrides the root but still aggregates; isolate cwd so the
+    // project-local store does not leak host runs into this assertion.
+    expect(withCwd(tmp, () => listRuns({ home })).map((record) => record.name)).toContain('input');
 
     const intervention = interveneRun('input', 'check the cutover', 'all', { home });
     expect(intervention.exitCode).toBe(0);
@@ -564,5 +591,52 @@ describe('library selector API (AC-7, AC-12)', () => {
     const dead = await withEnvAsync(env, () => getRunStatus(999999));
     expect(dead.exitCode).toBe(2);
     expect(typeof dead.output).toBe('string');
+  });
+});
+
+describe('library cross-store discovery', () => {
+  it('listRuns() aggregates a non-ambient project-local store and matches the CLI listing', async () => {
+    const realTmp = realpathSync(tmp);
+    const projStore = path.join(realTmp, '.agents', 'plans', '.runs');
+    writeRunRecord(projStore, liveDraft('proj-run', projStore));
+
+    const env = {
+      AGENT_QUORUM_HOME: path.join(realTmp, 'home'),
+      AGENT_QUORUM_PLANS_DIR: undefined,
+      AGENT_QUORUM_STATE_DIR: undefined,
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
+    };
+    const aggregated = await withCwdAsync(realTmp, () => withEnvAsync(env, () => listRuns()));
+    expect(aggregated.map((record) => record.name)).toContain('proj-run');
+
+    const listing = await withCwdAsync(realTmp, () => withEnvAsync(env, () => getRunStatus()));
+    expect(listing.exitCode).toBe(0);
+    expect(listing.output).toContain('proj-run');
+  });
+
+  it('listRuns({ store }) returns only that store', () => {
+    const storeA = path.join(tmp, 'store-a');
+    const storeB = path.join(tmp, 'store-b');
+    writeRunRecord(storeA, liveDraft('only-a', storeA));
+    writeRunRecord(storeB, liveDraft('only-b', storeB));
+    expect(listRuns({ store: storeA }).map((record) => record.name)).toEqual(['only-a']);
+  });
+
+  it('home overrides the root but still aggregates, while store scopes to one ledger', () => {
+    const realTmp = realpathSync(tmp);
+    const home = path.join(realTmp, 'home');
+    const homeStore = path.join(home, 'state');
+    const projStore = path.join(realTmp, '.agents', 'plans', '.runs');
+    writeRunRecord(homeStore, liveDraft('home-run', homeStore));
+    writeRunRecord(projStore, liveDraft('proj-run', projStore));
+
+    const aggregated = withEnv(
+      { AGENT_QUORUM_PLANS_DIR: undefined, AGENT_QUORUM_STATE_DIR: undefined },
+      () => withCwd(realTmp, () => listRuns({ home })),
+    ).map((record) => record.name);
+    expect(aggregated).toContain('home-run');
+    expect(aggregated).toContain('proj-run');
+
+    expect(listRuns({ store: homeStore }).map((record) => record.name)).toEqual(['home-run']);
   });
 });

@@ -4,8 +4,10 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -188,6 +190,32 @@ export function readRunRecords(stateDir: string): RunRecord[] {
   return records;
 }
 
+function canonicalExistingStoreDir(stateDir: string): string | undefined {
+  try {
+    if (!statSync(stateDir).isDirectory()) {
+      return undefined;
+    }
+    return realpathSync(stateDir);
+  } catch {
+    return undefined;
+  }
+}
+
+// Read-only union across stores: missing stores are skipped, and aliases read once.
+export function readRunRecordsAcross(stateDirs: readonly string[]): RunRecord[] {
+  const seen = new Set<string>();
+  const records: RunRecord[] = [];
+  for (const stateDir of stateDirs) {
+    const canonical = canonicalExistingStoreDir(stateDir);
+    if (canonical === undefined || seen.has(canonical)) {
+      continue;
+    }
+    seen.add(canonical);
+    records.push(...readRunRecords(canonical));
+  }
+  return records;
+}
+
 // A `running` record is live only when its pid is alive AND still carries the
 // recorded pgid and start token — the start token rejects a record whose pid was
 // recycled by an unrelated process that happens to share the pgid. A stale
@@ -252,7 +280,7 @@ export function retentionKeepCount(): number {
 
 // Bound the ledger by removing only terminal records (state on disk is not
 // `running`) beyond `keepCount` most-recent, or older than `maxAgeDays`.
-// Functional workdirs are never touched (AC-9: prune removes records only).
+// Functional workdirs are never touched; prune removes records only.
 export function pruneRuns(stateDir: string, policy: RetentionPolicy = {}): PruneResult {
   const { keepCount, maxAgeDays, dryRun } = resolveRetention(policy);
   const records = readRunRecords(stateDir);
