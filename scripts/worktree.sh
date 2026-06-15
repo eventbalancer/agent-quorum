@@ -6,17 +6,21 @@
 #   create <slug> (--desc <text> | --desc-file <path>) [--from <ref>]
 #   list
 #   touch <slug|path|branch>
+#   done <slug|path|branch>
+#   reopen <slug|path|branch>
 #   release <slug|path|branch> [--into <ref>]
 #
-# Two durable carriers live in each worktree's git admin dir (outside any working
-# tree, pruned when the worktree is removed): a task description (agent-quorum-task.md)
-# and a TTL-stamped active-edit marker (agent-quorum-active-edit.json).
+# Durable carriers live in each worktree's git admin dir (outside any working
+# tree, pruned when the worktree is removed): a task description (agent-quorum-task.md),
+# a TTL-stamped active-edit marker (agent-quorum-active-edit.json), and, once the
+# session is marked done, a done marker (agent-quorum-done.json).
 set -euo pipefail
 
 readonly ACTIVE_EDIT_TTL_SECONDS=900
 readonly DEFAULT_REF="main"
 readonly RECORD_FILE="agent-quorum-task.md"
 readonly MARKER_FILE="agent-quorum-active-edit.json"
+readonly DONE_FILE="agent-quorum-done.json"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -55,6 +59,24 @@ iso_to_epoch() {
     || date -u -d "$iso" +%s 2>/dev/null
 }
 
+json_string_field() {
+  local file="$1" field="$2"
+  sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file"
+}
+
+branch_integration_note() {
+  local branch="$1"
+  local note="integration into $DEFAULT_REF unknown ('$DEFAULT_REF' did not resolve)"
+  if git -C "$root" rev-parse --verify --quiet "$DEFAULT_REF" >/dev/null; then
+    if git -C "$root" merge-base --is-ancestor "refs/heads/$branch" "$DEFAULT_REF"; then
+      note="integrated into $DEFAULT_REF; 'worktree release $branch' can remove it"
+    else
+      note="not yet integrated into $DEFAULT_REF; integrate via /ship before releasing"
+    fi
+  fi
+  printf '%s' "$note"
+}
+
 write_marker() {
   local admin="$1" branch="$2" started_at="$3" refreshed_at="$4"
   cat >"$admin/$MARKER_FILE" <<EOF
@@ -65,6 +87,19 @@ write_marker() {
   "host": "$(hostname)",
   "pid": $$,
   "ttlSeconds": $ACTIVE_EDIT_TTL_SECONDS
+}
+EOF
+}
+
+# Stamp the terminal done marker. Its presence makes edit_status read "done" and
+# the selection gate skip the worktree by default; `reopen` removes it.
+write_done_marker() {
+  local admin="$1" branch="$2" done_at="$3"
+  cat >"$admin/$DONE_FILE" <<EOF
+{
+  "branch": "$branch",
+  "doneAt": "$done_at",
+  "host": "$(hostname)"
 }
 EOF
 }
@@ -158,10 +193,21 @@ resolve_worktree() {
 # a dirty tree or anything unknown reads "possibly active", never idle.
 edit_status() {
   local admin="$1" path="$2" now_epoch="$3"
+  local done_marker="$admin/$DONE_FILE"
+  if [ -n "$admin" ] && [ -f "$done_marker" ]; then
+    local done_at
+    done_at="$(json_string_field "$done_marker" "doneAt")"
+    if [ -n "$done_at" ]; then
+      echo "done (marked $done_at)"
+    else
+      echo "done"
+    fi
+    return
+  fi
   local marker="$admin/$MARKER_FILE"
   if [ -n "$admin" ] && [ -f "$marker" ]; then
     local refreshed_at refreshed_epoch
-    refreshed_at="$(sed -n 's/.*"refreshedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$marker")"
+    refreshed_at="$(json_string_field "$marker" "refreshedAt")"
     refreshed_epoch="$(iso_to_epoch "$refreshed_at" || true)"
     if [ -n "$refreshed_epoch" ]; then
       local age=$((now_epoch - refreshed_epoch))
@@ -338,6 +384,45 @@ cmd_touch() {
   echo "[worktree] refreshed active-edit marker: $marker"
 }
 
+cmd_done() {
+  if [ "$#" -lt 1 ]; then
+    echo "usage: scripts/worktree.sh done <slug|path|branch>" >&2
+    exit 2
+  fi
+  resolve_worktree "$1" 1
+  local dir="$RESOLVED_PATH" branch="$RESOLVED_BRANCH" admin now
+  admin="$(git -C "$dir" rev-parse --absolute-git-dir)"
+  now="$(iso_now)"
+  write_done_marker "$admin" "$branch" "$now"
+  echo "[worktree] marked done: $branch"
+  echo "  path:   $dir"
+  echo "  done:   $admin/$DONE_FILE"
+  echo "  branch: $(branch_integration_note "$branch")"
+  echo "The selection gate now skips this worktree by default; reopen with 'worktree:reopen $branch'."
+}
+
+cmd_reopen() {
+  if [ "$#" -lt 1 ]; then
+    echo "usage: scripts/worktree.sh reopen <slug|path|branch>" >&2
+    exit 2
+  fi
+  resolve_worktree "$1" 1
+  local dir="$RESOLVED_PATH" branch="$RESOLVED_BRANCH" admin
+  admin="$(git -C "$dir" rev-parse --absolute-git-dir)"
+  local done_marker="$admin/$DONE_FILE"
+  if [ ! -f "$done_marker" ]; then
+    echo "worktree reopen: '$branch' is not marked done (no $done_marker)" >&2
+    exit 1
+  fi
+  rm -f "$done_marker"
+  local marker="$admin/$MARKER_FILE"
+  if [ -f "$marker" ]; then
+    refresh_marker "$marker"
+  fi
+  echo "[worktree] reopened: $branch (cleared done marker; back in the selection gate)"
+  echo "  path:   $dir"
+}
+
 assert_release_invoked_outside_target() {
   local dir="$1"
   local here
@@ -394,7 +479,7 @@ cmd_release() {
 
 main() {
   if [ "$#" -lt 1 ]; then
-    echo "usage: scripts/worktree.sh <create|list|touch|release> ..." >&2
+    echo "usage: scripts/worktree.sh <create|list|touch|done|reopen|release> ..." >&2
     exit 2
   fi
   local sub="$1"
@@ -403,10 +488,12 @@ main() {
     create) cmd_create "$@" ;;
     list) cmd_list "$@" ;;
     touch) cmd_touch "$@" ;;
+    done) cmd_done "$@" ;;
+    reopen) cmd_reopen "$@" ;;
     release) cmd_release "$@" ;;
     *)
       echo "worktree: unknown subcommand '$sub'" >&2
-      echo "usage: scripts/worktree.sh <create|list|touch|release> ..." >&2
+      echo "usage: scripts/worktree.sh <create|list|touch|done|reopen|release> ..." >&2
       exit 2
       ;;
   esac

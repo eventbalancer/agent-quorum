@@ -186,6 +186,27 @@ Integrate to `main` via `/ship` plus an explicit merge or PR step, with conflict
 surfaced there; integration is never automatic. A same-file edit in two sessions
 yields a surfaced conflict, not silent loss.
 
+Mark a finished session done instead of leaving it in the active rotation. This
+keeps the tree for reference but tells the selection gate to ignore it:
+
+```bash
+pnpm run worktree:done <slug>     # a path or branch also works; allowed from inside
+pnpm run worktree:reopen <slug>   # clear the marker and resume work
+```
+
+`done` writes a third durable carrier, `agent-quorum-done.json`, into the
+worktree's git admin directory. It is a soft marker: it does not require the
+branch to be integrated, only reports that status, and never blocks. From then on
+the [selection gate](worktree-selection-gate.md) skips the worktree by default (it
+is dropped from the menu and the unambiguous-skip count), so future sessions are
+not distracted by finished work. The worktree stays on disk: `worktree:list` shows
+it with a `done (marked <ISO>)` status, `git -C <path> ...` inspects it, and
+`--worktree` / `--include-done` reselect it on explicit request. `reopen` removes
+the marker and refreshes the active-edit marker so the gate attends to it again.
+`/ship` marks the session worktree done automatically after a successful push (opt
+out with `--no-done`); a skipped push, `--dry-run`, or a primary-checkout ship
+leaves it active.
+
 Clean up non-destructively from the primary checkout (not from inside the
 target):
 
@@ -197,7 +218,9 @@ pnpm run worktree:release <slug> --into origin/main
 `release` verifies the integration base resolves, runs a merge-safety preflight
 (`git merge-base --is-ancestor`), aligns `git branch -d`'s own merged-check to
 that base, and removes the worktree then the branch. It refuses dirty or unmerged
-work and removes nothing rather than forcing; there is no `--force` path.
+work and removes nothing rather than forcing; there is no `--force` path. A done
+marker, if present, is pruned with the worktree, so a released session never
+lingers as done.
 
 ### Session worktree acceptance runbook
 
@@ -233,6 +256,14 @@ run manually rather than in the network-guarded test suite.
 - AC-8: a dirty worktree reads active via the fallback; a clean worktree refreshed
   within the TTL reads active via the marker; a clean worktree with a stale marker
   reads "possibly active / uncertain", never idle.
+- AC-9: `worktree:done <slug>` writes `agent-quorum-done.json` in the worktree's
+  admin dir, and `worktree:list` then shows the worktree with a
+  `done (marked <ISO>)` status that wins over the active/dirty fallbacks; the
+  selection gate
+  omits a done worktree from the menu and the unambiguous-skip count, while
+  `--worktree` / `--include-done` still reselect it. `worktree:reopen <slug>`
+  removes the marker and the status returns to active; releasing a done, merged
+  worktree removes it and prunes the marker with it.
 
 ## Linting and Editor Tooling
 

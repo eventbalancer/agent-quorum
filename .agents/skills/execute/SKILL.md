@@ -49,8 +49,15 @@ in a single-worktree checkout.
   or an explicit `(no task description recorded)` indicator, and an active-edit
   marker; act only on the operator-selected worktree.
 - **Unambiguous skip:** present nothing and proceed in place when exactly one
-  candidate exists or the skill is invoked inside a linked session worktree; the
-  primary checkout is a dispatch context, not a candidate.
+  non-done candidate exists or the skill is invoked inside a linked session
+  worktree; the primary checkout is a dispatch context, not a candidate.
+- **Done worktrees:** a session marked done (an `agent-quorum-done.json` marker
+  written by `worktree:done`) is skipped by default - omitted from the menu and
+  from the unambiguous-skip count. It stays in `worktree:list` and is selectable
+  with `--worktree` or surfaced with `--include-done`; confirm before acting and
+  offer `worktree:reopen` when resuming work. When every candidate is done, do
+  not act on the primary checkout - ask for `--worktree`/`--include-done`, a
+  reopen, or a new worktree.
 - **Explicit target:** `--worktree <branch|path>` bypasses the menu only. Match
   it exactly against `git worktree list --porcelain` and stop on zero or multiple
   matches. It still requires confirmation when the target may be actively edited
