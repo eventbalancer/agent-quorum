@@ -94,10 +94,14 @@ populates when the worktree is created (FR-4). A worktree with no recorded
 description still appears as an option, showing its git identifier and the
 explicit missing-description indicator rather than being omitted.
 
-The record's storage location and format are owned by the upstream isolation
-design; this gate only consumes the record through a lookup keyed by worktree
-path or branch. Until upstream finalizes that binding (OQ1), the git-only
-fallback is authoritative: do not hard-code a record location or format here.
+The record is `agent-quorum-task.md` inside the worktree's git admin directory,
+located with `git -C <path> rev-parse --absolute-git-dir` (the same admin dir the
+primary/linked distinction above already computes). Every worktree created through
+`pnpm run worktree:create` writes this record, so the in-flow path always carries a
+description; the gate consumes it through that admin dir, keyed by worktree path or
+branch. When the file is absent — a worktree created outside the `worktree:create`
+flow — fall back to the git-only behavior and show the
+`(no task description recorded)` indicator.
 
 ## Active-edit signal (FR-6, NFR-4)
 
@@ -106,7 +110,10 @@ worktree (FR-6). The signal is conservative (NFR-4): when session attribution is
 unavailable or uncertain, indicate possible live editing rather than asserting
 the worktree is idle. Resolve it through this fallback chain:
 
-1. an upstream per-session active-edit marker, when one exists;
+1. the per-session active-edit marker `agent-quorum-active-edit.json` in the same
+   git admin directory, read as active when `now - refreshedAt <= ttlSeconds`
+   (default 900); a missing, stale, or unreadable marker falls through to the next
+   step rather than reading idle;
 2. otherwise a dirty working tree (`git -C <path> status --porcelain`) or a
    locked worktree, used as a "possibly being edited" proxy;
 3. otherwise, since git carries no per-session attribution, surface uncertainty

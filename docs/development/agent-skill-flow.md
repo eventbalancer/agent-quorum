@@ -75,6 +75,9 @@ Completed investigation:
 Already clear prompt task:
   /prompt-architect -> confirmed run
 
+Before nontrivial implementation (multi-file or potentially concurrent):
+  pnpm run worktree:create <slug> --desc "<task>" -> work inside the worktree
+
 After implementation (a confirmed run, /execute, or a direct edit):
   /tidy -> /ship
 ```
@@ -83,6 +86,16 @@ After implementation (a confirmed run, /execute, or a direct edit):
 context and hand it downstream. `/prompt-architect` saves the prompt, prints the
 run profiles, and starts the selected run only after explicit operator
 confirmation.
+
+Nontrivial, multi-file, or potentially concurrent implementation runs inside a
+session worktree created with `pnpm run worktree:create <slug> --desc "<task>"`
+before the implement, `/tidy`, and `/ship` steps; see the
+[Session Worktrees](conventions.md#session-worktrees) convention. `worktree:create`
+writes the two carriers the [Worktree selection gate](worktree-selection-gate.md)
+consumes — the durable task description (`agent-quorum-task.md`) and the active-edit
+marker (`agent-quorum-active-edit.json`) in the worktree's git admin dir — so
+`tidy`, `ship`, and `execute` can target the right worktree and `worktree:release`
+cleans both up.
 
 ## Stage Contracts
 

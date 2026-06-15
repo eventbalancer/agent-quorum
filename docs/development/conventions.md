@@ -126,6 +126,106 @@ up through the `prepare` lifecycle script so any fresh clone works after
 install. Never pass `--no-verify` to bypass the hook; the conventions forbid
 it.
 
+## Session Worktrees
+
+Multiple agent sessions share one repository. To keep a session's work isolated,
+nontrivial work runs in its own linked git worktree on a `session/<slug>` branch,
+so the unmodified pre-commit hook stages and validates only that tree.
+
+Use a session worktree for nontrivial, multi-file, or potentially concurrent
+work; trivial solo edits may stay in the shared checkout.
+
+Start one with a required task description, so a durable record always exists:
+
+```bash
+pnpm run worktree:create <slug> --desc "<what this worktree is for>"
+pnpm run worktree:create <slug> --desc-file path/to/task.md
+pnpm run worktree:create <slug> --desc "..." --from origin/main   # base off the remote
+```
+
+This creates the worktree at `$HOME/.agent-quorum/worktrees/agent-quorum/<slug>`
+on branch `session/<slug>`, runs `pnpm install --frozen-lockfile` there, and
+writes two carriers into the worktree's git admin directory (outside any working
+tree, so the hook never sees them): the task description `agent-quorum-task.md`
+and the active-edit marker `agent-quorum-active-edit.json`. The per-worktree
+install reuses pnpm's global content-addressable store, so a warm store hardlinks
+rather than re-downloads.
+
+Enter the worktree with the harness `EnterWorktree <path>` tool, or `cd <path>`,
+and run every command — including `pnpm run check`, the per-worktree definition of
+done — inside it. For work already begun in the shared checkout, carry it over
+with a patch rather than re-editing: `git -C <shared> diff > /tmp/wip.patch`, then
+`git apply /tmp/wip.patch` inside the worktree.
+
+The hook is byte-for-byte unchanged; isolation comes from where it runs. Its
+relative `core.hooksPath` (`.githooks`) resolves against each worktree's own
+checkout top. A linked worktree's `.git` is a file, so its own `prepare` step
+skips the `[ -d .git ]` guard and does not set the config; `worktree:create`
+therefore sets `core.hooksPath` explicitly after `git worktree add`. A
+`git commit` inside the worktree then runs `git add -u` and `pnpm run check`
+against only that worktree's tree.
+
+Commit rules are unchanged: plain-ASCII messages, `Closes #<n>` / `Refs #<n>`
+issue linking, and never `--no-verify`.
+
+Refresh the active-edit marker so other sessions can see the worktree is live:
+`worktree:create` writes it, and `pnpm run worktree:touch <slug>` refreshes it.
+Run `touch` at the start of a work burst and before each verification or commit.
+The selection gate's dirty-tree fallback covers any lapse, so a stale marker
+never reads idle.
+
+Integrate to `main` via `/ship` plus an explicit merge or PR step, with conflicts
+surfaced there; integration is never automatic. A same-file edit in two sessions
+yields a surfaced conflict, not silent loss.
+
+Clean up non-destructively from the primary checkout (not from inside the
+target):
+
+```bash
+pnpm run worktree:release <slug>                  # integration base defaults to main
+pnpm run worktree:release <slug> --into origin/main
+```
+
+`release` verifies the integration base resolves, runs a merge-safety preflight
+(`git merge-base --is-ancestor`), aligns `git branch -d`'s own merged-check to
+that base, and removes the worktree then the branch. It refuses dirty or unmerged
+work and removes nothing rather than forcing; there is no `--force` path.
+
+### Session worktree acceptance runbook
+
+These checks are operational — they need two trees and a real install, so they
+run manually rather than in the network-guarded test suite.
+
+- AC-1/AC-2: with dirty changes in the primary checkout,
+  `pnpm run worktree:create demo --desc "<task>"`; confirm the hook precondition
+  (`git -C <wt> config --get core.hooksPath` is `.githooks`,
+  `<wt>/.githooks/pre-commit` exists). Make a tracked edit in the worktree, then —
+  as an explicit operator-authorized step — `git commit` inside it and watch the
+  hook run `pnpm run check` green with no `--no-verify`. `git -C <wt> status` shows
+  only the worktree's files; the primary checkout's tracked and untracked changes
+  are unchanged. Tear the proof down with no forbidden command:
+  `git -C <wt> reset --soft HEAD~1` and
+  `git -C <wt> restore --staged --worktree -- <file>`, then
+  `pnpm run worktree:release demo` from the primary checkout.
+- AC-3: in a fresh worktree, `pnpm run check` runs green after the documented
+  `pnpm install --frozen-lockfile`.
+- AC-4: this section documents the start, commit, handoff, and marker-refresh
+  cadence.
+- AC-5: the session branch reaches `main` via `/ship` plus the explicit merge/PR
+  step; a same-file edit in two sessions yields a surfaced conflict, not silent
+  loss.
+- AC-6: run `release` from the primary checkout. For an unmerged branch it refuses
+  at the merge-safety preflight and removes nothing; invoking it on the worktree
+  you stand in refuses cleanly. After integration (or after resetting a disposable
+  proof commit off), `release` removes the worktree and branch, leaving the path
+  absent from `git worktree list --porcelain` and `git branch --list 'session/demo'`
+  empty, with unrelated `session/*` worktrees untouched; no force flag is ever used.
+- AC-7: from another session, `git -C <wt> rev-parse --absolute-git-dir` then
+  reading `agent-quorum-task.md` returns the description supplied at `create`.
+- AC-8: a dirty worktree reads active via the fallback; a clean worktree refreshed
+  within the TTL reads active via the marker; a clean worktree with a stale marker
+  reads "possibly active / uncertain", never idle.
+
 ## Linting and Editor Tooling
 
 - ESLint is flat-config only (`eslint.config.ts`). Do not add `.eslintrc*` files.

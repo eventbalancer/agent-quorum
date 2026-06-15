@@ -200,6 +200,10 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 - [`docs/development/worktree-selection-gate.md`](docs/development/worktree-selection-gate.md)
   — the upfront target-worktree selection protocol shared by `tidy`, `ship`, and
   `execute`.
+- [Session Worktrees](docs/development/conventions.md#session-worktrees) — the
+  per-session worktree lifecycle (`worktree:create`, `worktree:list`,
+  `worktree:touch`, `worktree:release`)
+  that isolates concurrent sessions.
 - [`examples/`](examples/) — runnable CLI and API walkthroughs of the loop.
 
 ## Development
