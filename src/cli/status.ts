@@ -457,7 +457,7 @@ interface InterventionStatusLine {
   latest: string;
 }
 
-function operatorInterventionsStatus(work: string): InterventionStatusLine {
+export function operatorInterventionsStatus(work: string): InterventionStatusLine {
   const file = path.join(work, 'operator-interventions.jsonl');
   if (!nonEmptyFile(file)) {
     return { total: '0', active: '0', migrated: '0', latest: '—' };

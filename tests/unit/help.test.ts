@@ -41,6 +41,12 @@ describe('help text', () => {
     expect(packageVersion()).toBe(pkg.version);
   });
 
+  it('globalHelp advertises the interactive shell entry surface', () => {
+    expect(globalHelp(STAGE_SUMMARIES)).toContain(
+      'in a TTY, run agent-quorum with no command to open the interactive shell.',
+    );
+  });
+
   it('globalHelp embeds defaults from a readable config', () => {
     const config = path.join(tmp, 'agent-quorum.json');
     writeFileSync(

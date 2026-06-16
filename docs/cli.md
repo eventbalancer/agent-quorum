@@ -12,10 +12,14 @@ Within each entry point the flags, positionals, unknown-flag rejection, and exit
 codes are identical to the reference scripts, with one documented deviation: an
 explicit `-h`/`--help` prints usage to **stdout** and exits **0** (the reference
 run/intervene scripts replied on stderr with exit 1). Error-path usage output
-keeps the reference streams and exit codes. `agent-quorum` with no arguments (or
-`--help`) prints the global help (stages, run-lifecycle commands, and the
-effective defaults from the resolved `agent-quorum.json`); `agent-quorum
---version`/`-V` prints the package version.
+keeps the reference streams and exit codes. With no arguments in a dual-TTY
+terminal (both stdin and stdout are TTYs), `agent-quorum` opens the
+[interactive shell](interactive-shell.md); with no arguments in any
+non-interactive context — piped or redirected stdio — or with `--help`/`-h`, it
+prints the global help (stages, run-lifecycle commands, the additive
+interactive-shell line, and the effective defaults from the resolved
+`agent-quorum.json`); `agent-quorum --version`/`-V` prints the package version,
+byte-identical.
 
 ANSI color is emitted only when the target stream is a TTY and `NO_COLOR` is
 unset or empty ([no-color.org](https://no-color.org) semantics) — redirected
@@ -26,6 +30,20 @@ plan, source, tool-argument, and raw provider stderr bodies are not mirrored to
 normal output. On a non-zero provider exit, `agent-quorum` emits one compact
 `<role>/<provider> call failed` summary with status, captured stderr line
 count, and a classified reason when one is recognized.
+
+## Interactive shell
+
+In a dual-TTY terminal, `agent-quorum` with no command opens a full-screen,
+keyboard-first shell over the existing run lifecycle — discover runs grouped by
+store, inspect detail, follow `run.log`, launch, intervene, and stop, all from
+one control surface. It is built only on `node:readline` raw-mode keypresses and
+raw ANSI, with no new dependency. Opening the shell performs no mutation: it
+reads ledger and artifact metadata and starts a read-only refresh; launch,
+intervene, and a typed-name-confirmed stop are the only write paths. Every other
+no-argument path (piped or redirected stdio, `--help`/`-h`) is unchanged and
+still prints the global help. See the [interactive shell
+runbook](interactive-shell.md) for keys, views, and the `NO_COLOR`/80×24
+behavior.
 
 ## Plan stage — `agent-quorum plan [flags] <plan.md>`
 

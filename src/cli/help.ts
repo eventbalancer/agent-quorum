@@ -120,6 +120,8 @@ export function globalHelp(stages: readonly StageSummary[]): string {
     '  prune       remove terminal run records beyond the retention bound\n' +
     '  intervene   append an operator intervention to a run’s ledger\n' +
     '\n' +
+    'in a TTY, run agent-quorum with no command to open the interactive shell.\n' +
+    '\n' +
     'agent-quorum <command> --help prints command-specific usage.\n' +
     'agent-quorum --version (or -V, as the first argument) prints the package version.\n' +
     defaultsLine()
