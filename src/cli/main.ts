@@ -5,6 +5,7 @@ import { globalHelp, packageVersion, type StageSummary } from './help.js';
 import { runInterveneCli } from './intervene.js';
 import { runLaunchCli } from './launch.js';
 import { runLogsCli, runPruneCli, runShowCli } from './runs.js';
+import { openShellOrHelp, runShell } from './shell/index.js';
 import { runStatusCliInteractive } from './status.js';
 
 process.title = 'agent-quorum';
@@ -25,7 +26,13 @@ async function main(): Promise<number> {
     summary: stage.summary,
   }));
   const first = args[0];
-  if (first === undefined || first === '--help' || first === '-h') {
+  if (first === undefined) {
+    return await openShellOrHelp(
+      { input: process.stdin, output: process.stdout },
+      { runShell, writeHelp: () => process.stdout.write(globalHelp(summaries)) },
+    );
+  }
+  if (first === '--help' || first === '-h') {
     process.stdout.write(globalHelp(summaries));
     return 0;
   }
