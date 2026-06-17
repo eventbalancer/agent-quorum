@@ -230,17 +230,11 @@ export async function runLaunchCli(
     env.AGENT_QUORUM_RUN_NAME = name;
   }
 
-  // GC orphaned handoffs from prior launches whose child died before reading,
-  // independent of whether this launch forwards a token of its own.
   sweepHandoffDir(home);
 
-  // Split the override by sensitivity: the non-secret config rides the child env
-  // as JSON, but no bot token ever enters it. The effective token (structured
-  // override, else the parent's ambient one) goes to an owner-only 0600 file
-  // under <home>/handoff/ and only its path is forwarded; the ambient token is
-  // stripped from the child env so `{ ...process.env }` cannot copy it into the
-  // detached child or any provider grandchild. A token sourced only from the
-  // store is not forwarded — the child reads secrets.json from disk.
+  // No bot token ever enters the child env: it goes to an owner-only 0600 handoff
+  // file and only its path is forwarded, and the ambient token is stripped so
+  // `{ ...process.env }` cannot leak it to the detached child or a grandchild.
   if (overrides.config !== undefined) {
     env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON = JSON.stringify(overrides.config);
   }
@@ -276,8 +270,7 @@ export async function runLaunchCli(
     alive = false;
   }
   if (!alive) {
-    // The child unlinks the handoff itself once it reads it; on a startup failure
-    // it never got that far, so the parent removes the owner-only file here.
+    // The child unlinks the handoff once read; on a startup failure the parent removes it.
     if (handoffFile !== undefined && existsSync(handoffFile)) {
       try {
         unlinkSync(handoffFile);

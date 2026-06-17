@@ -150,7 +150,7 @@ describe('agent-quorum init', () => {
         telegramBotToken: 'BOTTOKEN-123',
       });
 
-      // AC-5: a later run notifies using only the store (no env credentials).
+      // A later run notifies using only the store (no env credentials).
       mkdirSync(path.join(tmp, 'work'));
       writeStructuredPlanFile(path.join(tmp, 'input.md'), 'Init Followup');
       emptyCritique(path.join(tmp, 'empty.json'));

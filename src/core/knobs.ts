@@ -4,7 +4,7 @@ import {
   DISABLED_STREAM_KNOBS,
   RUNNER_META,
   RUNNERS,
-  type RunnerMeta,
+  STREAM_RUNNERS,
 } from '../providers/registry.js';
 import type { Runner } from '../types.js';
 import type { StreamKnobs } from '../providers/watchdog.js';
@@ -34,28 +34,25 @@ function streamKnobs(knobs: ResolvedStreamKnobs): StreamKnobs {
   };
 }
 
-// Project the resolved knob values onto the watchdog shape, deriving the per-runner
-// stream map from RUNNER_META: streaming runners use their resolved knobs, others
-// the disabled sentinel. resolveConfig has already validated the values as
-// non-negative integers; the claude poll must additionally be positive (a zero
-// poll would busy-loop the watchdog).
+// Runners whose RUNNER_META sets requirePositivePoll must reject a zero poll on
+// top of resolveConfig's non-negative check: a zero poll would busy-loop the watchdog.
 export function resolveWatchdogKnobs(resolved: ResolvedConfig): WatchdogKnobs {
   const knobs = resolved.knobs;
-  if (!(knobs.claude.pollSeconds > 0)) {
-    throw new HaltError('AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS expects a positive integer', 1);
+  for (const runner of STREAM_RUNNERS) {
+    const meta = RUNNER_META[runner];
+    if (meta.stream.requirePositivePoll && !(knobs[runner].pollSeconds > 0)) {
+      throw new HaltError(
+        `AGENT_QUORUM_${meta.stream.envPrefix}_STALL_POLL_SECONDS expects a positive integer`,
+        1,
+      );
+    }
   }
-  const resolvedStream: Partial<Record<Runner, ResolvedStreamKnobs>> = {
-    claude: knobs.claude,
-    cursor: knobs.cursor,
-  };
   const stream = {} as Record<Runner, StreamKnobs>;
   for (const runner of RUNNERS) {
-    const meta: RunnerMeta = RUNNER_META[runner];
-    const resolvedRunnerKnobs = resolvedStream[runner];
-    stream[runner] =
-      meta.stream !== undefined && resolvedRunnerKnobs !== undefined
-        ? streamKnobs(resolvedRunnerKnobs)
-        : DISABLED_STREAM_KNOBS;
+    stream[runner] = DISABLED_STREAM_KNOBS;
+  }
+  for (const runner of STREAM_RUNNERS) {
+    stream[runner] = streamKnobs(knobs[runner]);
   }
   return {
     stream,

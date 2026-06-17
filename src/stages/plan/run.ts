@@ -419,10 +419,7 @@ function resolveFinalStatus({
   return { status: 'clean', reason: '' };
 }
 
-// Detached-launch forwarding: the non-secret config travels as a child-env JSON
-// var; the bot token travels only as a path to an owner-only file under
-// <home>/handoff/. A present-but-malformed forwarded value fails the run before
-// any provider work rather than being silently dropped.
+// A malformed forwarded value fails the run before any provider work rather than being dropped.
 function readForwardedOverrides(env: NodeJS.ProcessEnv, home: string): ResolveOverrides {
   const overrides: ResolveOverrides = {};
   const configJson = env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON;
@@ -445,12 +442,8 @@ function readForwardedOverrides(env: NodeJS.ProcessEnv, home: string): ResolveOv
   return overrides;
 }
 
-// The forwarded path is a location, not a credential. Canonicalize it and confirm
-// it resolves to a regular file strictly inside <home>/handoff/ BEFORE any unlink,
-// so a hostile env var cannot turn the reader into an arbitrary-file delete and a
-// path resolving to the handoff directory (or a sub-directory) within it fails as
-// a clean HaltError rather than an uncaught EISDIR; then read once and unlink
-// before any provider subprocess can inherit the secret.
+// Confirm the path resolves to a regular file strictly inside <home>/handoff/ before any
+// unlink, so a hostile env var cannot turn the reader into an arbitrary-file delete.
 function readSecretHandoff(filePath: string, home: string): Secrets {
   let dir: string;
   try {
@@ -504,9 +497,8 @@ export async function runPlanLoopCli(
   const parsed = parseRunArgs(args);
 
   const { home, runsDir, stateDir } = resolveArtifactRoots(overrides);
-  // In-process callers pass structured overrides through the typed RunOverrides
-  // channel; a detached child receives the same data via the forwarded env. The
-  // two are mutually exclusive in practice, but typed input wins if both appear.
+  // Typed RunOverrides and the detached child's forwarded env are exclusive in practice;
+  // typed input wins if both appear.
   const forwarded = readForwardedOverrides(process.env, home);
   const configOverrides: ResolveOverrides = {
     cli: parsed.cli,

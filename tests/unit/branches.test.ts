@@ -372,6 +372,21 @@ describe('config and knob halts', () => {
       resolveWatchdogKnobs(resolved({ AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS: '0' })),
     ).toThrow(/expects a positive integer/);
   });
+
+  it('does not require a positive cursor poll yet still validates cursor stream env', () => {
+    const resolved = (env: NodeJS.ProcessEnv = {}) => resolveConfig({ env, home: tmp }).config;
+    expect(() =>
+      resolveWatchdogKnobs(resolved({ AGENT_QUORUM_CURSOR_STALL_POLL_SECONDS: '0' })),
+    ).not.toThrow();
+    const capture = captureStderr();
+    try {
+      expect(() =>
+        resolveConfig({ env: { AGENT_QUORUM_CURSOR_STALL_TIMEOUT_SECONDS: 'soon' }, home: tmp }),
+      ).toThrow(HaltError);
+    } finally {
+      capture.restore();
+    }
+  });
 });
 
 describe('exec escalation', () => {

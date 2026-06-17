@@ -1,7 +1,8 @@
 import os from 'node:os';
 import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
-import { RUNNERS, isRunner } from '../providers/registry.js';
+import { RUNNER_META, RUNNERS, STREAM_RUNNERS, isRunner } from '../providers/registry.js';
+import type { StreamingRunner } from '../providers/registry.js';
 import type { Role, Runner } from '../types.js';
 import { DEFAULT_CONFIG } from './defaults.js';
 import type { SplitMode } from './split-policy.js';
@@ -103,9 +104,6 @@ function localeNeedsTranslation(locale: string): boolean {
   return !/^en([._-]|$)/i.test(locale);
 }
 
-// The three resolve* functions are thin projections of one ResolvedConfig from
-// resolveConfig; run.ts resolves once and threads the result. The role-matrix and
-// tool-permission projections keep the effective-configuration log lines.
 export function resolveRunSettings(resolved: ResolvedConfig): RunSettings {
   return resolved.settings;
 }
@@ -156,11 +154,6 @@ export function runnersInUse(matrix: RoleMatrix, fixPass: 0 | 1, translatePass: 
   return RUNNERS.filter((runner) => seen.has(runner));
 }
 
-// ---------------------------------------------------------------------------
-// Unified configuration store: OperatorConfig (persistable), ResolvedConfig
-// (runtime scalars), and resolveConfig (single layered resolver + provenance).
-// ---------------------------------------------------------------------------
-
 export type DeepPartial<T> = T extends readonly unknown[]
   ? T
   : T extends object
@@ -208,12 +201,10 @@ export interface OperatorPassKnobs {
   retryCount: number;
 }
 
-export interface OperatorKnobs {
-  claude: OperatorStreamKnobs;
-  cursor: OperatorStreamKnobs;
+export type OperatorKnobs = Record<StreamingRunner, OperatorStreamKnobs> & {
   fixPass: OperatorPassKnobs;
   translatePass: OperatorPassKnobs;
-}
+};
 
 export interface OperatorSplit {
   mode: SplitMode;
@@ -271,12 +262,10 @@ export interface ResolvedStreamKnobs {
   semanticTimeoutSeconds: number;
 }
 
-export interface ResolvedKnobs {
-  claude: ResolvedStreamKnobs;
-  cursor: ResolvedStreamKnobs;
+export type ResolvedKnobs = Record<StreamingRunner, ResolvedStreamKnobs> & {
   fixPass: OperatorPassKnobs;
   translatePass: OperatorPassKnobs;
-}
+};
 
 export interface ResolvedTelegram {
   botToken: string;
@@ -421,9 +410,7 @@ function resolveSettings(
   env: NodeJS.ProcessEnv,
   def: OperatorSettings,
 ): RunSettings {
-  // The override tier resolves a top-level scalar flag (parsed.cli) ahead of the
-  // same path in structured config — the explicit per-invocation flag is the more
-  // specific operator intent.
+  // An explicit per-invocation flag (parsed.cli) wins over the same path in structured config.
   const overrideRaw = (cliRaw: Raw, ovRaw: Raw): Raw => (present(cliRaw) ? cliRaw : ovRaw);
 
   const maxItersRaw = selectRaw(
@@ -499,9 +486,7 @@ function resolveSettings(
     'retryDelaySeconds',
   );
 
-  // Locale/translate keep the legacy precedence: an explicit translate toggle
-  // wins at its tier; otherwise a non-English locale implies the pass. cli/config
-  // (override) > env > store throughout, with cli ahead of structured config.
+  // An explicit translate toggle wins at its tier; otherwise a non-English locale implies the pass.
   const cliLocale = normalizeLocale(
     present(cli.locale) ? cli.locale : (rawScalar(ov?.locale) ?? ''),
   );
@@ -694,13 +679,13 @@ function resolvePermissions(
 
 function resolveStreamKnobs(
   prov: Map<string, ConfigLayer>,
-  group: 'claude' | 'cursor',
+  group: StreamingRunner,
   ov: DeepPartial<OperatorStreamKnobs> | undefined,
   store: DeepPartial<OperatorStreamKnobs> | undefined,
   env: NodeJS.ProcessEnv,
   def: OperatorStreamKnobs,
 ): ResolvedStreamKnobs {
-  const upper = group.toUpperCase();
+  const upper = RUNNER_META[group].stream.envPrefix;
   const knob = (field: keyof OperatorStreamKnobs, envName: string, defValue: number): number =>
     resolveInt(
       prov,
@@ -797,23 +782,19 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfigResult {
   const matrix = resolveMatrix(prov, ov.roles, store.roles, env, def.roles);
   const permissions = resolvePermissions(prov, ov.roles, store.roles, def.roles);
 
+  const streamEntries = STREAM_RUNNERS.map((runner) => {
+    const resolved = resolveStreamKnobs(
+      prov,
+      runner,
+      ov.knobs?.[runner],
+      store.knobs?.[runner],
+      env,
+      def.knobs[runner],
+    );
+    return [runner, resolved] as const;
+  });
   const knobs: ResolvedKnobs = {
-    claude: resolveStreamKnobs(
-      prov,
-      'claude',
-      ov.knobs?.claude,
-      store.knobs?.claude,
-      env,
-      def.knobs.claude,
-    ),
-    cursor: resolveStreamKnobs(
-      prov,
-      'cursor',
-      ov.knobs?.cursor,
-      store.knobs?.cursor,
-      env,
-      def.knobs.cursor,
-    ),
+    ...(Object.fromEntries(streamEntries) as Record<StreamingRunner, ResolvedStreamKnobs>),
     fixPass: resolvePassKnobs(
       prov,
       'fixPass',
@@ -1060,7 +1041,7 @@ function resolveProviders(
     'providers.cursorBin',
     overrideThenStore(
       rawScalar(ov.providers?.cursorBin),
-      env.AGENT_QUORUM_CURSOR_BIN,
+      env[RUNNER_META.cursor.binary.envOverride],
       rawScalar(store.providers?.cursorBin),
       rawScalar(def.providers.cursorBin),
     ),

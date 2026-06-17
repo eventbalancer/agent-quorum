@@ -6,10 +6,6 @@ import { DEFAULT_CONFIG } from '../core/defaults.js';
 import { readConfigStore } from '../core/store.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 
-// Single source of the command usage strings — the bin is `agent-quorum`;
-// the reference *.sh names never appear in user-facing output. Stage usage
-// (the plan loop) lives with its stage, not here.
-
 export interface StageSummary {
   readonly name: string;
   readonly summary: string;
@@ -90,9 +86,7 @@ function settingText(value: JsonValue | undefined): string | undefined {
   return undefined;
 }
 
-// Best-effort: surface the effective settings layered over the built-in
-// defaults. A malformed store must not break --help, so any failure simply omits
-// the line; an empty locale default is not shown.
+// A malformed store must not break --help, so any failure omits the defaults line.
 function defaultsLine(): string {
   let settings: Record<string, JsonValue | undefined>;
   try {

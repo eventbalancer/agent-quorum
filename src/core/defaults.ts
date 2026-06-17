@@ -1,3 +1,4 @@
+import { RUNNER_META } from '../providers/registry.js';
 import type { OperatorConfig } from './config.js';
 
 const TOOL_DISALLOWED = [
@@ -13,12 +14,8 @@ const TOOL_DISALLOWED = [
 
 const READ_TOOLS = ['Read', 'Grep', 'Glob'];
 
-// Canonical non-secret configuration: every operator-level default the runtime
-// previously read from agent-quorum.json or inlined env fallbacks, so the store
-// is optional and resolution never touches the package root. Mirrors the values
-// in agent-quorum.example.json, knobs.ts, run-store.ts, channels/telegram/config.ts,
-// providers/{heartbeat,stream-log,runtime}.ts, and the split/diagnostics/status
-// defaults in stages/plan/run.ts and cli/status.ts.
+// Canonical non-secret defaults so the store is optional and resolution never
+// touches the package root. A mirror test keeps these in sync with agent-quorum.example.json.
 export const DEFAULT_CONFIG: OperatorConfig = {
   version: 1,
   settings: {
@@ -102,7 +99,7 @@ export const DEFAULT_CONFIG: OperatorConfig = {
   providers: {
     livenessHeartbeatSeconds: 30,
     claudeThinkingEvery: 3,
-    cursorBin: 'cursor-agent',
+    cursorBin: RUNNER_META.cursor.binary.default,
     providerDiagnostics: false,
   },
   status: { maxPlanLines: 900 },

@@ -7,13 +7,11 @@ export const DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS = 70;
 export const DEFAULT_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS = 120;
 export const DEFAULT_TELEGRAM_RECEIVE_BACKOFF_SECONDS = 2;
 
-// Credential + transport subset every Telegram call needs.
 export interface TelegramTransport {
   readonly botToken: string;
   readonly apiBase: string;
 }
 
-// apiBase and stateDir are env-only, never persisted to the config store.
 export interface TelegramRuntime extends TelegramTransport {
   readonly chatId: string;
   readonly httpTimeoutSeconds: number;
@@ -23,8 +21,6 @@ export interface TelegramRuntime extends TelegramTransport {
   readonly stateDir: string;
 }
 
-// Chat-id discovery runs before a chatId exists, so it omits it and needs only
-// the credential/transport subset (plus the env-only stateDir rendezvous).
 export interface TelegramDiscoveryRuntime extends TelegramTransport {
   readonly stateDir?: string;
 }

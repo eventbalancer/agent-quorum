@@ -19,8 +19,7 @@ export interface InitStreams {
 export interface InitDeps {
   readonly streams?: InitStreams;
   readonly overrides?: RunOverrides;
-  // Discovery seam: tests replace the operator action (send the code to the bot)
-  // with a callback that injects the coded message after the high-water drain.
+  // Test seam: replaces the operator action (send the code) after the drain.
   readonly onReady?: (code: string) => void | Promise<void>;
   readonly discoveryTimeoutSeconds?: number;
   readonly pollIntervalMs?: number;
@@ -57,10 +56,8 @@ export async function runInitCli(args: readonly string[], deps: InitDeps = {}): 
   const rl = createInterface({ input: streams.input, output: streams.output });
   try {
     write('agent-quorum init — first-run setup\n');
-    // A single prompt: capture the credential, then discover the chat id. Other
-    // settings keep their defaults and are editable in config.json, via env, or
-    // inspected with `agent-quorum config` (sequential readline prompts race with
-    // a buffered input chunk, so onboarding intentionally asks only for the token).
+    // Only the token is prompted: sequential readline prompts race with a buffered
+    // input chunk, so the rest stays in config.json/env.
     const token = (await ask(rl, 'Telegram bot token: ')).trim();
     if (token === '') {
       throw new HaltError('agent-quorum init: a bot token is required', 1, true);

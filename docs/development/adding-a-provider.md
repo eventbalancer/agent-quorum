@@ -16,17 +16,21 @@ myprovider: {
   binary: { default: 'myprovider', envOverride: 'AGENT_QUORUM_MYPROVIDER_BIN' }, // envOverride optional
   install: { message: 'myprovider is required' },
   auth: { args: ['auth', 'status'], remedy: (bin) => `${bin} login` },
-  stream: { envPrefix: 'MYPROVIDER', validateEnv: true, requirePositivePoll: true }, // omit for a non-streaming provider
+  stream: { envPrefix: 'MYPROVIDER', requirePositivePoll: true }, // omit for a non-streaming provider
   usesSession: true,
 },
 ```
 
-- `binary.envOverride` is resolved with nullish coalescing, so an empty-string
-  override is passed through verbatim (parity with `AGENT_QUORUM_CURSOR_BIN`).
+- `binary.envOverride` is resolved with nullish coalescing in
+  `resolveRunnerBinaries`, so an empty-string override is kept verbatim. Note
+  that `cursor`'s effective binary comes from config resolution
+  (`providers.cursorBin`, env `AGENT_QUORUM_CURSOR_BIN`), which treats an empty
+  string as absent and falls back to the default.
 - `stream` is optional. Omit it for a non-streaming provider; the watchdog then
-  uses the all-zero `DISABLED_STREAM_KNOBS` sentinel for that runner.
-  `validateEnv` and `requirePositivePoll` gate the env validation independently
-  (claude validates and requires a positive poll; cursor passes through).
+  uses the all-zero `DISABLED_STREAM_KNOBS` sentinel for that runner. `envPrefix`
+  names the runner's `AGENT_QUORUM_<PREFIX>_STALL_*` env vars; `requirePositivePoll`
+  makes the runner reject a zero poll (claude does; cursor does not). All stream
+  env values are validated as non-negative integers regardless of runner.
 
 ## 2. Add the dispatch adapter in `PROVIDER_DISPATCH`
 

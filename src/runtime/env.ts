@@ -4,9 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 let cachedPackageRoot: string | undefined;
 
-// The package root is the nearest ancestor holding both package.json and the
-// skills/ role-prompt directory; the runtime always ships and reads both, so the
-// pair identifies the installed root unambiguously.
+// Both package.json and skills/ always ship together, so the pair pins the installed root.
 export function findPackageRoot(startDir: string): string {
   let dir = startDir;
   for (;;) {

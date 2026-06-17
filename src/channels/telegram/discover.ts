@@ -7,8 +7,7 @@ import { TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS, type TelegramDiscoveryRuntime } fr
 export interface DiscoverChatIdOptions {
   readonly timeoutSeconds: number;
   readonly code: string;
-  // Invoked only after the high-water offset is fixed, so the caller can prompt
-  // the operator to send the code without the reply being swallowed by the drain.
+  // Invoked after the offset is fixed, so the code reply cannot be swallowed by the drain.
   readonly onReady: () => void | Promise<void>;
   readonly pollTimeoutSeconds?: number;
   readonly pollIntervalMs?: number;
@@ -25,9 +24,7 @@ function rawUpdateId(entry: JsonValue): number | undefined {
   return typeof entry.update_id === 'number' ? entry.update_id : undefined;
 }
 
-// The chat id of the first message whose text equals the one-time code, or
-// undefined for any other entry. Matches by code text, not chat, because the chat
-// id is exactly what discovery is trying to learn.
+// Matches by code text, not chat: the chat id is exactly what discovery is learning.
 function matchedChatId(entry: JsonValue, code: string): string | undefined {
   if (!isJsonObject(entry)) {
     return undefined;
@@ -70,9 +67,8 @@ async function getUpdates(
   return Array.isArray(result.body.result) ? result.body.result : [];
 }
 
-// High-water handshake: drain pending updates to fix the offset (so a stale message
-// within Telegram's retention window cannot match), invoke onReady, then long-poll
-// from the high-water offset for the first message whose text equals the code.
+// Drain pending updates to fix a high-water offset before onReady, so a stale message
+// within Telegram's retention window cannot match the code.
 export async function telegramDiscoverChatId(
   runtime: TelegramDiscoveryRuntime,
   options: DiscoverChatIdOptions,

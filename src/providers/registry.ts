@@ -13,7 +13,6 @@ export interface RunnerMeta {
   readonly auth: { readonly args: readonly string[]; readonly remedy: (bin: string) => string };
   readonly stream?: {
     readonly envPrefix: string;
-    readonly validateEnv: boolean;
     readonly requirePositivePoll: boolean;
   };
   readonly usesSession: boolean;
@@ -30,14 +29,14 @@ export const RUNNER_META = {
     binary: { default: 'claude' },
     install: { message: 'claude is required' },
     auth: { args: ['auth', 'status'], remedy: () => 'claude auth login' },
-    stream: { envPrefix: 'CLAUDE', validateEnv: true, requirePositivePoll: true },
+    stream: { envPrefix: 'CLAUDE', requirePositivePoll: true },
     usesSession: true,
   },
   cursor: {
     binary: { default: 'cursor-agent', envOverride: 'AGENT_QUORUM_CURSOR_BIN' },
     install: { message: 'cursor-agent is required' },
     auth: { args: ['status'], remedy: (bin) => `${bin} login` },
-    stream: { envPrefix: 'CURSOR', validateEnv: false, requirePositivePoll: false },
+    stream: { envPrefix: 'CURSOR', requirePositivePoll: false },
     usesSession: true,
   },
 } satisfies Record<string, RunnerMeta>;
@@ -45,6 +44,21 @@ export const RUNNER_META = {
 export type Runner = keyof typeof RUNNER_META;
 
 export const RUNNERS = Object.keys(RUNNER_META) as readonly Runner[];
+
+// Runners whose registry entry carries a `stream` block. Derived from the
+// literal RUNNER_META shape (preserved by `satisfies`), so codex — which has no
+// stream — is excluded at the type level; the plain Runner union would wrongly
+// include it.
+export type StreamingRunner = {
+  [R in Runner]: (typeof RUNNER_META)[R] extends { stream: object } ? R : never;
+}[Runner];
+
+export const STREAM_RUNNERS: readonly StreamingRunner[] = RUNNERS.filter(
+  (runner): runner is StreamingRunner => {
+    const meta: RunnerMeta = RUNNER_META[runner];
+    return meta.stream !== undefined;
+  },
+);
 
 export function isRunner(value: string): value is Runner {
   return (RUNNERS as readonly string[]).includes(value);

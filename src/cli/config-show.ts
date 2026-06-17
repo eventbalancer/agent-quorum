@@ -76,7 +76,6 @@ function parseConfigArgs(args: readonly string[]): CliSettings {
   return cli;
 }
 
-// Never echo the resolved bot token: replace it with a fixed mask before printing.
 function maskToken(config: ResolvedConfig): ResolvedConfig {
   return {
     ...config,

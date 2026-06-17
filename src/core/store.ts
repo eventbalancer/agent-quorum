@@ -45,13 +45,9 @@ export function ensureHandoffDir(home: string): string {
   return dir;
 }
 
-// Lazy GC for the launch handoff. The child read-once-unlinks its own file and
-// the parent removes it on a detected startup failure; a child that is alive at
-// the liveness probe but dies before reading leaves an owner-only secret behind.
-// Each detached launch sweeps handoff files older than the TTL — comfortably
-// larger than the parent-write→child-read window, so a concurrent launch's
-// freshly written, not-yet-read file is never collected. Unlinks are
-// best-effort: the files are owner-only under <home>/handoff/.
+// Sweeps handoff files older than the TTL, covering a child that dies after the
+// liveness probe but before reading. The TTL exceeds the write→read window, so a
+// concurrent launch's fresh file is never collected.
 export function sweepHandoffDir(home: string, maxAgeMs = HANDOFF_TTL_MS): void {
   const dir = handoffDir(home);
   if (!existsSync(dir)) {
@@ -73,12 +69,8 @@ export function sweepHandoffDir(home: string, maxAgeMs = HANDOFF_TTL_MS): void {
   }
 }
 
-// Owner-only home. Creates it 0700 when absent and re-hardens an existing home
-// that a prior run created 0755 (run.ts mkdir uses the process umask), so the
-// store directory is owner-only before any secret read or write (NFR-2). The
-// re-harden is conditional on a looser-than-0700 mode: an already owner-only
-// home is left untouched, so a home that a consumer has tightened further is
-// not loosened and a no-op call does not spuriously chmod.
+// Re-hardens a home a prior run created 0755 under the process umask, but only when
+// looser than 0700 so a tighter home is never loosened.
 export function ensureStoreHome(home: string): void {
   if (existsSync(home)) {
     if ((statSync(home).mode & LOOSER_THAN_SECRET) !== 0) {
@@ -90,17 +82,14 @@ export function ensureStoreHome(home: string): void {
   chmodSync(home, HOME_MODE);
 }
 
-// Two-step owner-only write mirroring the clarify broker's writeSecure: the
-// mode option races the umask, the explicit chmod is authoritative. Reused by
-// the detached-launch secret handoff (P5) so there is one secure-write path.
+// The mode option races the umask, so the explicit chmod is authoritative.
 export function writeSecretFile(file: string, data: string): void {
   writeFileSync(file, data, { mode: SECRET_MODE });
   chmodSync(file, SECRET_MODE);
 }
 
-// A malformed store must never echo file contents: a leaked secrets.json would
-// surface the bot token in an error message. The thrown HaltError names only the
-// path.
+// Never echo file contents: a malformed secrets.json must not surface the token in the
+// error, so the HaltError names only the path.
 function parseStoreFile(file: string, label: string): JsonObject {
   let parsed: JsonValue;
   try {
@@ -114,9 +103,8 @@ function parseStoreFile(file: string, label: string): JsonObject {
   return parsed;
 }
 
-// Missing store → empty defaults so an onboarding-free run still resolves from
-// DEFAULT_CONFIG. Unknown extra keys are tolerated for a hand-edited or
-// forward-compatible store; only invalid JSON or a non-object root halts.
+// Missing store → empty defaults; unknown keys are tolerated, only invalid JSON or a
+// non-object root halts.
 export function readConfigStore(home: string): DeepPartial<OperatorConfig> {
   const file = configStorePath(home);
   if (!existsSync(file)) {
@@ -125,18 +113,15 @@ export function readConfigStore(home: string): DeepPartial<OperatorConfig> {
   return parseStoreFile(file, 'config.json');
 }
 
-// Operator overrides are intentionally partial: callers persist only the keys they
-// set and let the rest resolve from defaults. The writer mirrors readConfigStore,
-// which already returns a DeepPartial, rather than demanding a full OperatorConfig.
-// This is the full-rewrite path; mergeConfigStore is the additive one.
+// Full-rewrite path (mergeConfigStore is the additive one); the store is intentionally
+// partial, so callers persist only the keys they set.
 export function writeConfigStore(home: string, config: DeepPartial<OperatorConfig>): void {
   ensureStoreHome(home);
   writeFileSync(configStorePath(home), `${JSON.stringify(config, null, 2)}\n`);
 }
 
-// New value wins for scalars, arrays, and type mismatches; recurse only when both
-// sides are objects, so keys present only on the base survive. Arrays replace
-// rather than concat because isJsonObject is false for them.
+// Recurse only when both sides are objects, so base-only keys survive; arrays replace
+// rather than concat.
 function deepMergeJson(base: JsonObject, patch: JsonObject): JsonObject {
   const out: JsonObject = { ...base };
   for (const [key, patchValue] of Object.entries(patch)) {
@@ -149,21 +134,15 @@ function deepMergeJson(base: JsonObject, patch: JsonObject): JsonObject {
   return out;
 }
 
-// Additive persistence so re-running init (token rotation, re-discovery) never
-// discards operator-tuned or unknown keys: read the existing store, deep-merge the
-// partial onto it, and write through the single full-rewrite path.
+// Additive so re-running init never discards operator-tuned or unknown keys.
 export function mergeConfigStore(home: string, patch: DeepPartial<OperatorConfig>): void {
   const existing = readConfigStore(home) as JsonObject;
   const merged = deepMergeJson(existing, patch as JsonObject);
   writeConfigStore(home, merged);
 }
 
-// Symmetric hardening: ensureStoreHome plus a read-time chmod of an existing
-// secrets.json that is looser than 0600 (a hand-created 0644 file is repaired,
-// not trusted). A missing store short-circuits before ensureStoreHome so a pure
-// read against a home with no secret file (e.g. `agent-quorum config` pointed at
-// a consumer's directory) never alters its permissions. A `telegramBotToken` of
-// the wrong type halts without echoing the value.
+// Read-time hardening repairs an existing secrets.json looser than 0600. A missing
+// store short-circuits before ensureStoreHome so a pure read never alters permissions.
 export function readSecretsStore(home: string): Secrets {
   const file = secretsStorePath(home);
   if (!existsSync(file)) {
