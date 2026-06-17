@@ -4,6 +4,7 @@ import { err, log } from '../runtime/log.js';
 import { runWithRetries } from '../runtime/retry.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import type { Role } from '../types.js';
+import type { Runner } from './registry.js';
 import { codexRun } from './codex.js';
 import { claudeInvoke } from './claude.js';
 import { cursorInvoke } from './cursor.js';
@@ -71,6 +72,80 @@ async function providerRunCodex(
   return 0;
 }
 
+export interface ProviderCallInput {
+  readonly providerRuntime: ProviderRuntime;
+  readonly mode: ProviderMode;
+  readonly outFile: string;
+  readonly skillFile: string;
+  readonly schemaFile: string;
+  readonly tools: string;
+  readonly disallowedTools: string;
+  readonly model: string;
+  readonly reasoning: string;
+  readonly sessionFile: string;
+  readonly promptText: string;
+  readonly traceContext: TraceContext;
+  readonly diagnosticSink: DiagnosticSink | undefined;
+}
+
+export type ProviderInvoke = (input: ProviderCallInput) => Promise<number>;
+
+// Keyed by Runner via `satisfies`, so an omitted adapter is a compile error
+// naming the missing runner. Exported for the registry guard test but
+// deliberately not re-exported from src/index.ts (internal, not public surface).
+export const PROVIDER_DISPATCH = {
+  codex: (input) =>
+    providerRunCodex(
+      input.providerRuntime,
+      input.mode,
+      input.outFile,
+      input.skillFile,
+      input.schemaFile,
+      input.model,
+      input.reasoning,
+      input.promptText,
+      input.traceContext,
+      input.diagnosticSink,
+    ),
+  claude: (input) =>
+    claudeInvoke(
+      input.providerRuntime,
+      input.mode,
+      input.outFile,
+      input.skillFile,
+      input.tools,
+      input.disallowedTools,
+      input.model,
+      input.reasoning,
+      input.sessionFile,
+      input.mode === 'json' ? input.schemaFile : undefined,
+      input.promptText,
+      input.traceContext,
+      input.diagnosticSink,
+    ),
+  cursor: (input) => {
+    if (input.reasoning !== '') {
+      log(`WARNING: cursor runner ignores reasoning/effort field (reasoning=${input.reasoning})`);
+    }
+    return cursorInvoke(
+      input.providerRuntime,
+      input.mode,
+      input.outFile,
+      {
+        skillFile: input.skillFile,
+        tools: input.tools,
+        disallowedTools: input.disallowedTools,
+        model: input.model,
+        sessionFile: input.sessionFile,
+        schemaFile: input.mode === 'json' ? input.schemaFile : '',
+        promptBody: input.promptText,
+      },
+      input.traceContext,
+      input.diagnosticSink,
+    );
+  },
+} satisfies Record<Runner, ProviderInvoke>;
+
 async function providerRunOnce(
   providerRuntime: ProviderRuntime,
   role: Role,
@@ -90,65 +165,21 @@ async function providerRunOnce(
       ? createDiagnosticSink(providerRuntime.diagnosticsDir, traceContext)
       : undefined;
   try {
-    switch (entry.runner) {
-      case 'codex':
-        return await providerRunCodex(
-          providerRuntime,
-          mode,
-          outFile,
-          skillFile,
-          schemaFile,
-          entry.model,
-          entry.reasoning,
-          promptText,
-          traceContext,
-          diagnosticSink,
-        );
-      case 'claude':
-        return await claudeInvoke(
-          providerRuntime,
-          mode,
-          outFile,
-          skillFile,
-          tools,
-          disallowedTools,
-          entry.model,
-          entry.reasoning,
-          sessionFile,
-          mode === 'json' ? schemaFile : undefined,
-          promptText,
-          traceContext,
-          diagnosticSink,
-        );
-      case 'cursor': {
-        if (entry.reasoning !== '') {
-          log(
-            `WARNING: cursor runner ignores reasoning/effort field (reasoning=${entry.reasoning})`,
-          );
-        }
-        return await cursorInvoke(
-          providerRuntime,
-          mode,
-          outFile,
-          {
-            skillFile,
-            tools,
-            disallowedTools,
-            model: entry.model,
-            sessionFile,
-            schemaFile: mode === 'json' ? schemaFile : '',
-            promptBody: promptText,
-          },
-          traceContext,
-          diagnosticSink,
-        );
-      }
-      default: {
-        const unknownRunner: never = entry.runner;
-        err(`provider_run: unknown runner '${unknownRunner as string}'`);
-        return 2;
-      }
-    }
+    return await PROVIDER_DISPATCH[entry.runner]({
+      providerRuntime,
+      mode,
+      outFile,
+      skillFile,
+      schemaFile,
+      tools,
+      disallowedTools,
+      model: entry.model,
+      reasoning: entry.reasoning,
+      sessionFile,
+      promptText,
+      traceContext,
+      diagnosticSink,
+    });
   } finally {
     diagnosticSink?.close();
   }

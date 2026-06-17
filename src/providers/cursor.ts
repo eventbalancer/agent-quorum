@@ -40,11 +40,11 @@ async function cursorStream(
 ): Promise<CursorStreamOutcome> {
   const filter = new CursorStreamLogFilter();
   const result = await runStreamingCli({
-    command: providerRuntime.cursorBin,
+    command: providerRuntime.binaries.cursor,
     args: ['-p', '--output-format', 'stream-json', ...args],
     promptText,
     cwd: providerRuntime.projectRoot,
-    knobs: providerRuntime.cursorKnobs,
+    knobs: providerRuntime.streamKnobs.cursor,
     renderLine: (line) => filter.line(line),
     progressEvent: cursorProgressEvent,
     traceContext,
@@ -62,7 +62,7 @@ async function cursorStream(
   let status = result.status;
   if (result.stallReason !== undefined) {
     err(`cursor stream stalled: ${result.stallReason}`);
-    status = providerRuntime.cursorKnobs.stallStatus;
+    status = providerRuntime.streamKnobs.cursor.stallStatus;
   }
   return { status, output };
 }
@@ -142,7 +142,7 @@ async function cursorRunOnce(
   }
 
   const isStallWithLiveSession =
-    status === providerRuntime.cursorKnobs.stallStatus &&
+    status === providerRuntime.streamKnobs.cursor.stallStatus &&
     sessionFile !== '' &&
     nonEmptyFile(sessionFile);
   if (isStallWithLiveSession) {
@@ -207,10 +207,10 @@ function cursorPromptAndArgs(
   input: CursorInvokeInput,
 ): CursorPromptAndArgs {
   const args = ['--workspace', providerRuntime.projectRoot, '--model', input.model];
-  if (cursorCliSupportsFlag(providerRuntime.cursorBin, '--trust')) {
+  if (cursorCliSupportsFlag(providerRuntime.binaries.cursor, '--trust')) {
     args.push('--trust');
   }
-  if (cursorCliSupportsFlag(providerRuntime.cursorBin, '--approve-mcps')) {
+  if (cursorCliSupportsFlag(providerRuntime.binaries.cursor, '--approve-mcps')) {
     args.push('--approve-mcps');
   }
 

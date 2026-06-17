@@ -15,15 +15,18 @@ function translateRuntime(ctx: RunContext): ProviderRuntime {
       retryCount: ctx.passes.translatePass.retryCount,
       retryDelaySeconds: ctx.provider.retry.retryDelaySeconds,
     },
-    claudeKnobs: {
-      ...ctx.provider.claudeKnobs,
-      wallTimeoutSeconds: ctx.passes.translatePass.timeoutSeconds,
-      semanticTimeoutSeconds: ctx.passes.translatePass.semanticIdleTimeoutSeconds,
-    },
-    cursorKnobs: {
-      ...ctx.provider.cursorKnobs,
-      wallTimeoutSeconds: ctx.passes.translatePass.timeoutSeconds,
-      semanticTimeoutSeconds: ctx.passes.translatePass.semanticIdleTimeoutSeconds,
+    streamKnobs: {
+      ...ctx.provider.streamKnobs,
+      claude: {
+        ...ctx.provider.streamKnobs.claude,
+        wallTimeoutSeconds: ctx.passes.translatePass.timeoutSeconds,
+        semanticTimeoutSeconds: ctx.passes.translatePass.semanticIdleTimeoutSeconds,
+      },
+      cursor: {
+        ...ctx.provider.streamKnobs.cursor,
+        wallTimeoutSeconds: ctx.passes.translatePass.timeoutSeconds,
+        semanticTimeoutSeconds: ctx.passes.translatePass.semanticIdleTimeoutSeconds,
+      },
     },
     claudePermissionMode: 'default',
   };

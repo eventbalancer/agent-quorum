@@ -1,4 +1,11 @@
 import { HaltError } from '../runtime/halt.js';
+import {
+  DISABLED_STREAM_KNOBS,
+  RUNNER_META,
+  RUNNERS,
+  type RunnerMeta,
+} from '../providers/registry.js';
+import type { Runner } from '../types.js';
 import type { StreamKnobs } from '../providers/watchdog.js';
 
 const STALL_STATUS = 124;
@@ -10,8 +17,7 @@ export interface PassKnobs {
 }
 
 export interface WatchdogKnobs {
-  claude: StreamKnobs;
-  cursor: StreamKnobs;
+  stream: Record<Runner, StreamKnobs>;
   fixPass: PassKnobs;
   translatePass: PassKnobs;
 }
@@ -37,20 +43,57 @@ function requireNonNegativeInteger(entry: EnvNumberEntry): number {
   return entry.value;
 }
 
-// Watchdog and pass knobs resolve from env with the reference defaults. The
-// reference validates only the claude and fix/translate knobs (cursor knobs
-// pass through unvalidated); the claude poll must additionally be positive.
+// Resolve one streaming runner's knobs from its AGENT_QUORUM_<prefix>_* env vars
+// with the reference defaults. validateEnv gates the non-negative-integer checks
+// and requirePositivePoll the positive-poll check, preserving the reference
+// asymmetry: claude is validated (poll must be positive), cursor passes through.
+function resolveStreamKnobs(
+  prefix: string,
+  validateEnv: boolean,
+  requirePositivePoll: boolean,
+): StreamKnobs {
+  const byte = envNumber(`AGENT_QUORUM_${prefix}_STALL_TIMEOUT_SECONDS`, 600);
+  const poll = envNumber(`AGENT_QUORUM_${prefix}_STALL_POLL_SECONDS`, 5);
+  const grace = envNumber(`AGENT_QUORUM_${prefix}_STALL_INTERRUPT_GRACE_SECONDS`, 20);
+  const wall = envNumber(`AGENT_QUORUM_${prefix}_CALL_TIMEOUT_SECONDS`, 1800);
+  const semantic = envNumber(`AGENT_QUORUM_${prefix}_SEMANTIC_IDLE_TIMEOUT_SECONDS`, 900);
+  if (validateEnv) {
+    requireNonNegativeInteger(byte);
+    requireNonNegativeInteger(poll);
+    requireNonNegativeInteger(grace);
+    requireNonNegativeInteger(wall);
+    requireNonNegativeInteger(semantic);
+  }
+  if (requirePositivePoll && !(poll.value > 0)) {
+    throw new HaltError(`AGENT_QUORUM_${prefix}_STALL_POLL_SECONDS expects a positive integer`, 1);
+  }
+  return {
+    stallStatus: STALL_STATUS,
+    pollSeconds: poll.value,
+    graceSeconds: grace.value,
+    byteTimeoutSeconds: byte.value,
+    semanticTimeoutSeconds: semantic.value,
+    wallTimeoutSeconds: wall.value,
+  };
+}
+
+// Watchdog and pass knobs resolve from env with the reference defaults. Stream
+// knobs derive per runner from RUNNER_META (non-streaming runners get the
+// disabled sentinel); the fix/translate pass knobs are validated as before.
 export function resolveWatchdogKnobs(): WatchdogKnobs {
-  const claudeByte = envNumber('AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS', 600);
-  const claudePoll = envNumber('AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS', 5);
-  const claudeGrace = envNumber('AGENT_QUORUM_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS', 20);
-  const claudeWall = envNumber('AGENT_QUORUM_CLAUDE_CALL_TIMEOUT_SECONDS', 1800);
-  const claudeSemantic = envNumber('AGENT_QUORUM_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
-  const cursorByte = envNumber('AGENT_QUORUM_CURSOR_STALL_TIMEOUT_SECONDS', 600);
-  const cursorPoll = envNumber('AGENT_QUORUM_CURSOR_STALL_POLL_SECONDS', 5);
-  const cursorGrace = envNumber('AGENT_QUORUM_CURSOR_STALL_INTERRUPT_GRACE_SECONDS', 20);
-  const cursorWall = envNumber('AGENT_QUORUM_CURSOR_CALL_TIMEOUT_SECONDS', 1800);
-  const cursorSemantic = envNumber('AGENT_QUORUM_CURSOR_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
+  const stream = {} as Record<Runner, StreamKnobs>;
+  for (const runner of RUNNERS) {
+    const meta: RunnerMeta = RUNNER_META[runner];
+    stream[runner] =
+      meta.stream !== undefined
+        ? resolveStreamKnobs(
+            meta.stream.envPrefix,
+            meta.stream.validateEnv,
+            meta.stream.requirePositivePoll,
+          )
+        : DISABLED_STREAM_KNOBS;
+  }
+
   const fixTimeout = envNumber('AGENT_QUORUM_FIX_PASS_TIMEOUT_SECONDS', 900);
   const fixSemantic = envNumber('AGENT_QUORUM_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS', 900);
   const fixRetries = envNumber('AGENT_QUORUM_FIX_PASS_RETRY_COUNT', 1);
@@ -61,38 +104,15 @@ export function resolveWatchdogKnobs(): WatchdogKnobs {
   );
   const translateRetries = envNumber('AGENT_QUORUM_TRANSLATE_PASS_RETRY_COUNT', 1);
 
-  requireNonNegativeInteger(claudeByte);
-  requireNonNegativeInteger(claudePoll);
-  requireNonNegativeInteger(claudeGrace);
-  requireNonNegativeInteger(claudeWall);
-  requireNonNegativeInteger(claudeSemantic);
   requireNonNegativeInteger(fixTimeout);
   requireNonNegativeInteger(fixSemantic);
   requireNonNegativeInteger(fixRetries);
   requireNonNegativeInteger(translateTimeout);
   requireNonNegativeInteger(translateSemantic);
   requireNonNegativeInteger(translateRetries);
-  if (!(claudePoll.value > 0)) {
-    throw new HaltError('AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS expects a positive integer', 1);
-  }
 
   return {
-    claude: {
-      stallStatus: STALL_STATUS,
-      pollSeconds: claudePoll.value,
-      graceSeconds: claudeGrace.value,
-      byteTimeoutSeconds: claudeByte.value,
-      semanticTimeoutSeconds: claudeSemantic.value,
-      wallTimeoutSeconds: claudeWall.value,
-    },
-    cursor: {
-      stallStatus: STALL_STATUS,
-      pollSeconds: cursorPoll.value,
-      graceSeconds: cursorGrace.value,
-      byteTimeoutSeconds: cursorByte.value,
-      semanticTimeoutSeconds: cursorSemantic.value,
-      wallTimeoutSeconds: cursorWall.value,
-    },
+    stream,
     fixPass: {
       timeoutSeconds: fixTimeout.value,
       semanticIdleTimeoutSeconds: fixSemantic.value,

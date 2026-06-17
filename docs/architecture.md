@@ -27,6 +27,12 @@ single retry wrapper:
   capability-probed `--trust/--approve-mcps`; tool and schema constraints are
   injected as prompt hints; the session id is captured from the result event.
 
+The supported runner set is declared once in `src/providers/registry.ts`
+(`RUNNER_META`), from which `Runner`, the config allow-list, dispatch, preflight,
+and watchdog knobs all derive. See
+[`development/adding-a-provider.md`](development/adding-a-provider.md) for the two
+edits that add a provider.
+
 Provider stdout streams are rendered through a shared metadata-only trace:
 tool names, target paths, command/text sizes, retry markers, and status
 metadata are logged, while prompt, plan, source, tool-argument, and raw provider

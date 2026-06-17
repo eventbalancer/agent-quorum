@@ -388,7 +388,7 @@ describe('config and knob halts', () => {
 
   it('validates watchdog knobs with reference messages and defaults', () => {
     const knobs = resolveWatchdogKnobs();
-    expect(knobs.claude.wallTimeoutSeconds).toBe(1800);
+    expect(knobs.stream.claude.wallTimeoutSeconds).toBe(1800);
     expect(knobs.translatePass.retryCount).toBe(1);
     expect(() =>
       withEnv({ AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS: 'soon' }, () => resolveWatchdogKnobs()),

@@ -197,6 +197,9 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 - [`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)
   — repository-local requirements, handoff, prompt architecture, execution, and
   self-planning workflow.
+- [`docs/development/adding-a-provider.md`](docs/development/adding-a-provider.md)
+  — the two edits that add a CLI provider to the single-source-of-truth runner
+  registry.
 - [`docs/development/worktree-selection-gate.md`](docs/development/worktree-selection-gate.md)
   — the upfront target-worktree selection protocol shared by `tidy`, `ship`, and
   `execute`.
