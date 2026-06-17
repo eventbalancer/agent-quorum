@@ -148,20 +148,26 @@ returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
 
 ## Configuration
 
-agent-quorum reads one config file: the packaged `agent-quorum.json`, or the file
-pointed at by `AGENT_QUORUM_CONFIG_FILE`. There is no search chain. It has two main
+agent-quorum reads one per-user store that the CLI and the library API resolve
+identically: `<home>/config.json` for non-secret settings and an owner-only
+`<home>/secrets.json` for the bot token, both under `AGENT_QUORUM_HOME` (default
+`~/.agent-quorum`). Configuration is optional — with no store and no environment,
+every setting falls back to a built-in default. `config.json` has two main
 sections: `settings` (iteration cap, effort, fix pass, locale, translation,
 retries) and `roles` (per-role runner, model, reasoning level, and tool
 permissions). Supported runners are `codex`, `claude`, and `cursor`.
 
-A gitignored package-root `.env` is loaded before config resolution, with real
-environment variables winning. It is intended for secrets such as Telegram bot
-credentials, which enable final completion notifications automatically; set
-`AGENT_QUORUM_CLARIFY=0` for notifications without the prompt-mode question gate.
+Run `agent-quorum init` for interactive first-run setup (capture the bot token,
+discover the chat id, write the store at owner-only permissions) and
+`agent-quorum config` to print the resolved configuration with each value's
+winning layer. Telegram credentials enable final completion notifications
+automatically; set `AGENT_QUORUM_CLARIFY=0` for notifications without the
+prompt-mode question gate.
 
-The full reference — every `AGENT_QUORUM_*` variable, watchdog knob, Telegram
-setting, status/launch toggle, and the exact CLI > env > file
-[override precedence](docs/configuration.md#precedence) — lives in
+The full reference — every setting and store key, the `AGENT_QUORUM_*` env layer,
+watchdog knobs, the env-only rendezvous vars, and the exact
+override > env > store > default
+[precedence](docs/configuration.md#precedence) — lives in
 [`docs/configuration.md`](docs/configuration.md).
 
 ## Platform support
@@ -186,7 +192,7 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 
 - [`docs/architecture.md`](docs/architecture.md) — roles, providers, loop
   mechanics, artifact contract, watchdog, sessions.
-- [`docs/configuration.md`](docs/configuration.md) — `agent-quorum.json` and the
+- [`docs/configuration.md`](docs/configuration.md) — the per-user store and the
   environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
 - [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.

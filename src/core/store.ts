@@ -67,7 +67,10 @@ export function readConfigStore(home: string): DeepPartial<OperatorConfig> {
   return parseStoreFile(file, 'config.json');
 }
 
-export function writeConfigStore(home: string, config: OperatorConfig): void {
+// Operator overrides are intentionally partial: callers persist only the keys they
+// set and let the rest resolve from defaults. The writer mirrors readConfigStore,
+// which already returns a DeepPartial, rather than demanding a full OperatorConfig.
+export function writeConfigStore(home: string, config: DeepPartial<OperatorConfig>): void {
   ensureStoreHome(home);
   writeFileSync(configStorePath(home), `${JSON.stringify(config, null, 2)}\n`);
 }

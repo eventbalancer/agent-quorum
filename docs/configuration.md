@@ -1,243 +1,234 @@
 # Configuration
 
-## agent-quorum.json
+agent-quorum reads one per-user store that the CLI and the library API resolve
+identically. Configuration is optional: with no store and no environment, every
+setting falls back to a built-in default.
 
-One fixed config file at the package root; `AGENT_QUORUM_CONFIG_FILE` overrides
-the path (there is no search chain). Missing required fields halt the run with
-a controlled error; unknown keys warn and are ignored.
+## The store
 
-```jsonc
-{
-  "version": 1,
-  "settings": {
-    "iters": 7,              // iteration cap (required)
-    "effort": "high",        // low | high | max (required)
-    "fix": true,             // reference fix pass (required)
-    "locale": "en",          // human interaction locale (optional, default en)
-    "translate": false,      // compatibility translate-pass toggle (optional)
-    "diffThreshold": 5,      // stable-diff convergence threshold (required)
-    "retryCount": 3,         // provider retry attempts (required)
-    "retryDelaySeconds": 10  // delay between retries (required)
-  },
-  "roles": {
-    "critic":     { "runner": "claude", "model": "…", "reasoning": "…", "tools": [...], "disallowedTools": [...] },
-    "creator":    { "runner": "claude", "model": "…", "reasoning": "…",
-                    "createTools": [...], "createDisallowedTools": [...],
-                    "updateTools": [...], "updateDisallowedTools": [...] },
-    "fixer":      { ... },
-    "reviewer":   { ... },
-    "translator": { ... }
-  }
-}
+Two files live under the agent-quorum home (`AGENT_QUORUM_HOME`, default
+`~/.agent-quorum`), the same root that anchors `runs/` and `state/`:
+
+| File                  | Holds                            | Permissions              |
+| --------------------- | -------------------------------- | ------------------------ |
+| `<home>/config.json`  | non-secret operator settings     | home `0700`              |
+| `<home>/secrets.json` | credentials (`telegramBotToken`) | file `0600`, home `0700` |
+
+Both the home (`0700`) and `secrets.json` (`0600`) are hardened on **read and
+write**: a pre-existing looser mode is repaired before the file is parsed, so a
+hand-created `0644` secrets file is tightened rather than trusted. A malformed
+`config.json`/`secrets.json` halts the run with a controlled error that names the
+path only — file contents (and the token) are never echoed. `config.json` is a
+partial document; any unset key resolves from the default. Unknown keys are
+tolerated.
+
+## Precedence
+
+Every setting resolves through one uniform precedence:
+
+```
+per-invocation override  >  ambient AGENT_QUORUM_* env  >  <home>/config.json  >  built-in default
 ```
 
-Runner whitelist: `codex`, `claude`, `cursor`. Tool fields accept a non-empty
-string or a non-empty string array (joined with commas).
+The **override** tier is the per-invocation input: CLI scalar flags
+(`--iters`/`--effort`/`--fix`/`--no-fix`/`--translate`/`--no-translate`/`--locale`)
+and, for the library API, the structured `config`/`secrets` options. When a
+top-level scalar option and the same path in structured `config` are both set,
+the **top-level scalar wins** (the intra-override tie-break), identically
+in-process and across a detached launch. A few settings have no env layer by
+design: `settings.effort` and `settings.fix` come only from the override or the
+store, and all tool-permission fields are store-only.
 
-### Precedence
+`agent-quorum config` prints the fully resolved configuration and each value's
+winning layer (`override`/`env`/`store`/`default`); the bot token is masked.
 
-- Loop settings: `CLI > env > file`. `locale` defaults to `en`; non-English
-  locales enable the localized final companion plan unless `translate` is
-  explicitly off. `effort` and `fix` deliberately have no env layer
-  (`--effort`/`--fix`/`--no-fix` or the file).
-- Role matrix (`runner`/`model`/`reasoning`): `env > file`.
-- Tool permissions: file only.
+## Setup
 
-## .env
+`agent-quorum init` (interactive, TTY only) captures the Telegram bot token,
+discovers the chat id via a one-time code handshake with your bot, and writes
+`config.json` + `secrets.json` at owner-only permissions. In a non-interactive
+context it errors instead of hanging; write the store files directly there.
 
-A gitignored `.env` at the **package root** loads unconditionally before any
-config resolution, with real-environment-wins semantics. A `.env` sitting next
-to a `AGENT_QUORUM_CONFIG_FILE` override is never read. Intended for the Telegram
-secrets and other local credentials.
+## Settings reference
 
-## Environment variables
+Persisted settings live in `config.json` under the keys below. Each may also be
+set for one run through its environment variable (when it has one); the listed
+default is the built-in fallback.
 
-### Run placement
+### Loop settings (`settings`)
 
-| Variable                    | Meaning                                                       |
-| --------------------------- | ------------------------------------------------------------- |
-| `AGENT_QUORUM_CONFIG_FILE`  | config file override                                          |
-| `AGENT_QUORUM_HOME`         | artifact root (default `~/.agent-quorum`)                     |
-| `AGENT_QUORUM_WORK_DIR`     | explicit workdir (default `<home>/runs/loop-<name>`)          |
-| `AGENT_QUORUM_PLANS_DIR`    | functional runs root (default `<home>/runs`; legacy override) |
-| `AGENT_QUORUM_STATE_DIR`    | system ledger dir (default `<home>/state`; legacy override)   |
-| `AGENT_QUORUM_RETAIN_COUNT` | prune keeps this many terminal records (default 50)           |
-| `AGENT_QUORUM_RETAIN_DAYS`  | prune drops terminal records older than this (default 30)     |
-| `AGENT_QUORUM_RESUME`       | `1` resumes from the last stable plan                         |
+| Store key                    | Env var                             | Default | Meaning                                                              |
+| ---------------------------- | ----------------------------------- | ------- | -------------------------------------------------------------------- |
+| `settings.iters`             | `AGENT_QUORUM_MAX_ITERS`            | `5`     | iteration cap (positive integer)                                     |
+| `settings.effort`            | _(override/store only; `--effort`)_ | `high`  | `low` \| `high` \| `max`                                             |
+| `settings.fix`               | _(override/store only; `--fix`)_    | `true`  | reference fix pass                                                   |
+| `settings.translate`         | `AGENT_QUORUM_TRANSLATE`            | `false` | localized companion plan pass                                        |
+| `settings.locale`            | `AGENT_QUORUM_LOCALE`               | `en`    | interaction/companion locale (non-`en` enables translate unless off) |
+| `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`       | `5`     | stable-diff convergence threshold                                    |
+| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`          | `3`     | provider retry attempts                                              |
+| `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`  | `10`    | delay between retries                                                |
 
-The default root splits **functional** output (`<home>/runs/loop-<name>`, the
-per-run workdirs holding `plan.final.md`/`summary.md`/`run.log`) from the
-**system** ledger (`<home>/state/runs/<runId>.json`, the durable run records).
-A clean install writes nothing under `~/.claude`; there is no migration of
-pre-existing `~/.claude/plans` trees (setting `AGENT_QUORUM_HOME=$HOME/.claude/plans`
-recreates the old location if needed). Setting only `AGENT_QUORUM_PLANS_DIR` keeps
-the legacy single-var layout (`<plans>/.runs` for state).
+### Role matrix (`roles.<role>`)
 
-The no-argument `status` listing and `listRuns` read across all **known stores**
-(the ambient `STATE_DIR`/`PLANS_DIR`-derived store, `<home>/state`, and the
-project-local `<cwd>/.agents/plans/.runs`), deduped and read-only. Setting
-`AGENT_QUORUM_STATE_DIR` therefore no longer implicitly narrows that listing; to
-scope it to one ledger pass `--store <dir>` (CLI) or `{ store }` (library).
-Selector-resolving commands (`show`/`logs`/`intervene`, `status --watch <selector>`)
-and `prune` stay single-store-ambient and accept an explicit store only to scope.
+Roles: `critic`, `creator`, `fixer`, `reviewer`, `translator`. Each carries
+`runner` (`codex` \| `claude` \| `cursor`), `model`, and `reasoning`, plus
+tool-permission fields. `runner`/`model`/`reasoning` accept an env override
+`AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL` / `_REASONING`; tool fields are
+store-only and accept a non-empty string or string array (joined with commas).
 
-The library API additionally accepts `home`/`workDir`/`configFile` as typed
-options on `runPlanLoop`/`launchPlanLoop`, and `home`/`store` lookup options on
-`listRuns`/`getRun`/`getRunLogPath`/`interveneRun`/`pruneRuns`; resolution
-precedence is option > env > default. The CLI contract stays env-first
-([details](api.md)).
+| Tool field (per role)                                                          | Applies to                       |
+| ------------------------------------------------------------------------------ | -------------------------------- |
+| `tools`, `disallowedTools`                                                     | critic/fixer/reviewer/translator |
+| `createTools`, `createDisallowedTools`, `updateTools`, `updateDisallowedTools` | creator                          |
 
-### Loop settings (env layer)
+Defaults: `critic` = `codex`/`gpt-5.5`/`xhigh`; `creator` =
+`claude`/`claude-opus-4-8`/`xhigh`; `fixer`/`reviewer`/`translator` =
+`codex`/`gpt-5.5`/`high`. Read-only roles default to `Read,Grep,Glob` tools with
+write/exec/agent tools disallowed.
 
-`AGENT_QUORUM_MAX_ITERS`, `AGENT_QUORUM_DIFF_THRESHOLD`, `AGENT_QUORUM_RETRY_COUNT`,
-`AGENT_QUORUM_RETRY_DELAY_SECONDS`, `AGENT_QUORUM_LOCALE`, `AGENT_QUORUM_TRANSLATE`,
-`AGENT_QUORUM_MAX_PLAN_LINES` (plan-size warning threshold and split size signal,
-default 900).
+The creator must return a complete plan in one capture. Reliable minimum creator
+tiers: claude opus class (`claude-opus-4-8`; weaker claude needs `default`
+permission mode and may still stub), codex `gpt-5.5`, cursor `composer-2.5`.
 
-### Large-plan split policy (env layer)
+### Watchdog knobs (`knobs`)
 
-`AGENT_QUORUM_SPLIT` (`auto` | `always` | `never`, default `auto`) and
-`AGENT_QUORUM_SPLIT_MIN_PHASES` (default 5) decide whether a converged, post-fix
-`plan.final.md` is additionally emitted as a navigable `plan.package/` (index,
-master plan, self-contained phase docs, journal, runbook, debt ledger):
+Stream knobs for `knobs.claude` and `knobs.cursor` (env prefix
+`AGENT_QUORUM_CLAUDE_` / `AGENT_QUORUM_CURSOR_`):
 
-- `auto` splits when the plan exceeds `AGENT_QUORUM_MAX_PLAN_LINES` **or** has at
-  least `AGENT_QUORUM_SPLIT_MIN_PHASES` Work Plan phases.
-- `always` forces a package regardless of size.
-- `never` keeps a single document and records an explicit no-split rationale in
-  `plan.split.json`, even above the size signal.
+| Store key                    | Env suffix                      | Default |
+| ---------------------------- | ------------------------------- | ------- |
+| `stallTimeoutSeconds`        | `STALL_TIMEOUT_SECONDS`         | `600`   |
+| `stallPollSeconds`           | `STALL_POLL_SECONDS`            | `5`     |
+| `stallInterruptGraceSeconds` | `STALL_INTERRUPT_GRACE_SECONDS` | `20`    |
+| `callTimeoutSeconds`         | `CALL_TIMEOUT_SECONDS`          | `1800`  |
+| `semanticIdleTimeoutSeconds` | `SEMANTIC_IDLE_TIMEOUT_SECONDS` | `900`   |
 
-These are env-only (no `agent-quorum.json` settings layer), mirroring
-`AGENT_QUORUM_MAX_PLAN_LINES`. Every run records the decision, rationale, and
-signals in `plan.split.json`; `plan.final.md` stays the entry point and the
-package (when present) shares one combined final status with it. An optional
-advisory `effort.md` may accompany a package; it never affects validation.
+Pass knobs for `knobs.fixPass` and `knobs.translatePass` (env prefix
+`AGENT_QUORUM_FIX_PASS_` / `AGENT_QUORUM_TRANSLATE_PASS_`): `timeoutSeconds`
+(`900`), `semanticIdleTimeoutSeconds` (`900`), `retryCount` (`1`).
 
-The shared forbidden-shell scan that gates `plan.final.md` and every
-`plan.package/*.md` shell block rejects `pnpm -r`, `pnpm --filter`, `npx `,
-`git commit`, `git push`, `git pull`, and the destructive `git reset --hard` and
-`git checkout --` (aligned with the repo no-destructive-git rule).
+### Providers (`providers`)
 
-### Role matrix overrides
+| Store key                            | Env var                                   | Default        | Meaning                                                                       |
+| ------------------------------------ | ----------------------------------------- | -------------- | ----------------------------------------------------------------------------- |
+| `providers.livenessHeartbeatSeconds` | `AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS` | `30`           | wall-clock liveness line cadence for silent codex/cursor calls (`0` disables) |
+| `providers.claudeThinkingEvery`      | `AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY`  | `3`            | Claude `thinking…` heartbeat cadence                                          |
+| `providers.cursorBin`                | `AGENT_QUORUM_CURSOR_BIN`                 | `cursor-agent` | cursor CLI binary                                                             |
+| `providers.providerDiagnostics`      | `AGENT_QUORUM_PROVIDER_DIAGNOSTICS`       | `false`        | opt-in raw per-call stdout/stderr capture under `$WORK/diagnostics/`          |
+| `claudePermissionMode`               | `CLAUDE_PERMISSION_MODE`                  | `default`      | Claude Code `--permission-mode` for claude-runner roles                       |
 
-`AGENT_QUORUM_<ROLE>_RUNNER`, `AGENT_QUORUM_<ROLE>_MODEL`,
-`AGENT_QUORUM_<ROLE>_REASONING` for `CRITIC`, `CREATOR`, `FIXER`, `REVIEWER`,
-`TRANSLATOR`.
+The liveness heartbeat never feeds the watchdog stall counters, so it cannot mask
+a real stall. `claudePermissionMode`: `default` returns the requested artifact;
+`plan` makes Claude Code present a plan (a weak model returns only a stub and
+persists the plan under `~/.claude/plans/`, which can fail the CREATE shape gate
+with exit 4). The translator role is always `default`. Other Claude Code modes
+pass through verbatim but are unsupported.
 
-### Claude permission mode
+Provider diagnostics keep the metadata-only log contract: normal logs emit only a
+`diagnostics →` reference; raw prompt/plan/source/tool/stderr bodies never reach
+standard output. Capture is best-effort and never changes a provider exit code.
 
-`CLAUDE_PERMISSION_MODE` passes through to Claude Code's `--permission-mode` for
-every claude-runner role and controls how a `-p` capture is read.
+### Large-plan split (`split`) and status (`status`)
 
-| Value     | Effect                                                                                                               |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| `default` | Claude Code returns the requested artifact (the markdown plan or schema JSON) as the result.                         |
-| `plan`    | Claude Code _presents_ a plan: a weak model returns only a stub and persists the full plan under `~/.claude/plans/`. |
+| Store key             | Env var                         | Default | Meaning                                                  |
+| --------------------- | ------------------------------- | ------- | -------------------------------------------------------- |
+| `split.mode`          | `AGENT_QUORUM_SPLIT`            | `auto`  | `auto` \| `always` \| `never`                            |
+| `split.minPhases`     | `AGENT_QUORUM_SPLIT_MIN_PHASES` | `5`     | phase count that triggers an `auto` split                |
+| `status.maxPlanLines` | `AGENT_QUORUM_MAX_PLAN_LINES`   | `900`   | plan-size warning threshold and `auto` split size signal |
 
-Unset resolves to `default`. The precedence is per-role runtime override > this
-variable > `default`. It affects all claude-runner roles; the translator is
-always `default`. Only `default` and `plan` are documented and recommended here;
-other Claude Code modes pass through verbatim but are unsupported. Under `plan`
-mode a weak claude creator can fail the CREATE shape gate with a targeted
-diagnostic (see [`cli.md`](cli.md), exit code 4); `default` lets weak claude
-models return a complete plan.
+`auto` emits a navigable `plan.package/` when the converged, post-fix
+`plan.final.md` exceeds `status.maxPlanLines` **or** has at least
+`split.minPhases` Work Plan phases; `always` forces a package; `never` keeps a
+single document. Every run records the decision in `plan.split.json`;
+`plan.final.md` stays the entry point. The shared forbidden-shell scan that gates
+`plan.final.md` and every `plan.package/*.md` shell block rejects `pnpm -r`,
+`pnpm --filter`, `npx `, `git commit`, `git push`, `git pull`, `git reset --hard`,
+and `git checkout --`.
 
-### Recommended minimum creator tier
+### Retention (`retention`)
 
-The creator must return a complete plan in one `-p` capture. Reliable minimum
-creator tiers per provider:
+| Store key              | Env var                     | Default | Meaning                                     |
+| ---------------------- | --------------------------- | ------- | ------------------------------------------- |
+| `retention.keepCount`  | `AGENT_QUORUM_RETAIN_COUNT` | `50`    | terminal records `prune` keeps              |
+| `retention.maxAgeDays` | `AGENT_QUORUM_RETAIN_DAYS`  | `30`    | terminal records older than this are pruned |
 
-| Provider | Minimum reliable creator model | Notes                                                                 |
-| -------- | ------------------------------ | --------------------------------------------------------------------- |
-| claude   | opus class (`claude-opus-4-8`) | Weak claude models need `default` permission mode and may still stub. |
-| codex    | cheap default (`gpt-5.5`)      | Reliable creator at the default tier.                                 |
-| cursor   | cheap default (`composer-2.5`) | Reliable creator at the default tier.                                 |
+Retention is record-only; functional workdirs are never deleted.
 
-### Watchdog knobs
+### Telegram (`telegram`) and secrets
 
-Claude: `AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS` (600),
-`AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS` (5),
-`AGENT_QUORUM_CLAUDE_STALL_INTERRUPT_GRACE_SECONDS` (20),
-`AGENT_QUORUM_CLAUDE_CALL_TIMEOUT_SECONDS` (1800),
-`AGENT_QUORUM_CLAUDE_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
-`AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY` (3).
+The bot token is the only secret: it lives in `<home>/secrets.json` as
+`telegramBotToken`, or arrives via the env layer / structured `secrets`. The
+remaining Telegram settings are non-secret and live under `telegram` in
+`config.json`.
 
-Cursor: the same five knobs with the `AGENT_QUORUM_CURSOR_` prefix, plus
-`AGENT_QUORUM_CURSOR_BIN` (default `cursor-agent`).
+| Store key                              | Env var                                                | Default  | Meaning                                            |
+| -------------------------------------- | ------------------------------------------------------ | -------- | -------------------------------------------------- |
+| `secrets.telegramBotToken`             | `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`                      | _(none)_ | bot token (in `secrets.json`, never `config.json`) |
+| `telegram.chatId`                      | `AGENT_QUORUM_TELEGRAM_CHAT_ID`                        | _(none)_ | numeric chat id                                    |
+| `telegram.clarify`                     | `AGENT_QUORUM_CLARIFY`                                 | `auto`   | `1` on, `0` off, `auto` (on when configured)       |
+| `telegram.clarifyDeadlineSeconds`      | `AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS`                | `86400`  | max total wait for answers                         |
+| `telegram.pollTimeoutSeconds`          | `AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT`                   | `50`     | long-poll seconds per getUpdates                   |
+| `telegram.httpTimeoutSeconds`          | `AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT`                   | `70`     | HTTP timeout seconds                               |
+| `telegram.receiveFailureWindowSeconds` | `AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS` | `120`    | receive-failure window before exit 8               |
+| `telegram.receiveBackoffSeconds`       | `AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS`        | `2`      | initial receive retry backoff (capped at 30)       |
 
-Passes: `AGENT_QUORUM_FIX_PASS_TIMEOUT_SECONDS` (900),
-`AGENT_QUORUM_FIX_PASS_SEMANTIC_IDLE_TIMEOUT_SECONDS` (900),
-`AGENT_QUORUM_FIX_PASS_RETRY_COUNT` (1), and the `AGENT_QUORUM_TRANSLATE_PASS_*`
-equivalents.
+A bot token plus chat id enables best-effort completion notifications and the
+prompt-mode clarification gate (unless `clarify` is off). Multiple prompt-mode
+runs can share one bot and chat; questions correlate by Telegram reply-to
+metadata. A persistent unauthorized token, network/timeout failure, or
+`getUpdates` 409 conflict exits with code 8.
 
-### Liveness heartbeat
+## Library API
 
-`AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS` (default `30`) sets the wall-clock
-cadence for the liveness line that `run.log` emits while an otherwise-silent
-codex or cursor call is in flight, so an actively-working reasoning phase is
-distinguishable from a stalled one. It is on by default and applies to the codex
-and cursor runners; `0` disables it. The line ceases when the call ends and never
-feeds the watchdog's stall counters, so it cannot defer or mask a real stall.
+`runPlanLoop`/`launchPlanLoop` accept structured `config?: DeepPartial<OperatorConfig>`
+and `secrets?: { telegramBotToken?: string }` (plus `home`/`workDir`) as typed
+options — no `process.env` mutation by the caller. In-process these fold directly
+into the resolver. A detached `launchPlanLoop` forwards the non-secret config to
+the child as JSON and the effective bot token (the structured override, else the
+parent's ambient `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`) through an owner-only `0600`
+handoff file under `<home>/handoff/` — only the file path is passed, the ambient
+token is stripped from the child env, and the child reads the file once and
+unlinks it before any provider subprocess starts. The bot token never enters the
+child or provider-subprocess environment. Store/discovery helpers
+(`readConfigStore`/`writeConfigStore`/`readSecretsStore`/`writeSecretsStore`,
+`telegramDiscoverChatId`) are exported for embedded onboarding. See
+[`api.md`](api.md).
 
-This is separate from Claude's `thinking... (N heartbeats)` heartbeat, which is
-governed by `AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY` (see Watchdog knobs above)
-and is unaffected by this knob.
+## Artifact roots
 
-### Provider diagnostics (env layer)
+| Variable                 | Meaning                                                       |
+| ------------------------ | ------------------------------------------------------------- |
+| `AGENT_QUORUM_HOME`      | artifact + store root (default `~/.agent-quorum`)             |
+| `AGENT_QUORUM_WORK_DIR`  | explicit workdir (default `<home>/runs/loop-<name>`)          |
+| `AGENT_QUORUM_PLANS_DIR` | functional runs root (default `<home>/runs`; legacy override) |
+| `AGENT_QUORUM_STATE_DIR` | system ledger dir (default `<home>/state`; legacy override)   |
+| `AGENT_QUORUM_RESUME`    | `1` resumes from the last stable plan                         |
 
-`AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` enables opt-in raw capture of each provider
-call's stdout and stderr into `$WORK/diagnostics/` as
-`<seq>-<role>-<provider>.log` files. Normal logs still follow the metadata-only
-contract and emit only a `diagnostics →` reference line per call; raw prompt,
-plan, source, tool-argument, and stderr bodies never reach standard output.
-Capture is best-effort — a filesystem failure disables the sink for that call
-with one bounded warning and does not change the provider exit code. Default is
-off (unset or any value other than `1`).
+The default root splits **functional** output (`<home>/runs/loop-<name>`) from
+the **system** ledger (`<home>/state/runs/<runId>.json`). The no-argument
+`status` listing and `listRuns` read across all known stores (the ambient
+`STATE_DIR`/`PLANS_DIR`-derived store, `<home>/state`, and the project-local
+`<cwd>/.agents/plans/.runs`), deduped and read-only; scope to one with
+`--store <dir>` (CLI) or `{ store }` (library).
 
-### Clarification gate / Telegram
+## Env-only rendezvous and timing variables (not persisted)
 
-`AGENT_QUORUM_TELEGRAM_BOT_TOKEN` plus `AGENT_QUORUM_TELEGRAM_CHAT_ID` enable
-best-effort final completion notifications for core runs automatically. The
-same credentials also enable the prompt-mode clarification gate unless
-`AGENT_QUORUM_CLARIFY=0` disables that gate; setting `AGENT_QUORUM_CLARIFY=0` does
-not disable completion notifications.
+These never live in the store; they are runtime rendezvous points or timing knobs
+sourced from the environment (or a built-in default):
 
-Multiple prompt-mode runs can share one bot token and chat. Each question is
-correlated by Telegram reply-to metadata, so reply directly to the question
-message when more than one run is active in the chat. Plain, untargeted replies
-are accepted only when a single live run is using that bot and chat.
+| Variable                           | Default                    | Meaning                                          |
+| ---------------------------------- | -------------------------- | ------------------------------------------------ |
+| `AGENT_QUORUM_TELEGRAM_API_BASE`   | `https://api.telegram.org` | Bot API base override (tests inject a stub)      |
+| `AGENT_QUORUM_TELEGRAM_STATE_DIR`  | `os.tmpdir()`              | shared clarify-broker state root                 |
+| `AGENT_QUORUM_LAUNCH_VERIFY_DELAY` | `1`                        | seconds before the launch liveness check         |
+| `AGENT_QUORUM_STATUS_SCAN_PS`      | _(on)_                     | `0` disables the `ps` scan in the status listing |
 
-Receive-side Telegram failures are surfaced separately from operator
-cancellation: a persistent unauthorized token, network/timeout failure, or
-`getUpdates` conflict exits with code 8. A persistent 409 conflict names the
-concurrent `getUpdates` consumer class in the diagnostic.
+The clarification broker stores coordination files under
+`<state-root>/agent-quorum/telegram/<token-chat-hash>/` (`0700` dir, `0600`
+files); it is compacted and removed when the last live run for that bot and chat
+exits.
 
-| Variable                                               | Meaning                                                                       |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `AGENT_QUORUM_CLARIFY`                                 | `1` force on, `0` force off, `auto` (default: on when Telegram is configured) |
-| `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`                      | bot token (secret — keep in `.env`)                                           |
-| `AGENT_QUORUM_TELEGRAM_CHAT_ID`                        | numeric chat id                                                               |
-| `AGENT_QUORUM_TELEGRAM_API_BASE`                       | Bot API base override (tests inject a stub)                                   |
-| `AGENT_QUORUM_TELEGRAM_STATE_DIR`                      | shared broker state root (`os.tmpdir()` by default)                           |
-| `AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT`                   | long-poll seconds per getUpdates (50)                                         |
-| `AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT`                   | HTTP timeout seconds (70)                                                     |
-| `AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS` | receive failure window before exit 8 (120)                                    |
-| `AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS`        | initial receive retry backoff seconds (2, exponential capped at 30)           |
-| `AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS`                | max total wait for answers (86400)                                            |
-
-The clarification broker stores shared coordination files under
-`<state-root>/agent-quorum/telegram/<token-chat-hash>/`. The directory is `0700`,
-files are `0600`, and the journal can contain operator reply text. It is
-compacted below the minimum live run cursor and removed when the last live run
-for that bot and chat exits.
-
-### Status / launch
-
-`AGENT_QUORUM_STATUS_SCAN_PS` (`0` disables the `ps` scan in the no-argument
-status listing), `AGENT_QUORUM_LAUNCH_VERIFY_DELAY` (seconds before the launch
-liveness check, default 1).
-
-### Obsolete
+## Obsolete
 
 `AGENT_QUORUM_AJV_BIN` selected the validator binary in the reference; schema
 validation now runs in-process, so a set value is warned once and ignored.

@@ -3,6 +3,9 @@ import type { Socket } from 'node:net';
 
 export interface QueueReplyOptions {
   readonly replyTo?: number;
+  // Override the chat the message comes from (defaults to the stub's chat id), so
+  // discovery tests can seed a message from a different chat than the coded one.
+  readonly chatId?: string;
 }
 
 export interface FailNextOptions {
@@ -123,7 +126,7 @@ export async function startTelegramStub(chatId = '42'): Promise<TelegramStub> {
     baseUrl: `http://127.0.0.1:${port}`,
     sent,
     queueReply: (updateId, text, options = {}) => {
-      const message: StubMessage = { chat: { id: Number(chatId) }, text };
+      const message: StubMessage = { chat: { id: Number(options.chatId ?? chatId) }, text };
       if (options.replyTo !== undefined) {
         message.reply_to_message = { message_id: options.replyTo };
       }

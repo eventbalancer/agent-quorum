@@ -311,7 +311,7 @@ cli -> core -> {providers, channels} -> runtime
 - `src/cli/` owns argument parsing and command entry points (`main`, `run`, `launch`, `intervene`, `help`). It resolves settings and builds the `RunContext`; it holds no orchestration logic.
 - `src/core/` owns the orchestration domain: config resolution, the iteration loop, the critic/creator/fixer/reviewer/translate passes, the clarification gate, plan validation, resume, summaries, and the run context. Pure decision logic lives here.
 - `src/providers/` owns the three provider adapters (codex, claude, cursor) behind a single `providerRun` entry point that owns retry, streaming, and the watchdog. Provider-specific quirks stay here.
-- `src/runtime/` owns low-level technical primitives: process exec and teardown, env/dotenv loading, logging, filesystem helpers, scratch dirs, and the `HaltError` exit contract. No domain knowledge.
+- `src/runtime/` owns low-level technical primitives: process exec and teardown, package-root resolution, logging, filesystem helpers, scratch dirs, and the `HaltError` exit contract. No domain knowledge.
 - `src/channels/` owns operator communication channels — the Telegram Bot API client and completion-notification rendering today. It is the external messaging transport the clarification gate and completion notifier consume; it depends only on `runtime/` and `core/` JSON types, and holds no orchestration logic.
 - `skills/` holds the role prompt skills and their JSON schemas, validated with ajv. Treat a skill `*.schema.json` as a contract: changing it changes the provider I/O shape.
 
@@ -597,8 +597,8 @@ Catch as `unknown` and narrow with `instanceof`. Catch narrowly at boundaries (a
 
 ## Security and Secrets
 
-- Never commit `.env` files, tokens, or keys. Telegram and provider credentials (`AGENT_QUORUM_TELEGRAM_BOT_TOKEN`, `AGENT_QUORUM_TELEGRAM_CHAT_ID`, provider auth) come from the environment.
-- Keep any `.env.example` current when local config keys change.
+- Never commit `.env` files, tokens, or keys. The Telegram bot token comes from the owner-only `<home>/secrets.json` (or the structured `secrets` library option / ambient env), and `agent-quorum init` writes it at `0600`; provider CLI auth (codex/claude/cursor) stays external environment state. A stray package-root `.env` is inert at runtime but remains git-ignored.
+- Keep `docs/configuration.md` current when supported settings or store keys change.
 - Do not paste real secrets into docs, issues, commits, tests, logs, or prompts.
 
 ## Path Portability

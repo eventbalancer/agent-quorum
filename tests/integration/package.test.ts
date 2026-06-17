@@ -182,9 +182,10 @@ describe('bin + packaged files contract (AC-1, AC-6)', () => {
     expect(Object.keys(manifest.bin)).not.toContain(LEGACY_BIN);
   });
 
-  it('ships agent-quorum.json and not the legacy config so installed packageRoot resolves', () => {
+  it('ships the skills/ marker and no package-root config so installed packageRoot resolves', () => {
     const manifest = readManifest();
-    expect(manifest.files).toContain('agent-quorum.json');
+    expect(manifest.files).toContain('skills');
+    expect(manifest.files).not.toContain('agent-quorum.json');
     expect(manifest.files).not.toContain(LEGACY_CONFIG_NAME);
   });
 });

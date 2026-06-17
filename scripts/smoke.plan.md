@@ -25,8 +25,9 @@ effort, at most two iterations, fix and translate passes off by default.
 - `pnpm run plan:self` (`package.json` scripts) runs `tsx src/cli/main.ts plan`
   with `AGENT_QUORUM_PLANS_DIR=.agents/plans`, so artifacts land under
   `.agents/plans/`.
-- The default role matrix lives in `agent-quorum.json`; per-role runner, model,
-  and reasoning are overridable through `AGENT_QUORUM_<ROLE>_{RUNNER,MODEL,REASONING}`.
+- The default role matrix lives in `src/core/defaults.ts` (`DEFAULT_CONFIG`,
+  mirrored by `agent-quorum.example.json`); per-role runner, model, and reasoning
+  are overridable through `AGENT_QUORUM_<ROLE>_{RUNNER,MODEL,REASONING}`.
 - This smoke test requires no public API, bin, schema, config, or runtime
   contract change.
 

@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG } from '../core/defaults.js';
 import { readConfigStore } from '../core/store.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 
-// Single source of the run-lifecycle usage strings — the bin is `agent-quorum`;
+// Single source of the command usage strings — the bin is `agent-quorum`;
 // the reference *.sh names never appear in user-facing output. Stage usage
 // (the plan loop) lives with its stage, not here.
 
@@ -54,6 +54,20 @@ export const LOGS_USAGE =
   '  agent-quorum logs <selector> -f      — follow until the run ends\n' +
   '  agent-quorum logs --last [-f]        — the most recent run\n' +
   '  agent-quorum logs --work <dir> [-f]  — an explicit workdir\n';
+
+export const INIT_USAGE =
+  'agent-quorum init — interactive first-run setup (TTY only).\n' +
+  'Captures the Telegram bot token, discovers the chat id, and writes\n' +
+  'config.json + secrets.json (0600) under the agent-quorum home.\n';
+
+export const CONFIG_USAGE =
+  "agent-quorum config — print the resolved configuration and each value's winning layer.\n" +
+  '\n' +
+  'Usage:\n' +
+  '  agent-quorum config [--iters N] [--effort E] [--locale L] [--fix|--no-fix] [--translate|--no-translate]\n' +
+  '\n' +
+  'Scalar flags resolve in the override layer, so they show how a per-invocation\n' +
+  'flag would win over env, store, and default. The bot token is never printed.\n';
 
 export function packageVersion(): string {
   const parsed = JSON.parse(
@@ -118,6 +132,10 @@ export function globalHelp(stages: readonly StageSummary[]): string {
     '  logs        print or follow a run’s run.log\n' +
     '  prune       remove terminal run records beyond the retention bound\n' +
     '  intervene   append an operator intervention to a run’s ledger\n' +
+    '\n' +
+    'configuration:\n' +
+    '  init        interactive first-run setup: capture the bot token, discover the chat id, write the store\n' +
+    '  config      print the resolved configuration and each value’s winning layer (token masked)\n' +
     '\n' +
     'in a TTY, run agent-quorum with no command to open the interactive shell.\n' +
     '\n' +

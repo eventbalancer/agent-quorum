@@ -379,7 +379,7 @@ export function storeConfigPath(home: string): string {
 }
 
 // Persist the operator config under a temp store home — the AGENT_QUORUM_HOME
-// replacement for the legacy AGENT_QUORUM_CONFIG_FILE / temp agent-quorum.json.
+// per-user store that replaced the legacy package-root config channels.
 export function writeStoreConfig(home: string, config: JsonObject = defaultPlanLoopConfig()): void {
   mkdirSync(home, { recursive: true });
   writeFileSync(storeConfigPath(home), `${JSON.stringify(config, null, 2)}\n`);

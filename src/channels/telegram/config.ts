@@ -23,6 +23,12 @@ export interface TelegramRuntime extends TelegramTransport {
   readonly stateDir: string;
 }
 
+// Chat-id discovery runs before a chatId exists, so it omits it and needs only
+// the credential/transport subset (plus the env-only stateDir rendezvous).
+export interface TelegramDiscoveryRuntime extends TelegramTransport {
+  readonly stateDir?: string;
+}
+
 export function telegramConfigured(runtime: TelegramRuntime): boolean {
   return Boolean(runtime.botToken) && Boolean(runtime.chatId);
 }

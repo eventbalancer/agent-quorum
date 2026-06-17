@@ -70,7 +70,8 @@ const result = await runPlanLoop({
   locale: 'ru', // optional; localizes Telegram interaction + final companion plan
   translate: false, // optional compatibility toggle
   workDir: '/abs/path/loop-my-plan', // optional; takes precedence over AGENT_QUORUM_WORK_DIR
-  configFile: '/abs/path/agent-quorum.json', // optional; takes precedence over AGENT_QUORUM_CONFIG_FILE
+  config: { settings: { diffThreshold: 8 }, telegram: { chatId: '123' } }, // optional structured override
+  secrets: { telegramBotToken: '...' }, // optional; never mutates process.env
 });
 // result: {
 //   exitCode: 0,
@@ -96,25 +97,26 @@ policy fired and a `plan.package/` was emitted. Both are additive —
 `finalPlanPath` is never replaced by a directory-only result, so existing
 callers are unaffected. `runId` and `name` identify the run (the same id the
 start surfaces report); they are additive on `RunResult`/`LaunchResult`.
-Artifacts land in the resolved workdir; for `home`, `workDir`, and
-`configFile` the precedence is option > environment variable > default
-(`<home>/runs/loop-<name>` / `~/.agent-quorum` / the packaged `agent-quorum.json`).
-`home` relocates the whole artifact root (`runs/` + `state/`) without mutating
-`process.env`.
+Artifacts land in the resolved workdir; for `home`/`workDir` the precedence is
+option > environment variable > default (`~/.agent-quorum` / `<home>/runs/loop-<name>`).
+Structured `config`/`secrets` resolve in the override tier (override > env >
+`<home>/config.json` > default); when a top-level scalar (`iters`/`effort`/`fix`/
+`translate`/`locale`) and the same path in `config` are both set, the top-level
+scalar wins. `home` relocates the whole artifact root (`runs/` + `state/`) without
+mutating `process.env`.
 `locale` is the typed counterpart of `--locale`; it defaults to `en`.
 Clarification questions sent through Telegram target that locale. Non-English
 locales also run the translate pass and write `plan.final.<locale>.md`; `en`
 keeps the final plan English-only unless `translate` is explicitly enabled for
 compatibility. The options are typed alternatives to mutating `process.env` — the
-`workDir`/`configFile` plumbing itself never writes to the calling process
-environment. (The package-root `.env` loader keeps its reference semantics
-and still fills missing keys; see
-[configuration.md](configuration.md).)
+`workDir`/`config`/`secrets` plumbing itself never writes to the calling process
+environment; ambient `AGENT_QUORUM_*` env still fills any unset key (see
+[configuration.md](configuration.md)).
 
-If `AGENT_QUORUM_TELEGRAM_BOT_TOKEN` and `AGENT_QUORUM_TELEGRAM_CHAT_ID` are present,
-`runPlanLoop` also sends the same best-effort completion notification as the
-CLI. Notification failures are logged and do not alter the returned
-`RunResult`.
+When a bot token and chat id resolve (from `secrets`/`config`, the
+`<home>/secrets.json`+`config.json` store, or ambient env), `runPlanLoop` also
+sends the same best-effort completion notification as the CLI. Notification
+failures are logged and do not alter the returned `RunResult`.
 
 ## launchPlanLoop(options)
 
@@ -131,9 +133,11 @@ const { exitCode, output, workDir, pid, logPath } = await launchPlanLoop({
 `workDir`/`pid`/`logPath` are the structured counterparts of the `output`
 text. A detached launch cannot report `iterations`/`health` at detach time by
 construction — once the run finishes, read the artifacts in `workDir`
-(`summary.md`, `plan.final.md`). `workDir`/`configFile` options are forwarded
-to the detached child through its environment copy; the parent `process.env`
-is left untouched.
+(`summary.md`, `plan.final.md`). `workDir`/`config` are forwarded to the detached
+child through its environment copy; a `secrets` (or ambient) bot token travels via
+an owner-only `0600` handoff file under `<home>/handoff/` (path-only, with the
+ambient token stripped from the child env), never as an env value. The parent
+`process.env` is left untouched.
 
 When Telegram credentials are present, completion notifications are sent by
 the detached child run, not by the launch parent.

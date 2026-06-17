@@ -27,6 +27,20 @@ export { ExitCode } from './exit-codes.js';
 export type { Effort, Role, RunMode, RunOverrides, Runner } from './types.js';
 export type { DeepPartial, OperatorConfig, ResolvedConfig, Secrets } from './core/config.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
+export {
+  configStorePath,
+  ensureStoreHome,
+  readConfigStore,
+  readSecretsStore,
+  secretsStorePath,
+  writeConfigStore,
+  writeSecretsStore,
+} from './core/store.js';
+export {
+  telegramDiscoverChatId,
+  type DiscoverChatIdOptions,
+  type TelegramDiscoveryRuntime,
+} from './channels/telegram/index.js';
 export type RunSelector = Selector;
 
 // Lookup scoping without mutating process.env. `home` overrides only the home
