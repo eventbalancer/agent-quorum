@@ -1,20 +1,20 @@
 import type { RoleMatrix } from '../core/config.js';
 import type { RetryPolicy } from '../runtime/retry.js';
 import type { Scratch } from '../runtime/scratch.js';
-import type { Role } from '../types.js';
+import type { Role, Runner } from '../types.js';
+import { RUNNER_META } from './registry.js';
 import type { StreamKnobs } from './watchdog.js';
 
 export interface ProviderRuntime {
   readonly scratch: Scratch;
   readonly projectRoot: string;
   readonly retry: RetryPolicy;
-  readonly claudeKnobs: StreamKnobs;
-  readonly cursorKnobs: StreamKnobs;
+  readonly streamKnobs: Record<Runner, StreamKnobs>;
   readonly matrix: RoleMatrix;
   readonly sessionMode: 0 | 1;
   readonly creatorSessionFile: string;
   readonly markdownSchemaPath: string;
-  readonly cursorBin: string;
+  readonly binaries: Record<Runner, string>;
   readonly claudePermissionMode?: string;
   // Opt-in raw-diagnostics directory. Unset means raw stderr/stdout is dropped
   // after classification (default-off).
@@ -26,7 +26,7 @@ export function roleSessionFile(providerRuntime: ProviderRuntime, role: Role): s
     return '';
   }
   const runner = providerRuntime.matrix.creator.runner;
-  if (runner === 'claude' || runner === 'cursor') {
+  if (RUNNER_META[runner].usesSession) {
     return providerRuntime.creatorSessionFile;
   }
   return '';

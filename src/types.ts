@@ -1,4 +1,4 @@
-export type Runner = 'codex' | 'claude' | 'cursor';
+export type { Runner } from './providers/registry.js';
 
 export type Role = 'critic' | 'creator' | 'fixer' | 'reviewer' | 'translator';
 

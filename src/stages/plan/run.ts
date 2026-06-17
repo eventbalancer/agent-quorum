@@ -46,6 +46,7 @@ import { effortMatrix } from '../../core/effort.js';
 import { runFixPass } from './fix-pass.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { resolveWatchdogKnobs } from '../../core/knobs.js';
+import { resolveRunnerBinaries } from '../../providers/registry.js';
 import { runIterationLoop } from './loop.js';
 import { preflightRunners } from './preflight.js';
 import {
@@ -578,9 +579,9 @@ export async function runPlanLoopCli(
       }
     }
 
-    const cursorBin = process.env.AGENT_QUORUM_CURSOR_BIN ?? 'cursor-agent';
+    const binaries = resolveRunnerBinaries();
     const required = runnersInUse(matrix, settings.fixPass, settings.translatePass);
-    const preflightFailure = preflightRunners(required, cursorBin);
+    const preflightFailure = preflightRunners(required, binaries);
     if (preflightFailure !== undefined) {
       process.stderr.write(`${preflightFailure.message}\n`);
       cleanupRunRegistry(runRegistryFile);
@@ -605,13 +606,12 @@ export async function runPlanLoopCli(
         scratch,
         projectRoot: projectRoot(),
         retry: { retryCount: settings.retryCount, retryDelaySeconds: settings.retryDelaySeconds },
-        claudeKnobs: knobs.claude,
-        cursorKnobs: knobs.cursor,
+        streamKnobs: knobs.stream,
         matrix,
         sessionMode: effort.sessionMode,
         creatorSessionFile,
         markdownSchemaPath: skills.markdownSchema,
-        cursorBin,
+        binaries,
         ...(process.env.AGENT_QUORUM_PROVIDER_DIAGNOSTICS === '1'
           ? { diagnosticsDir: path.join(work, 'diagnostics') }
           : {}),

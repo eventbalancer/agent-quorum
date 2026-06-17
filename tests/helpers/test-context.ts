@@ -4,8 +4,19 @@ import { effortMatrix } from '../../src/core/effort.js';
 import { DEFAULT_SPLIT_MIN_PHASES } from '../../src/stages/plan/plan-package.js';
 import type { SplitMode } from '../../src/core/split-policy.js';
 import { skillPaths, type RunContext } from '../../src/core/run-context.js';
+import { DISABLED_STREAM_KNOBS } from '../../src/providers/registry.js';
+import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';
+
+const BASE_STREAM_KNOBS: StreamKnobs = {
+  stallStatus: 124,
+  pollSeconds: 1,
+  graceSeconds: 1,
+  byteTimeoutSeconds: 0,
+  semanticTimeoutSeconds: 0,
+  wallTimeoutSeconds: 0,
+};
 
 export function fixturePermissions(): RolePermissions {
   const disallowed = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
@@ -77,27 +88,16 @@ export function makeTestRunContext(
       scratch,
       projectRoot: options.projectRoot ?? tmp,
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      claudeKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 0,
-        semanticTimeoutSeconds: 0,
-        wallTimeoutSeconds: 0,
-      },
-      cursorKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 0,
-        semanticTimeoutSeconds: 0,
-        wallTimeoutSeconds: 0,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: BASE_STREAM_KNOBS,
+        cursor: BASE_STREAM_KNOBS,
       },
       matrix: options.matrix ?? fixtureMatrix(),
       sessionMode: effortMatrix(effort).sessionMode,
       creatorSessionFile: path.join(work, 'creator.session-id'),
       markdownSchemaPath: path.join(REPO_ROOT, 'skills', '_shared', 'markdown.schema.json'),
-      cursorBin: 'cursor-agent',
+      binaries: { codex: 'codex', claude: 'claude', cursor: 'cursor-agent' },
     },
     passes: {
       fixPass: { timeoutSeconds: 0, semanticIdleTimeoutSeconds: 0, retryCount: 0 },

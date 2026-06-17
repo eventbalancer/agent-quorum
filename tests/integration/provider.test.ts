@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { providerRun } from '../../src/providers/provider.js';
+import { DISABLED_STREAM_KNOBS, resolveRunnerBinaries } from '../../src/providers/registry.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import type { ProviderRuntime } from '../../src/providers/runtime.js';
+import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { fixtureMatrix } from '../helpers/test-context.js';
 import {
@@ -12,6 +14,7 @@ import {
   captureStderr,
   emptyCritique,
   SKILLS_DIR,
+  withEnv,
   withEnvAsync,
   writeFakeBin,
   writeMarkdownWrapper,
@@ -26,6 +29,17 @@ const CREATOR_SKILL = path.join(SKILLS_DIR, 'plan-creator', 'SKILL.md');
 const TOOLS = 'Read,Grep,Glob';
 const DISALLOWED = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
 
+// Streaming runners share the same fast, mostly-disabled cadence in tests; the
+// watchdog cases below override individual claude/cursor fields off this base.
+const BASE_STREAM_KNOBS: StreamKnobs = {
+  stallStatus: 124,
+  pollSeconds: 1,
+  graceSeconds: 1,
+  byteTimeoutSeconds: 0,
+  semanticTimeoutSeconds: 0,
+  wallTimeoutSeconds: 0,
+};
+
 let tmp: string;
 let fake: string;
 let scratch: Scratch;
@@ -36,27 +50,16 @@ function makeRuntime(partial?: Partial<ProviderRuntime>): ProviderRuntime {
     scratch,
     projectRoot: tmp,
     retry: { retryCount: 3, retryDelaySeconds: 0 },
-    claudeKnobs: {
-      stallStatus: 124,
-      pollSeconds: 1,
-      graceSeconds: 1,
-      byteTimeoutSeconds: 0,
-      semanticTimeoutSeconds: 0,
-      wallTimeoutSeconds: 0,
-    },
-    cursorKnobs: {
-      stallStatus: 124,
-      pollSeconds: 1,
-      graceSeconds: 1,
-      byteTimeoutSeconds: 0,
-      semanticTimeoutSeconds: 0,
-      wallTimeoutSeconds: 0,
+    streamKnobs: {
+      codex: DISABLED_STREAM_KNOBS,
+      claude: BASE_STREAM_KNOBS,
+      cursor: BASE_STREAM_KNOBS,
     },
     matrix: fixtureMatrix(),
     sessionMode: 0,
     creatorSessionFile: path.join(tmp, 'creator.session-id'),
     markdownSchemaPath: path.join(SKILLS_DIR, '_shared', 'markdown.schema.json'),
-    cursorBin: 'cursor-agent',
+    binaries: { codex: 'codex', claude: 'claude', cursor: 'cursor-agent' },
     ...partial,
   };
 }
@@ -399,13 +402,10 @@ describe('claude sessions', () => {
     const providerRuntime = makeRuntime({
       sessionMode: 1,
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      claudeKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 1,
-        semanticTimeoutSeconds: 0,
-        wallTimeoutSeconds: 0,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: { ...BASE_STREAM_KNOBS, byteTimeoutSeconds: 1 },
+        cursor: BASE_STREAM_KNOBS,
       },
     });
     const liveId = '00000000-0000-4000-8000-0000000000aa';
@@ -448,13 +448,10 @@ describe('claude watchdog', () => {
     writeStructuredPlanFile(created, 'Created');
     const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      claudeKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 0,
-        semanticTimeoutSeconds: 2,
-        wallTimeoutSeconds: 0,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: { ...BASE_STREAM_KNOBS, semanticTimeoutSeconds: 2 },
+        cursor: BASE_STREAM_KNOBS,
       },
     });
 
@@ -487,13 +484,10 @@ describe('claude watchdog', () => {
     writeStructuredPlanFile(created, 'Created');
     const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      claudeKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 0,
-        semanticTimeoutSeconds: 2,
-        wallTimeoutSeconds: 5,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: { ...BASE_STREAM_KNOBS, semanticTimeoutSeconds: 2, wallTimeoutSeconds: 5 },
+        cursor: BASE_STREAM_KNOBS,
       },
     });
 
@@ -527,13 +521,10 @@ describe('claude watchdog', () => {
     writeStructuredPlanFile(created, 'Created');
     const providerRuntime = makeRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      claudeKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 0,
-        semanticTimeoutSeconds: 0,
-        wallTimeoutSeconds: 3,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: { ...BASE_STREAM_KNOBS, wallTimeoutSeconds: 3 },
+        cursor: BASE_STREAM_KNOBS,
       },
     });
 
@@ -1038,13 +1029,10 @@ describe('cursor liveness heartbeat', () => {
     const out = path.join(tmp, 'out.md');
     const providerRuntime = cursorRuntime({
       retry: { retryCount: 0, retryDelaySeconds: 0 },
-      cursorKnobs: {
-        stallStatus: 124,
-        pollSeconds: 1,
-        graceSeconds: 1,
-        byteTimeoutSeconds: 2,
-        semanticTimeoutSeconds: 0,
-        wallTimeoutSeconds: 0,
+      streamKnobs: {
+        codex: DISABLED_STREAM_KNOBS,
+        claude: BASE_STREAM_KNOBS,
+        cursor: { ...BASE_STREAM_KNOBS, byteTimeoutSeconds: 2 },
       },
     });
 
@@ -1434,5 +1422,49 @@ describe('provider stdout redaction through the real pipeline (AC-2)', () => {
     // Tool input, assistant prose, exec command, and retry reason all carried
     // the plant on stdout; only metadata reaches the logs.
     expect(capture.text()).not.toContain(PLANT);
+  });
+});
+
+describe('binary SSOT', () => {
+  it('the codex adapter spawns the resolved binaries.codex, not a literal', async () => {
+    const out = path.join(tmp, 'out.json');
+    const codexLog = path.join(tmp, 'codex.argv');
+    const cursorLog = path.join(tmp, 'cursor.argv');
+    // binaries.codex points at the distinct, PATH-present `cursor-agent` stub.
+    // Post-SSOT the codex adapter spawns whatever binaries.codex names, so the
+    // cursor stub records the codex argv while the literal `codex` stub (its own
+    // FAKE_CODEX_ARGV_LOG) is never invoked.
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      binaries: { codex: 'cursor-agent', claude: 'claude', cursor: 'cursor-agent' },
+    });
+
+    await withEnvAsync(
+      { PATH: fakePath(), FAKE_CODEX_ARGV_LOG: codexLog, FAKE_CURSOR_ARGV_LOG: cursorLog },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          out,
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'PROMPT BODY\n',
+        ),
+    );
+
+    const spawned = argvRecords(cursorLog);
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.[0]).toBe('exec');
+    expect(argvRecords(codexLog)).toEqual([]);
+  });
+
+  it('resolveRunnerBinaries passes an empty AGENT_QUORUM_CURSOR_BIN through verbatim', () => {
+    const binaries = withEnv({ AGENT_QUORUM_CURSOR_BIN: '' }, () => resolveRunnerBinaries());
+    expect(binaries.cursor).toBe('');
+    expect(binaries.codex).toBe('codex');
+    expect(binaries.claude).toBe('claude');
   });
 });

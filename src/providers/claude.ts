@@ -36,11 +36,11 @@ async function claudeStream(
 ): Promise<ClaudeStreamOutcome> {
   const filter = new StreamLogFilter();
   const result = await runStreamingCli({
-    command: 'claude',
+    command: providerRuntime.binaries.claude,
     args: ['-p', '--verbose', '--output-format', 'stream-json', ...args],
     promptText,
     cwd: providerRuntime.projectRoot,
-    knobs: providerRuntime.claudeKnobs,
+    knobs: providerRuntime.streamKnobs.claude,
     renderLine: (line) => filter.line(line),
     progressEvent: claudeProgressEvent,
     traceContext,
@@ -50,7 +50,7 @@ async function claudeStream(
   let status = result.status;
   if (result.stallReason !== undefined) {
     err(`claude stream stalled: ${result.stallReason}`);
-    status = providerRuntime.claudeKnobs.stallStatus;
+    status = providerRuntime.streamKnobs.claude.stallStatus;
   }
   return { status, output };
 }
@@ -127,7 +127,7 @@ async function claudeRunOnce(
   }
 
   const isStallWithLiveSession =
-    status === providerRuntime.claudeKnobs.stallStatus &&
+    status === providerRuntime.streamKnobs.claude.stallStatus &&
     sessionFile !== '' &&
     nonEmptyFile(sessionFile);
   if (isStallWithLiveSession) {

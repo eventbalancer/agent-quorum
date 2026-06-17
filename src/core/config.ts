@@ -3,12 +3,11 @@ import path from 'node:path';
 import { packageRoot } from '../runtime/env.js';
 import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
+import { RUNNERS, isRunner } from '../providers/registry.js';
 import type { Role, Runner } from '../types.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 
 const PLAN_ROLES: readonly Role[] = ['critic', 'creator', 'fixer', 'reviewer', 'translator'];
-
-const RUNNERS: readonly string[] = ['codex', 'claude', 'cursor'];
 const SETTINGS_KEYS = [
   'iters',
   'effort',
@@ -423,9 +422,9 @@ export function resolveRoleConfig(file: string = configFilePath()): RoleMatrix {
       envRunner !== undefined && envRunner !== ''
         ? envRunner
         : configFileValue(config, role, 'runner');
-    if (!RUNNERS.includes(runner)) {
+    if (!isRunner(runner)) {
       halt(
-        `agent-quorum config: role '${role}' has invalid runner '${runner}' (expected codex, claude, or cursor)`,
+        `agent-quorum config: role '${role}' has invalid runner '${runner}' (expected ${RUNNERS.join(', ')})`,
       );
     }
     const envModel = process.env[`AGENT_QUORUM_${upper}_MODEL`];
@@ -436,7 +435,7 @@ export function resolveRoleConfig(file: string = configFilePath()): RoleMatrix {
       envReasoning !== undefined && envReasoning !== ''
         ? envReasoning
         : configFileValue(config, role, 'reasoning');
-    matrix[role] = { runner: runner as Runner, model, reasoning };
+    matrix[role] = { runner, model, reasoning };
   }
   const full = matrix as RoleMatrix;
   log('config: effective role matrix (env > agent-quorum.json):');
@@ -515,6 +514,5 @@ export function runnersInUse(matrix: RoleMatrix, fixPass: 0 | 1, translatePass: 
     roles.push('translator');
   }
   const seen = new Set(roles.map((role) => matrix[role].runner));
-  const order: Runner[] = ['codex', 'claude', 'cursor'];
-  return order.filter((runner) => seen.has(runner));
+  return RUNNERS.filter((runner) => seen.has(runner));
 }

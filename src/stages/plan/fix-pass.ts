@@ -43,10 +43,13 @@ function fixPassRuntime(ctx: RunContext): ProviderRuntime {
       retryCount: ctx.passes.fixPass.retryCount,
       retryDelaySeconds: ctx.provider.retry.retryDelaySeconds,
     },
-    claudeKnobs: {
-      ...ctx.provider.claudeKnobs,
-      wallTimeoutSeconds: ctx.passes.fixPass.timeoutSeconds,
-      semanticTimeoutSeconds: ctx.passes.fixPass.semanticIdleTimeoutSeconds,
+    streamKnobs: {
+      ...ctx.provider.streamKnobs,
+      claude: {
+        ...ctx.provider.streamKnobs.claude,
+        wallTimeoutSeconds: ctx.passes.fixPass.timeoutSeconds,
+        semanticTimeoutSeconds: ctx.passes.fixPass.semanticIdleTimeoutSeconds,
+      },
     },
   };
 }

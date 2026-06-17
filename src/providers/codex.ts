@@ -53,10 +53,14 @@ export async function codexRun(
   const heartbeatSeconds = livenessHeartbeatSeconds();
   rmSync(outPath, { force: true });
 
-  const child = spawnDetached('codex', codexArgs(model, reasoning, schemaPath, outPath, prompt), {
-    cwd: providerRuntime.projectRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = spawnDetached(
+    providerRuntime.binaries.codex,
+    codexArgs(model, reasoning, schemaPath, outPath, prompt),
+    {
+      cwd: providerRuntime.projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   const filter = new StreamLogFilter();
   let pending = '';
   child.stdout?.on('data', (chunk: Buffer) => {
