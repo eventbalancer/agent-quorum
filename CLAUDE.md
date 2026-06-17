@@ -71,8 +71,9 @@ When facts conflict, trust in this order:
 5. [`docs/architecture.md`](docs/architecture.md),
    [`docs/configuration.md`](docs/configuration.md), [`docs/cli.md`](docs/cli.md),
    and [`docs/api.md`](docs/api.md) for runtime contracts.
-6. `agent-quorum.json` and `skills/**/*.schema.json` for default orchestration and
-   role I/O contracts.
+6. `src/core/defaults.ts` (built-in orchestration defaults, mirrored by
+   `agent-quorum.example.json`) and `skills/**/*.schema.json` for default
+   orchestration and role I/O contracts.
 
 ## 3. Required Entry Points
 

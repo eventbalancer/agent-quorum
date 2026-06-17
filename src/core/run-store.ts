@@ -245,17 +245,11 @@ export interface PruneResult {
   readonly kept: number;
 }
 
-const DEFAULT_RETAIN_COUNT = 50;
-const DEFAULT_RETAIN_DAYS = 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-function numberEnv(key: string, fallback: number): number {
-  const raw = process.env[key];
-  if (raw === undefined || raw === '') {
-    return fallback;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
+export interface RetentionDefaults {
+  readonly keepCount: number;
+  readonly maxAgeDays: number;
 }
 
 interface ResolvedRetention {
@@ -264,25 +258,29 @@ interface ResolvedRetention {
   readonly dryRun: boolean;
 }
 
-function resolveRetention(policy: RetentionPolicy): ResolvedRetention {
+function resolveRetention(policy: RetentionPolicy, defaults: RetentionDefaults): ResolvedRetention {
   return {
-    keepCount: policy.keepCount ?? numberEnv('AGENT_QUORUM_RETAIN_COUNT', DEFAULT_RETAIN_COUNT),
-    maxAgeDays: policy.maxAgeDays ?? numberEnv('AGENT_QUORUM_RETAIN_DAYS', DEFAULT_RETAIN_DAYS),
+    keepCount: policy.keepCount ?? defaults.keepCount,
+    maxAgeDays: policy.maxAgeDays ?? defaults.maxAgeDays,
     dryRun: policy.dryRun === true,
   };
 }
 
 // The count bound the run listing shares with prune so "recent finished" never
 // shows more than retention keeps.
-export function retentionKeepCount(): number {
-  return numberEnv('AGENT_QUORUM_RETAIN_COUNT', DEFAULT_RETAIN_COUNT);
+export function retentionKeepCount(defaults: RetentionDefaults): number {
+  return defaults.keepCount;
 }
 
 // Bound the ledger by removing only terminal records (state on disk is not
 // `running`) beyond `keepCount` most-recent, or older than `maxAgeDays`.
 // Functional workdirs are never touched; prune removes records only.
-export function pruneRuns(stateDir: string, policy: RetentionPolicy = {}): PruneResult {
-  const { keepCount, maxAgeDays, dryRun } = resolveRetention(policy);
+export function pruneRuns(
+  stateDir: string,
+  policy: RetentionPolicy,
+  defaults: RetentionDefaults,
+): PruneResult {
+  const { keepCount, maxAgeDays, dryRun } = resolveRetention(policy, defaults);
   const records = readRunRecords(stateDir);
   const terminal = records
     .filter((record) => record.state !== 'running')

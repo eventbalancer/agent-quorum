@@ -43,8 +43,15 @@ function fakePath(): string {
   return `${fake}:${process.env.PATH ?? ''}`;
 }
 
-function buildContext(matrix?: RoleMatrix): RunContext {
-  return makeTestRunContext(tmp, work, scratch, matrix !== undefined ? { matrix } : {});
+function buildContext(
+  opts: { matrix?: RoleMatrix; claudePermissionMode?: string } = {},
+): RunContext {
+  return makeTestRunContext(tmp, work, scratch, {
+    ...(opts.matrix !== undefined ? { matrix: opts.matrix } : {}),
+    ...(opts.claudePermissionMode !== undefined
+      ? { claudePermissionMode: opts.claudePermissionMode }
+      : {}),
+  });
 }
 
 function writeStubPlan(file: string): void {
@@ -84,14 +91,13 @@ describe('runCreatorCreate shape gate', () => {
   it('claude plan mode + stub artifact throws the targeted plan-mode diagnostic (exit 4)', async () => {
     const result = path.join(tmp, 'result.md');
     writeStubPlan(result);
-    const ctx = buildContext();
+    const ctx = buildContext({ claudePermissionMode: 'plan' });
     const out = path.join(work, 'plan.v0.md');
 
     const halt = await captureHalt(
       withEnvAsync(
         {
           PATH: fakePath(),
-          CLAUDE_PERMISSION_MODE: 'plan',
           FAKE_CLAUDE_MARKDOWN_RESULT: result,
         },
         () => runCreatorCreate(ctx, ctx.inputPath, out),
@@ -107,14 +113,13 @@ describe('runCreatorCreate shape gate', () => {
   it('claude plan mode + substantial-but-malformed plan still throws the targeted diagnostic', async () => {
     const result = path.join(tmp, 'result.md');
     writePartialPlan(result);
-    const ctx = buildContext();
+    const ctx = buildContext({ claudePermissionMode: 'plan' });
     const out = path.join(work, 'plan.v0.md');
 
     const halt = await captureHalt(
       withEnvAsync(
         {
           PATH: fakePath(),
-          CLAUDE_PERMISSION_MODE: 'plan',
           FAKE_CLAUDE_MARKDOWN_RESULT: result,
         },
         () => runCreatorCreate(ctx, ctx.inputPath, out),
@@ -136,7 +141,6 @@ describe('runCreatorCreate shape gate', () => {
       withEnvAsync(
         {
           PATH: fakePath(),
-          CLAUDE_PERMISSION_MODE: undefined,
           FAKE_CLAUDE_MARKDOWN_RESULT: result,
         },
         () => runCreatorCreate(ctx, ctx.inputPath, out),
@@ -154,8 +158,11 @@ describe('runCreatorCreate shape gate', () => {
     const partialMarkdown = '# Partial Plan\n\n## At a Glance\n- Outcome: partial.\n';
     writeFileSync(result, `${JSON.stringify({ plan_markdown: partialMarkdown }, null, 2)}\n`);
     const ctx = buildContext({
-      ...fixtureMatrix(),
-      creator: { runner: 'codex', model: 'gpt-5.5', reasoning: 'low' },
+      matrix: {
+        ...fixtureMatrix(),
+        creator: { runner: 'codex', model: 'gpt-5.5', reasoning: 'low' },
+      },
+      claudePermissionMode: 'plan',
     });
     const out = path.join(work, 'plan.v0.md');
 
@@ -163,7 +170,6 @@ describe('runCreatorCreate shape gate', () => {
       withEnvAsync(
         {
           PATH: fakePath(),
-          CLAUDE_PERMISSION_MODE: 'plan',
           FAKE_CODEX_OUTPUT: result,
           FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         },
@@ -187,7 +193,6 @@ describe('runCreatorCreate shape gate', () => {
       withEnvAsync(
         {
           PATH: fakePath(),
-          CLAUDE_PERMISSION_MODE: undefined,
           FAKE_CLAUDE_MARKDOWN_RESULT: result,
         },
         () => runCreatorCreate(ctx, ctx.inputPath, out),

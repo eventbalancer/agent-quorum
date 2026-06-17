@@ -7,6 +7,7 @@ import { AGENT_QUORUM_PREFIX, colorsEnabled } from '../runtime/log.js';
 import { packageRoot } from '../runtime/env.js';
 import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
+import { resolveConfigForHome } from '../core/config.js';
 import { commandOf, ppidOf, ps, psField } from '../runtime/proc.js';
 import { critiqueHealth } from '../core/metrics.js';
 import { resolveRunState, type RunRecord } from '../core/run-store.js';
@@ -365,7 +366,7 @@ function pad(value: string, width: number): string {
 // The iteration table comes from $WORK artifacts; run.log only feeds last event.
 function printIterTable(work: string, pal: Palette, write: (s: string) => void): void {
   const criticSchema = path.join(packageRoot(), 'skills', 'plan-critic', 'critique.schema.json');
-  const maxPlanLines = Number(process.env.AGENT_QUORUM_MAX_PLAN_LINES ?? 900);
+  const maxPlanLines = resolveConfigForHome(resolveArtifactRoots().home).status.maxPlanLines;
   const iters: number[] = [];
   for (const name of readdirSync(work)) {
     const match = /^critique\.v([0-9]+)\.json$/.exec(name);

@@ -3,7 +3,7 @@ import { nonEmptyFile } from '../runtime/files.js';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { StreamLogFilter } from './stream-log.js';
-import { livenessHeartbeatSeconds, runLivenessHeartbeat } from './heartbeat.js';
+import { runLivenessHeartbeat } from './heartbeat.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
 import type { ProviderRuntime } from './runtime.js';
 
@@ -50,7 +50,7 @@ export async function codexRun(
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
 ): Promise<number> {
-  const heartbeatSeconds = livenessHeartbeatSeconds();
+  const heartbeatSeconds = providerRuntime.livenessHeartbeatSeconds;
   rmSync(outPath, { force: true });
 
   const child = spawnDetached(
@@ -61,7 +61,7 @@ export async function codexRun(
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
-  const filter = new StreamLogFilter();
+  const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
   let pending = '';
   child.stdout?.on('data', (chunk: Buffer) => {
     if (diagnosticSink !== undefined) {

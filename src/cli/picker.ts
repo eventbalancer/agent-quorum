@@ -7,7 +7,8 @@ import {
   type RunRecord,
   type RunState,
 } from '../core/run-store.js';
-import { knownStateDirs } from '../runtime/paths.js';
+import { knownStateDirs, resolveArtifactRoots } from '../runtime/paths.js';
+import { resolveConfigForHome } from '../core/config.js';
 import { systemProbes } from './probes.js';
 
 export interface RunCandidate {
@@ -44,7 +45,9 @@ export function listCandidates(stateDirs?: readonly string[]): RunCandidate[] {
   }
   live.sort((a, b) => compareRunsByRecency(a.record, b.record));
   finished.sort((a, b) => compareRunsByRecency(a.record, b.record));
-  return [...live, ...finished.slice(0, retentionKeepCount())];
+  const { home } = resolveArtifactRoots();
+  const retention = resolveConfigForHome(home).retention;
+  return [...live, ...finished.slice(0, retentionKeepCount(retention))];
 }
 
 function dim(text: string, color: boolean): string {

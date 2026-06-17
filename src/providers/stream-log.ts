@@ -218,9 +218,8 @@ export class StreamLogFilter {
   private thinkingSeen = 0;
   private readonly thinkingEvery: number;
 
-  constructor(thinkingEvery?: number) {
-    this.thinkingEvery =
-      thinkingEvery ?? Number(process.env.AGENT_QUORUM_CLAUDE_THINKING_LOG_EVERY ?? 3);
+  constructor(thinkingEvery = 3) {
+    this.thinkingEvery = thinkingEvery;
   }
 
   line(line: string): string[] {

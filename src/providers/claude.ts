@@ -34,7 +34,7 @@ async function claudeStream(
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
 ): Promise<ClaudeStreamOutcome> {
-  const filter = new StreamLogFilter();
+  const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
   const result = await runStreamingCli({
     command: providerRuntime.binaries.claude,
     args: ['-p', '--verbose', '--output-format', 'stream-json', ...args],

@@ -348,12 +348,8 @@ export function defaultPlanLoopConfig(): JsonObject {
   };
 }
 
-export function writeDefaultPlanLoopConfig(file: string): void {
-  writeFileSync(file, `${JSON.stringify(defaultPlanLoopConfig(), null, 2)}\n`);
-}
-
 // Role specs use the harness form "role:runner[:model[:reasoning]]".
-export function writePlanLoopConfig(file: string, ...specs: string[]): void {
+function planLoopConfigWithRoles(...specs: string[]): JsonObject {
   const config = defaultPlanLoopConfig();
   const roles = config.roles as Record<string, JsonObject>;
   for (const spec of specs) {
@@ -375,7 +371,22 @@ export function writePlanLoopConfig(file: string, ...specs: string[]): void {
       target.reasoning = reasoning;
     }
   }
-  writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  return config;
+}
+
+export function storeConfigPath(home: string): string {
+  return path.join(home, 'config.json');
+}
+
+// Persist the operator config under a temp store home — the AGENT_QUORUM_HOME
+// per-user store that replaced the legacy package-root config channels.
+export function writeStoreConfig(home: string, config: JsonObject = defaultPlanLoopConfig()): void {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(storeConfigPath(home), `${JSON.stringify(config, null, 2)}\n`);
+}
+
+export function writeStoreConfigRoles(home: string, ...specs: string[]): void {
+  writeStoreConfig(home, planLoopConfigWithRoles(...specs));
 }
 
 export interface StderrCapture {

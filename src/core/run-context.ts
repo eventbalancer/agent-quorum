@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ProviderRuntime } from '../providers/runtime.js';
-import type { RolePermissions, RunSettings } from './config.js';
+import type { ResolvedConfig, RolePermissions, RunSettings } from './config.js';
 import type { EffortMatrix } from './effort.js';
 import type { PassKnobs } from './knobs.js';
 import type { SplitPolicy } from './split-policy.js';
@@ -54,6 +54,7 @@ export interface RunContext {
   mode: RunMode;
   inputPath: string;
   plansDir: string;
+  config: ResolvedConfig;
   settings: RunSettings;
   effort: EffortMatrix;
   permissions: RolePermissions;

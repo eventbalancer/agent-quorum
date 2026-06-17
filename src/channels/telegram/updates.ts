@@ -1,6 +1,6 @@
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import { telegramCall, type TelegramFailure } from './client.js';
-import { TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS } from './config.js';
+import { TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS, type TelegramRuntime } from './config.js';
 
 export interface TelegramUpdate {
   readonly updateId: number;
@@ -61,6 +61,7 @@ function parseChatUpdate(entry: JsonValue, chat: string): TelegramUpdate | undef
 // getUpdates confirms updates bot-globally; httpTimeoutSeconds bounds the HTTP
 // abort independently of the long-poll so a hung receive surfaces promptly.
 export async function telegramGetUpdates(
+  runtime: TelegramRuntime,
   offset: number,
   timeout = 50,
   options: { httpTimeoutSeconds?: number } = {},
@@ -76,12 +77,17 @@ export async function telegramGetUpdates(
     get: true,
     timeoutSeconds: httpTimeoutSeconds,
   };
-  const telegramCallResult = await telegramCall('getUpdates', getUpdatesParams, getUpdatesOptions);
+  const telegramCallResult = await telegramCall(
+    runtime,
+    'getUpdates',
+    getUpdatesParams,
+    getUpdatesOptions,
+  );
   if (!telegramCallResult.ok) {
     return { ok: false, failure: telegramCallResult.failure };
   }
 
-  const chat = process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '';
+  const chat = runtime.chatId;
   const entries = Array.isArray(telegramCallResult.body.result)
     ? telegramCallResult.body.result
     : [];

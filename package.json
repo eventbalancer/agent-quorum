@@ -38,7 +38,6 @@
   "files": [
     "dist",
     "skills",
-    "agent-quorum.json",
     "README.md",
     "LICENSE"
   ],

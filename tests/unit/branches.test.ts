@@ -22,7 +22,7 @@ import {
   criticPrompt,
   topologyContext,
 } from '../../src/stages/plan/critic.js';
-import { resetConfigCache, resolveRunSettings } from '../../src/core/config.js';
+import { resolveConfig } from '../../src/core/config.js';
 import { resolveWatchdogKnobs } from '../../src/core/knobs.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import { interruptThenTerminate, spawnDetached, waitForExit } from '../../src/runtime/exec.js';
@@ -30,7 +30,6 @@ import {
   captureStderr,
   defaultPlanLoopConfig,
   stripAnsi,
-  withEnv,
   writeCritique,
 } from '../helpers/harness.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
@@ -61,7 +60,6 @@ interface SanitizedMeta {
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-branches.'));
-  resetConfigCache();
 });
 
 afterEach(() => {
@@ -310,92 +308,84 @@ describe('critic prompt helpers', () => {
 });
 
 describe('config and knob halts', () => {
-  function writeConfig(name: string, mutate: (config: JsonObject) => void): string {
+  function storeSettings(env: NodeJS.ProcessEnv, mutate: (settings: JsonObject) => void) {
     const config = defaultPlanLoopConfig();
-    mutate(config);
-    const file = path.join(tmp, name);
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-    return file;
+    mutate(config.settings as JsonObject);
+    writeFileSync(path.join(tmp, 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+    return resolveConfig({ env, home: tmp }).config.settings;
   }
 
-  it('halts on missing version/settings/roles and invalid translate', () => {
+  it('preserves translate/locale precedence and validation through resolveConfig', () => {
     const capture = captureStderr();
     try {
-      const noVersion = writeConfig('no-version.json', (config) => {
-        Reflect.deleteProperty(config, 'version');
-      });
-      expect(() => resolveRunSettings({}, noVersion)).toThrow(/missing required field version/);
-      resetConfigCache();
-      const noSettings = writeConfig('no-settings.json', (config) => {
-        Reflect.deleteProperty(config, 'settings');
-      });
-      expect(() => resolveRunSettings({}, noSettings)).toThrow(/missing required object settings/);
-      resetConfigCache();
-      const noRoles = writeConfig('no-roles.json', (config) => {
-        Reflect.deleteProperty(config, 'roles');
-      });
-      expect(() => resolveRunSettings({}, noRoles)).toThrow(/missing required object roles/);
-      resetConfigCache();
-      const file = writeConfig('translate.json', (config) => {
-        (config.settings as JsonObject).translate = 'maybe';
-      });
-      expect(() => resolveRunSettings({}, file)).toThrow(
+      expect(() => storeSettings({}, (s) => (s.translate = 'maybe'))).toThrow(
         /settings\.translate must be true or false/,
       );
-      resetConfigCache();
-      const onOff = writeConfig('translate-on.json', (config) => {
-        (config.settings as JsonObject).translate = 'on';
-      });
-      expect(resolveRunSettings({}, onOff).translatePass).toBe(1);
-      expect(resolveRunSettings({}, onOff).locale).toBe('ru');
+      const onOff = storeSettings({}, (s) => (s.translate = 'on'));
+      expect(onOff.translatePass).toBe(1);
+      expect(onOff.locale).toBe('ru');
       expect(
-        withEnv({ AGENT_QUORUM_TRANSLATE: 'off' }, () => resolveRunSettings({}, onOff))
-          .translatePass,
+        storeSettings({ AGENT_QUORUM_TRANSLATE: 'off' }, (s) => (s.translate = 'on')).translatePass,
       ).toBe(0);
-      resetConfigCache();
-      const localeOn = writeConfig('locale-on.json', (config) => {
-        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
-        (config.settings as JsonObject).locale = 'pt-BR';
+      const localeSettings = storeSettings({}, (s) => {
+        Reflect.deleteProperty(s, 'translate');
+        s.locale = 'pt-BR';
       });
-      const localeSettings = resolveRunSettings({}, localeOn);
       expect(localeSettings.translatePass).toBe(1);
       expect(localeSettings.locale).toBe('pt-BR');
-      resetConfigCache();
-      const defaultLocale = writeConfig('default-locale.json', (config) => {
-        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
-      });
-      const defaultLocaleSettings = resolveRunSettings({}, defaultLocale);
+      const defaultLocaleSettings = storeSettings({}, (s) =>
+        Reflect.deleteProperty(s, 'translate'),
+      );
       expect(defaultLocaleSettings.translatePass).toBe(0);
       expect(defaultLocaleSettings.locale).toBe('en');
-      resetConfigCache();
-      const englishLocale = writeConfig('english-locale.json', (config) => {
-        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
-        (config.settings as JsonObject).locale = 'en';
+      const englishSettings = storeSettings({}, (s) => {
+        Reflect.deleteProperty(s, 'translate');
+        s.locale = 'en';
       });
-      const englishSettings = resolveRunSettings({}, englishLocale);
       expect(englishSettings.translatePass).toBe(0);
       expect(englishSettings.locale).toBe('en');
-      resetConfigCache();
-      const invalidLocale = writeConfig('invalid-locale.json', (config) => {
-        Reflect.deleteProperty(config.settings as JsonObject, 'translate');
-        (config.settings as JsonObject).locale = '../ru';
-      });
-      expect(() => resolveRunSettings({}, invalidLocale)).toThrow(/settings\.locale/);
+      expect(() =>
+        storeSettings({}, (s) => {
+          Reflect.deleteProperty(s, 'translate');
+          s.locale = '../ru';
+        }),
+      ).toThrow(/settings\.locale/);
     } finally {
       capture.restore();
     }
   });
 
-  it('validates watchdog knobs with reference messages and defaults', () => {
-    const knobs = resolveWatchdogKnobs();
+  it('projects resolved watchdog knobs and enforces a positive claude poll', () => {
+    const resolved = (env: NodeJS.ProcessEnv = {}) => resolveConfig({ env, home: tmp }).config;
+    const knobs = resolveWatchdogKnobs(resolved());
     expect(knobs.stream.claude.wallTimeoutSeconds).toBe(1800);
     expect(knobs.translatePass.retryCount).toBe(1);
+    const capture = captureStderr();
+    try {
+      expect(() =>
+        resolveConfig({ env: { AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS: 'soon' }, home: tmp }),
+      ).toThrow(HaltError);
+    } finally {
+      capture.restore();
+    }
     expect(() =>
-      withEnv({ AGENT_QUORUM_CLAUDE_STALL_TIMEOUT_SECONDS: 'soon' }, () => resolveWatchdogKnobs()),
-    ).toThrow(HaltError);
-    expect(() =>
-      withEnv({ AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS: '0' }, () => resolveWatchdogKnobs()),
+      resolveWatchdogKnobs(resolved({ AGENT_QUORUM_CLAUDE_STALL_POLL_SECONDS: '0' })),
     ).toThrow(/expects a positive integer/);
+  });
+
+  it('does not require a positive cursor poll yet still validates cursor stream env', () => {
+    const resolved = (env: NodeJS.ProcessEnv = {}) => resolveConfig({ env, home: tmp }).config;
+    expect(() =>
+      resolveWatchdogKnobs(resolved({ AGENT_QUORUM_CURSOR_STALL_POLL_SECONDS: '0' })),
+    ).not.toThrow();
+    const capture = captureStderr();
+    try {
+      expect(() =>
+        resolveConfig({ env: { AGENT_QUORUM_CURSOR_STALL_TIMEOUT_SECONDS: 'soon' }, home: tmp }),
+      ).toThrow(HaltError);
+    } finally {
+      capture.restore();
+    }
   });
 });
 

@@ -13,13 +13,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ExitCode, runPlanLoop } from '../../src/index.js';
-import { resetConfigCache } from '../../src/core/config.js';
 import {
   captureStderr,
   emptyCritique,
   REPO_ROOT,
   withEnvAsync,
-  writeDefaultPlanLoopConfig,
+  writeStoreConfig,
   writeFakeBin,
   writeLargeStructuredPlanFile,
   writeStructuredPlanFile,
@@ -36,7 +35,7 @@ type EnvOverrides = Record<string, string | undefined>;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_HOME: path.join(tmp, 'home'),
     AGENT_QUORUM_WORK_DIR: work,
     AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
     AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
@@ -63,9 +62,8 @@ beforeEach(() => {
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+  writeStoreConfig(path.join(tmp, 'home'));
   emptyCritique(path.join(tmp, 'empty.json'));
-  resetConfigCache();
   capture = captureStderr();
 });
 
@@ -184,9 +182,10 @@ describe('bin + packaged files contract (AC-1, AC-6)', () => {
     expect(Object.keys(manifest.bin)).not.toContain(LEGACY_BIN);
   });
 
-  it('ships agent-quorum.json and not the legacy config so installed packageRoot resolves', () => {
+  it('ships the skills/ marker and no package-root config so installed packageRoot resolves', () => {
     const manifest = readManifest();
-    expect(manifest.files).toContain('agent-quorum.json');
+    expect(manifest.files).toContain('skills');
+    expect(manifest.files).not.toContain('agent-quorum.json');
     expect(manifest.files).not.toContain(LEGACY_CONFIG_NAME);
   });
 });

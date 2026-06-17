@@ -5,6 +5,7 @@
     "effort": "high",
     "fix": true,
     "translate": false,
+    "locale": "",
     "diffThreshold": 5,
     "retryCount": 3,
     "retryDelaySeconds": 10
@@ -33,9 +34,9 @@
       "createTools": ["Read", "Grep", "Glob"],
       "createDisallowedTools": [
         "Write",
-        "Bash",
         "Edit",
         "NotebookEdit",
+        "Bash",
         "Agent",
         "Task",
         "ToolSearch",
@@ -44,9 +45,9 @@
       "updateTools": ["Read"],
       "updateDisallowedTools": [
         "Write",
-        "Bash",
         "Edit",
         "NotebookEdit",
+        "Bash",
         "Agent",
         "Task",
         "ToolSearch",
@@ -59,8 +60,8 @@
       "reasoning": "high",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
-        "Edit",
         "Write",
+        "Edit",
         "NotebookEdit",
         "Bash",
         "Agent",
@@ -101,5 +102,58 @@
         "AskUserQuestion"
       ]
     }
-  }
+  },
+  "knobs": {
+    "claude": {
+      "stallTimeoutSeconds": 600,
+      "stallPollSeconds": 5,
+      "stallInterruptGraceSeconds": 20,
+      "callTimeoutSeconds": 1800,
+      "semanticIdleTimeoutSeconds": 900
+    },
+    "cursor": {
+      "stallTimeoutSeconds": 600,
+      "stallPollSeconds": 5,
+      "stallInterruptGraceSeconds": 20,
+      "callTimeoutSeconds": 1800,
+      "semanticIdleTimeoutSeconds": 900
+    },
+    "fixPass": {
+      "timeoutSeconds": 900,
+      "semanticIdleTimeoutSeconds": 900,
+      "retryCount": 1
+    },
+    "translatePass": {
+      "timeoutSeconds": 900,
+      "semanticIdleTimeoutSeconds": 900,
+      "retryCount": 1
+    }
+  },
+  "split": {
+    "mode": "auto",
+    "minPhases": 5
+  },
+  "retention": {
+    "keepCount": 50,
+    "maxAgeDays": 30
+  },
+  "telegram": {
+    "chatId": "",
+    "clarify": "auto",
+    "clarifyDeadlineSeconds": 86400,
+    "pollTimeoutSeconds": 50,
+    "httpTimeoutSeconds": 70,
+    "receiveFailureWindowSeconds": 120,
+    "receiveBackoffSeconds": 2
+  },
+  "providers": {
+    "livenessHeartbeatSeconds": 30,
+    "claudeThinkingEvery": 3,
+    "cursorBin": "cursor-agent",
+    "providerDiagnostics": false
+  },
+  "status": {
+    "maxPlanLines": 900
+  },
+  "claudePermissionMode": "default"
 }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { HaltError } from '../runtime/halt.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
+import { resolveConfigForHome } from '../core/config.js';
 import { pruneRuns, resolveRunState, type RetentionPolicy } from '../core/run-store.js';
 import { LOGS_USAGE, PRUNE_USAGE, SHOW_USAGE } from './help.js';
 import { systemProbes } from './probes.js';
@@ -246,7 +247,9 @@ export function runPruneCli(args: readonly string[], out: Writer = stdout): numb
     ...(policy.maxAgeDays !== undefined ? { maxAgeDays: policy.maxAgeDays } : {}),
     dryRun: policy.dryRun,
   };
-  const result = pruneRuns(resolveArtifactRoots().stateDir, retention);
+  const { home, stateDir } = resolveArtifactRoots();
+  const defaults = resolveConfigForHome(home).retention;
+  const result = pruneRuns(stateDir, retention, defaults);
   const verb = policy.dryRun ? 'would remove' : 'removed';
   out(`${verb} ${result.removed.length} run record(s); kept ${result.kept}\n`);
   return 0;

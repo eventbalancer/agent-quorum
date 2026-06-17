@@ -6,10 +6,11 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { loadAgentQuorumDotenv, packageRoot, projectRoot } from '../../runtime/env.js';
+import { packageRoot, projectRoot } from '../../runtime/env.js';
 import { fileLineCount } from '../../runtime/files.js';
 import { installSignalTeardown, ownPgid } from '../../runtime/exec.js';
 import { HaltError } from '../../runtime/halt.js';
@@ -34,13 +35,17 @@ import {
 } from '../../core/run-store.js';
 import { runClarificationGate } from './clarify.js';
 import {
-  configFilePath,
+  resolveConfig,
   resolveRoleConfig,
   resolveRolePermissions,
   resolveRunSettings,
   runnersInUse,
   type CliSettings,
+  type ResolveOverrides,
+  type Secrets,
 } from '../../core/config.js';
+import { isJsonObject, type JsonValue } from '../../core/json.js';
+import { handoffDir } from '../../core/store.js';
 import { runCreatorCreate } from './creator.js';
 import { effortMatrix } from '../../core/effort.js';
 import { runFixPass } from './fix-pass.js';
@@ -50,11 +55,9 @@ import { resolveRunnerBinaries } from '../../providers/registry.js';
 import { runIterationLoop } from './loop.js';
 import { preflightRunners } from './preflight.js';
 import {
-  DEFAULT_SPLIT_MIN_PHASES,
   emitPlanPackage,
   evaluateSplitDecision,
   parsePlanStructure,
-  resolveSplitMode,
   SPLIT_DECISION_FILE,
   validatePlanPackage,
   type PackageHealth,
@@ -71,6 +74,7 @@ import { buildRunReport, writeSummary, type RunReport } from './summary.js';
 import {
   telegramNotifyCompletion,
   type TelegramCompletionNotification,
+  type TelegramRuntime,
 } from '../../channels/telegram/index.js';
 import { runTranslatePass } from './translate-pass.js';
 import {
@@ -239,14 +243,18 @@ export interface RunOutcome {
 type CompletionNotificationDetails = Omit<TelegramCompletionNotification, 'inputPath' | 'workDir'>;
 type CompletionNotifier = (details: CompletionNotificationDetails) => Promise<void>;
 
-function createCompletionNotifier(inputPath: string, workDir: string): CompletionNotifier {
+function createCompletionNotifier(
+  inputPath: string,
+  workDir: string,
+  runtime: TelegramRuntime,
+): CompletionNotifier {
   let didNotifyCompletion = false;
   return async (details) => {
     if (didNotifyCompletion) {
       return;
     }
     didNotifyCompletion = true;
-    await telegramNotifyCompletion({ inputPath, workDir, ...details });
+    await telegramNotifyCompletion(runtime, { inputPath, workDir, ...details });
   };
 }
 
@@ -411,19 +419,103 @@ function resolveFinalStatus({
   return { status: 'clean', reason: '' };
 }
 
+// A malformed forwarded value fails the run before any provider work rather than being dropped.
+function readForwardedOverrides(env: NodeJS.ProcessEnv, home: string): ResolveOverrides {
+  const overrides: ResolveOverrides = {};
+  const configJson = env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON;
+  if (configJson !== undefined && configJson !== '') {
+    let parsed: JsonValue;
+    try {
+      parsed = JSON.parse(configJson) as JsonValue;
+    } catch {
+      throw new HaltError('AGENT_QUORUM_CONFIG_OVERRIDE_JSON is not valid JSON', 1);
+    }
+    if (!isJsonObject(parsed)) {
+      throw new HaltError('AGENT_QUORUM_CONFIG_OVERRIDE_JSON must be a JSON object', 1);
+    }
+    overrides.config = parsed;
+  }
+  const secretFile = env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE;
+  if (secretFile !== undefined && secretFile !== '') {
+    overrides.secrets = readSecretHandoff(secretFile, home);
+  }
+  return overrides;
+}
+
+// Confirm the path resolves to a regular file strictly inside <home>/handoff/ before any
+// unlink, so a hostile env var cannot turn the reader into an arbitrary-file delete.
+function readSecretHandoff(filePath: string, home: string): Secrets {
+  let dir: string;
+  try {
+    dir = realpathSync(handoffDir(home));
+  } catch {
+    throw new HaltError(
+      'AGENT_QUORUM_SECRETS_OVERRIDE_FILE set but the store handoff directory does not exist',
+      1,
+    );
+  }
+  let resolved: string;
+  try {
+    resolved = realpathSync(filePath);
+  } catch {
+    throw new HaltError(
+      'AGENT_QUORUM_SECRETS_OVERRIDE_FILE does not resolve to a readable file',
+      1,
+    );
+  }
+  if (!resolved.startsWith(dir + path.sep)) {
+    throw new HaltError(
+      'AGENT_QUORUM_SECRETS_OVERRIDE_FILE must resolve inside the store handoff directory',
+      1,
+    );
+  }
+  if (!statSync(resolved).isFile()) {
+    throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE must resolve to a regular file', 1);
+  }
+  const raw = readFileSync(resolved, 'utf8');
+  unlinkSync(resolved);
+  let parsed: JsonValue;
+  try {
+    parsed = JSON.parse(raw) as JsonValue;
+  } catch {
+    throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE is not valid JSON', 1);
+  }
+  if (!isJsonObject(parsed)) {
+    throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE must contain a JSON object', 1);
+  }
+  const token = parsed.telegramBotToken;
+  if (token !== undefined && typeof token !== 'string') {
+    throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE telegramBotToken must be a string', 1);
+  }
+  return token === undefined ? {} : { telegramBotToken: token };
+}
+
 export async function runPlanLoopCli(
   args: readonly string[],
   overrides: RunOverrides = {},
 ): Promise<RunOutcome> {
-  loadAgentQuorumDotenv();
   const parsed = parseRunArgs(args);
 
-  const configFile = overrides.configFile ?? configFilePath();
-  const settings = resolveRunSettings(parsed.cli, configFile);
-  const knobs = resolveWatchdogKnobs();
+  const { home, runsDir, stateDir } = resolveArtifactRoots(overrides);
+  // Typed RunOverrides and the detached child's forwarded env are exclusive in practice;
+  // typed input wins if both appear.
+  const forwarded = readForwardedOverrides(process.env, home);
+  const configOverrides: ResolveOverrides = {
+    cli: parsed.cli,
+    ...(forwarded.config !== undefined ? { config: forwarded.config } : {}),
+    ...(forwarded.secrets !== undefined ? { secrets: forwarded.secrets } : {}),
+    ...(overrides.config !== undefined ? { config: overrides.config } : {}),
+    ...(overrides.secrets !== undefined ? { secrets: overrides.secrets } : {}),
+  };
+  const { config: resolved } = resolveConfig({
+    overrides: configOverrides,
+    env: process.env,
+    home,
+  });
+  const settings = resolveRunSettings(resolved);
+  const knobs = resolveWatchdogKnobs(resolved);
   const effort = effortMatrix(settings.effort);
 
-  const { runsDir, stateDir } = resolveArtifactRoots(overrides);
   const plansDir = runsDir;
   const inputPath = absolutePath(parsed.inputPath);
   const base = path.basename(inputPath, '.md');
@@ -454,7 +546,7 @@ export async function runPlanLoopCli(
   const logPath = path.join(work, 'run.log');
   const runMetaFile = path.join(work, 'run.meta.tsv');
   const runRegistryFile = path.join(runStateDir, `${process.pid}.tsv`);
-  const notifyCompletion = createCompletionNotifier(inputPath, work);
+  const notifyCompletion = createCompletionNotifier(inputPath, work, resolved.telegram);
 
   const pgid = ownPgid();
   const startToken = procStartToken(process.pid) ?? '';
@@ -497,13 +589,13 @@ export async function runPlanLoopCli(
     ).runId;
     log(`run ${runId} (${name})`);
     try {
-      pruneRuns(runStateDir);
+      pruneRuns(runStateDir, {}, resolved.retention);
     } catch {
       /* best-effort retention; never block a run on prune */
     }
 
-    const matrix = resolveRoleConfig(configFile);
-    const permissions = resolveRolePermissions(configFile);
+    const matrix = resolveRoleConfig(resolved);
+    const permissions = resolveRolePermissions(resolved);
 
     const metadata: RunMetadata = {
       pid: process.pid,
@@ -579,7 +671,7 @@ export async function runPlanLoopCli(
       }
     }
 
-    const binaries = resolveRunnerBinaries();
+    const binaries = { ...resolveRunnerBinaries(), cursor: resolved.providers.cursorBin };
     const required = runnersInUse(matrix, settings.fixPass, settings.translatePass);
     const preflightFailure = preflightRunners(required, binaries);
     if (preflightFailure !== undefined) {
@@ -598,6 +690,7 @@ export async function runPlanLoopCli(
       mode: parsed.mode,
       inputPath,
       plansDir,
+      config: resolved,
       settings,
       effort,
       permissions,
@@ -612,15 +705,18 @@ export async function runPlanLoopCli(
         creatorSessionFile,
         markdownSchemaPath: skills.markdownSchema,
         binaries,
-        ...(process.env.AGENT_QUORUM_PROVIDER_DIAGNOSTICS === '1'
+        claudePermissionMode: resolved.providers.claudePermissionMode,
+        livenessHeartbeatSeconds: resolved.providers.livenessHeartbeatSeconds,
+        claudeThinkingEvery: resolved.providers.claudeThinkingEvery,
+        ...(resolved.providers.providerDiagnostics
           ? { diagnosticsDir: path.join(work, 'diagnostics') }
           : {}),
       },
       passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
-      maxPlanLines: Number(process.env.AGENT_QUORUM_MAX_PLAN_LINES ?? 900),
+      maxPlanLines: resolved.status.maxPlanLines,
       split: {
-        mode: resolveSplitMode(process.env.AGENT_QUORUM_SPLIT),
-        minPhases: Number(process.env.AGENT_QUORUM_SPLIT_MIN_PHASES ?? DEFAULT_SPLIT_MIN_PHASES),
+        mode: resolved.split.mode,
+        minPhases: resolved.split.minPhases,
       },
       lastCritiqueIter: -1,
       resume: { startIter: 0, archivedCount: 0, archiveDir: '' },

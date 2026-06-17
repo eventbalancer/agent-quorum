@@ -4,6 +4,11 @@
 if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
   exit "${FAKE_CODEX_LOGIN_STATUS:-0}"
 fi
+# Provider-subprocess env capture: a real provider call dumps its environment so
+# tests can assert no bot token (override or ambient) reached a provider grandchild.
+if [[ -n "${FAKE_CODEX_ENVDUMP:-}" ]]; then
+  printenv > "$FAKE_CODEX_ENVDUMP"
+fi
 if [[ -n "${FAKE_CODEX_ARGS_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$FAKE_CODEX_ARGS_LOG"
 fi

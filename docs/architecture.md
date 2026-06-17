@@ -2,8 +2,8 @@
 
 ## Roles and providers
 
-Five roles drive the loop, each resolved to a provider through
-`agent-quorum.json` (`env > file` per field):
+Five roles drive the loop, each resolved to a provider through the per-user
+config store (`override > env > store > default` per field):
 
 | Role       | Purpose                                            | Mode                   |
 | ---------- | -------------------------------------------------- | ---------------------- |

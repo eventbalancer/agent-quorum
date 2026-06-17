@@ -1,12 +1,10 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { packageRoot } from '../runtime/env.js';
-import { configFilePath } from '../core/config.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
+import { DEFAULT_CONFIG } from '../core/defaults.js';
+import { readConfigStore } from '../core/store.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
-
-// Single source of the run-lifecycle usage strings — the bin is `agent-quorum`;
-// the reference *.sh names never appear in user-facing output. Stage usage
-// (the plan loop) lives with its stage, not here.
 
 export interface StageSummary {
   readonly name: string;
@@ -53,6 +51,20 @@ export const LOGS_USAGE =
   '  agent-quorum logs --last [-f]        — the most recent run\n' +
   '  agent-quorum logs --work <dir> [-f]  — an explicit workdir\n';
 
+export const INIT_USAGE =
+  'agent-quorum init — interactive first-run setup (TTY only).\n' +
+  'Captures the Telegram bot token, discovers the chat id, and writes\n' +
+  'config.json + secrets.json (0600) under the agent-quorum home.\n';
+
+export const CONFIG_USAGE =
+  "agent-quorum config — print the resolved configuration and each value's winning layer.\n" +
+  '\n' +
+  'Usage:\n' +
+  '  agent-quorum config [--iters N] [--effort E] [--locale L] [--fix|--no-fix] [--translate|--no-translate]\n' +
+  '\n' +
+  'Scalar flags resolve in the override layer, so they show how a per-invocation\n' +
+  'flag would win over env, store, and default. The bot token is never printed.\n';
+
 export function packageVersion(): string {
   const parsed = JSON.parse(
     readFileSync(path.join(packageRoot(), 'package.json'), 'utf8'),
@@ -74,32 +86,27 @@ function settingText(value: JsonValue | undefined): string | undefined {
   return undefined;
 }
 
-// Best-effort: read the effective config without validating it — an
-// unreadable or shape-broken config must not break --help, so the defaults
-// line is simply omitted.
+// A malformed store must not break --help, so any failure omits the defaults line.
 function defaultsLine(): string {
-  const file = configFilePath();
-  let parsed: JsonValue;
+  let settings: Record<string, JsonValue | undefined>;
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
+    const home = resolveArtifactRoots().home;
+    const store = readConfigStore(home).settings ?? {};
+    settings = { ...DEFAULT_CONFIG.settings, ...store };
   } catch {
     return '';
   }
-  if (!isJsonObject(parsed) || !isJsonObject(parsed.settings)) {
-    return '';
-  }
-  const settings = parsed.settings;
   const parts: string[] = [];
   for (const key of ['iters', 'effort', 'fix', 'locale', 'translate']) {
     const text = settingText(settings[key]);
-    if (text !== undefined) {
+    if (text !== undefined && text !== '') {
       parts.push(`${key}=${text}`);
     }
   }
   if (parts.length === 0) {
     return '';
   }
-  return `\ndefaults: ${parts.join(' ')} (from ${file})\n`;
+  return `\ndefaults: ${parts.join(' ')} (from agent-quorum config store)\n`;
 }
 
 export function globalHelp(stages: readonly StageSummary[]): string {
@@ -119,6 +126,10 @@ export function globalHelp(stages: readonly StageSummary[]): string {
     '  logs        print or follow a run’s run.log\n' +
     '  prune       remove terminal run records beyond the retention bound\n' +
     '  intervene   append an operator intervention to a run’s ledger\n' +
+    '\n' +
+    'configuration:\n' +
+    '  init        interactive first-run setup: capture the bot token, discover the chat id, write the store\n' +
+    '  config      print the resolved configuration and each value’s winning layer (token masked)\n' +
     '\n' +
     'in a TTY, run agent-quorum with no command to open the interactive shell.\n' +
     '\n' +

@@ -2,9 +2,13 @@
 
 `agent-quorum` is one bin with an umbrella dispatcher. The first argument selects
 an entry point: a reserved run-lifecycle command (`launch`, `status`, `show`,
-`logs`, `prune`, `intervene`) or a **stage** from the stage registry (`plan` is
-the only stage today). There is no default fallthrough — an unrecognized first
-token prints the global help to stderr and exits non-zero. After the subcommand
+`logs`, `prune`, `intervene`), a configuration command (`init`, `config`), or a
+**stage** from the stage registry (`plan` is the only stage today). There is no
+default fallthrough — an unrecognized first token prints the global help to stderr
+and exits non-zero. `init` runs interactive first-run setup (TTY only: capture the
+bot token, discover the chat id, write `config.json`+`secrets.json`); `config`
+prints the resolved configuration with each value's winning layer (token masked).
+After the subcommand
 token a single leading `--` is dropped, so a `pnpm run <script> -- <flags>`
 forwarding case reaches the stage parser with its flags intact.
 
@@ -16,9 +20,9 @@ keeps the reference streams and exit codes. With no arguments in a dual-TTY
 terminal (both stdin and stdout are TTYs), `agent-quorum` opens the
 [interactive shell](interactive-shell.md); with no arguments in any
 non-interactive context — piped or redirected stdio — or with `--help`/`-h`, it
-prints the global help (stages, run-lifecycle commands, the additive
-interactive-shell line, and the effective defaults from the resolved
-`agent-quorum.json`); `agent-quorum --version`/`-V` prints the package version,
+prints the global help (stages, run-lifecycle commands, the configuration
+commands, the additive interactive-shell line, and the effective defaults from the
+resolved store); `agent-quorum --version`/`-V` prints the package version,
 byte-identical.
 
 ANSI color is emitted only when the target stream is a TTY and `NO_COLOR` is

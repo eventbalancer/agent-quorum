@@ -18,7 +18,8 @@ import {
   type RunState,
 } from '../../core/run-store.js';
 import { AGENT_QUORUM_PREFIX } from '../../runtime/log.js';
-import { knownStateDirs } from '../../runtime/paths.js';
+import { resolveConfigForHome } from '../../core/config.js';
+import { knownStateDirs, resolveArtifactRoots } from '../../runtime/paths.js';
 import { systemProbes } from '../probes.js';
 import { operatorInterventionsStatus, runStatusCli } from '../status.js';
 
@@ -163,7 +164,8 @@ export function loadDashboard(): DashboardGroup[] {
   }
   live.sort((a, b) => compareRunsByRecency(a.record, b.record));
   finished.sort((a, b) => compareRunsByRecency(a.record, b.record));
-  const selected = [...live, ...finished.slice(0, retentionKeepCount())];
+  const retention = resolveConfigForHome(resolveArtifactRoots().home).retention;
+  const selected = [...live, ...finished.slice(0, retentionKeepCount(retention))];
 
   const byStore = new Map<string, RunRow[]>();
   for (const origin of selected) {

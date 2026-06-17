@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveConfig } from '../../src/core/config.js';
 import { resolveWatchdogKnobs } from '../../src/core/knobs.js';
 import { PROVIDER_DISPATCH, type ProviderCallInput } from '../../src/providers/provider.js';
 import {
@@ -14,6 +18,14 @@ import type { Runner } from '../../src/types.js';
 type AssertEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 describe('provider registry guard', () => {
+  let tmpHome: string;
+  beforeEach(() => {
+    tmpHome = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-registry.'));
+  });
+  afterEach(() => {
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
   it('anchors the supported runner set', () => {
     // Independent anchor: deleting or renaming a registry entry changes RUNNERS
     // (and, via the compile-time check below, the derived Runner type). Update
@@ -31,7 +43,7 @@ describe('provider registry guard', () => {
 
   it('wires every runner end to end', () => {
     const binaries = resolveRunnerBinaries();
-    const stream = resolveWatchdogKnobs().stream;
+    const stream = resolveWatchdogKnobs(resolveConfig({ env: {}, home: tmpHome }).config).stream;
     for (const runner of RUNNERS) {
       const meta: RunnerMeta = RUNNER_META[runner];
       expect(typeof PROVIDER_DISPATCH[runner], `${runner}: missing dispatch adapter`).toBe(

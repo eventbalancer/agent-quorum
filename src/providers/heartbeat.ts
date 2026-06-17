@@ -1,11 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { ChildProcess } from 'node:child_process';
-import { HaltError } from '../runtime/halt.js';
 import { log } from '../runtime/log.js';
 import type { TraceContext } from './trace.js';
 
-const LIVENESS_HEARTBEAT_SECONDS_ENV = 'AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS';
-const DEFAULT_LIVENESS_HEARTBEAT_SECONDS = 30;
 const POLL_SLICE_MS = 200;
 
 interface ChildSettlement {
@@ -32,17 +29,6 @@ async function sleepUntilSettledOrDuration(
     await sleep(slice);
     waited += slice;
   }
-}
-
-export function livenessHeartbeatSeconds(): number {
-  const raw = process.env[LIVENESS_HEARTBEAT_SECONDS_ENV];
-  if (raw === undefined || raw === '') {
-    return DEFAULT_LIVENESS_HEARTBEAT_SECONDS;
-  }
-  if (!/^[0-9]+$/.test(raw)) {
-    throw new HaltError(`${LIVENESS_HEARTBEAT_SECONDS_ENV} expects a non-negative integer`, 1);
-  }
-  return Number(raw);
 }
 
 // Wall-clock liveness for an in-flight provider call: one [agent-quorum] line per

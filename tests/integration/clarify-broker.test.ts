@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openClarifyBroker } from '../../src/stages/plan/clarify-broker.js';
+import type { TelegramRuntime } from '../../src/channels/telegram/index.js';
 import { withEnvAsync } from '../helpers/harness.js';
 
 let tmp: string;
@@ -23,6 +24,19 @@ function brokerEnv(extra: Record<string, string> = {}): Record<string, string> {
     AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS: '2',
     AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS: '1',
     ...extra,
+  };
+}
+
+function brokerRuntime(): TelegramRuntime {
+  return {
+    botToken: 't',
+    chatId: '42',
+    apiBase: 'http://127.0.0.1:1',
+    stateDir,
+    pollTimeoutSeconds: 1,
+    httpTimeoutSeconds: 1,
+    receiveFailureWindowSeconds: 2,
+    receiveBackoffSeconds: 1,
   };
 }
 
@@ -88,8 +102,8 @@ afterEach(() => {
 describe('clarify broker', () => {
   it('serializes polling: the lease holder polls and a peer is told peer-held without polling', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const holder = openClarifyBroker();
-      const peer = openClarifyBroker();
+      const holder = openClarifyBroker(brokerRuntime());
+      const peer = openClarifyBroker(brokerRuntime());
       const gate = deferred();
       getUpdatesHandler = () => gate.promise;
 
@@ -112,7 +126,7 @@ describe('clarify broker', () => {
   it('steals a stale lock and an outgoing holder does not delete a successor lease', async () => {
     await withEnvAsync(brokerEnv(), async () => {
       const lockFile = path.join(sharedDir(), 'poll.lock');
-      const holder = openClarifyBroker();
+      const holder = openClarifyBroker(brokerRuntime());
       writeFileSync(lockFile, JSON.stringify({ pid: 1, ts: 1, token: 'ancient' }));
 
       const gate = deferred();
@@ -137,8 +151,8 @@ describe('clarify broker', () => {
 
   it('counts a session blocked inside a long poll as live', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const holder = openClarifyBroker();
-      const peer = openClarifyBroker();
+      const holder = openClarifyBroker(brokerRuntime());
+      const peer = openClarifyBroker(brokerRuntime());
       holder.refresh(5);
       const gate = deferred();
       getUpdatesHandler = () => gate.promise;
@@ -157,8 +171,8 @@ describe('clarify broker', () => {
 
   it('compacts the journal below the minimum live-session cursor', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const holder = openClarifyBroker();
-      const peer = openClarifyBroker();
+      const holder = openClarifyBroker(brokerRuntime());
+      const peer = openClarifyBroker(brokerRuntime());
 
       getUpdatesHandler = () => Promise.resolve(chatUpdates([1, 2, 3]));
       expect(await holder.tryPoll(1)).toEqual({ polled: true });
@@ -178,8 +192,8 @@ describe('clarify broker', () => {
 
   it('claims an untargeted update exactly once across handles', async () => {
     await withEnvAsync(brokerEnv(), () => {
-      const a = openClarifyBroker();
-      const b = openClarifyBroker();
+      const a = openClarifyBroker(brokerRuntime());
+      const b = openClarifyBroker(brokerRuntime());
       expect(a.claimUntargeted(99)).toBe(true);
       expect(b.claimUntargeted(99)).toBe(false);
       a.close();
@@ -189,7 +203,7 @@ describe('clarify broker', () => {
 
   it('records a classified failure and surfaces it through health', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const broker = openClarifyBroker();
+      const broker = openClarifyBroker(brokerRuntime());
       getUpdatesHandler = () =>
         Promise.resolve(jsonResponse({ ok: false, error_code: 409, description: 'Conflict' }));
       const result = await broker.tryPoll(1);
@@ -201,8 +215,8 @@ describe('clarify broker', () => {
 
   it('creates the shared dir 0700 with 0600 files and removes it on last close', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const a = openClarifyBroker();
-      const b = openClarifyBroker();
+      const a = openClarifyBroker(brokerRuntime());
+      const b = openClarifyBroker(brokerRuntime());
       getUpdatesHandler = () => Promise.resolve(chatUpdates([1]));
       await a.tryPoll(1);
 
@@ -220,7 +234,7 @@ describe('clarify broker', () => {
 
   it('recovers when a peer tears down the shared dir mid-flight', async () => {
     await withEnvAsync(brokerEnv(), async () => {
-      const broker = openClarifyBroker();
+      const broker = openClarifyBroker(brokerRuntime());
       rmSync(sharedDir(), { recursive: true, force: true });
       getUpdatesHandler = () => Promise.resolve(emptyUpdates());
       expect(await broker.tryPoll(1)).toEqual({ polled: true });

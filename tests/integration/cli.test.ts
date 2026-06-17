@@ -16,8 +16,8 @@ import {
   emptyCritique,
   REPO_ROOT,
   writeCritique,
-  writeDefaultPlanLoopConfig,
   writeFakeBin,
+  writeStoreConfig,
   writeStructuredPlanFile,
 } from '../helpers/harness.js';
 import { startTelegramStub, type TelegramStub } from '../helpers/telegram-stub.js';
@@ -29,7 +29,7 @@ let work: string;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_HOME: path.join(tmp, 'home'),
     AGENT_QUORUM_WORK_DIR: work,
     AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
     AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
@@ -61,7 +61,7 @@ beforeEach(() => {
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+  writeStoreConfig(path.join(tmp, 'home'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'CLI Input');
   emptyCritique(path.join(tmp, 'empty.json'));
 });
@@ -483,6 +483,7 @@ describe('runner auth preflight', () => {
 describe('default artifact root', () => {
   it('writes functional + system artifacts under ~/.agent-quorum and leaves ~/.claude untouched', () => {
     const home = path.join(tmp, 'home');
+    writeStoreConfig(path.join(home, '.agent-quorum'));
     const claudePlans = path.join(home, '.claude', 'plans');
     mkdirSync(claudePlans, { recursive: true });
     const seed = path.join(claudePlans, 'seed.md');
@@ -502,7 +503,6 @@ describe('default artifact root', () => {
       ],
       {
         PATH: `${fake}:${process.env.PATH ?? ''}`,
-        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
         AGENT_QUORUM_CLARIFY: '0',
         AGENT_QUORUM_RETRY_COUNT: '0',
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
@@ -540,7 +540,7 @@ describe('default artifact root', () => {
       ],
       {
         PATH: `${fake}:${process.env.PATH ?? ''}`,
-        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+        AGENT_QUORUM_HOME: path.join(tmp, 'home'),
         AGENT_QUORUM_CLARIFY: '0',
         AGENT_QUORUM_RETRY_COUNT: '0',
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
@@ -593,5 +593,80 @@ describe('--help / --version', () => {
       expect(result.status, flag).toBe(0);
       expect(result.stdout, flag).toBe(`${pkg.version}\n`);
     }
+  });
+});
+
+describe('detached-launch forwarding channel', () => {
+  const planArgs = () => [
+    'plan',
+    '--effort',
+    'low',
+    '--iters',
+    '1',
+    path.join(tmp, 'input.md'),
+    '--no-fix',
+    '--no-translate',
+  ];
+
+  it('fails the run on a malformed AGENT_QUORUM_CONFIG_OVERRIDE_JSON', () => {
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_CONFIG_OVERRIDE_JSON: '{not json' }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_CONFIG_OVERRIDE_JSON');
+  });
+
+  it('reads, unlinks, and applies a valid in-dir secret handoff file', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    mkdirSync(handoff, { recursive: true });
+    const secretFile = path.join(handoff, 'secret.json');
+    writeFileSync(secretFile, JSON.stringify({ telegramBotToken: 't' }), { mode: 0o600 });
+    const result = runCli(
+      planArgs(),
+      baseEnv({
+        FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        AGENT_QUORUM_SECRETS_OVERRIDE_FILE: secretFile,
+      }),
+    );
+    expect(result.status).toBe(0);
+    expect(existsSync(secretFile)).toBe(false);
+  });
+
+  it('fails on a malformed secret handoff payload', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    mkdirSync(handoff, { recursive: true });
+    const secretFile = path.join(handoff, 'bad.json');
+    writeFileSync(secretFile, '{not json', { mode: 0o600 });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: secretFile }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+  });
+
+  it('rejects an out-of-handoff path without deleting it', () => {
+    mkdirSync(path.join(tmp, 'home', 'handoff'), { recursive: true });
+    const outside = path.join(tmp, 'outside-secret.json');
+    writeFileSync(outside, JSON.stringify({ telegramBotToken: 't' }), { mode: 0o600 });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: outside }));
+    expect(result.status).not.toBe(0);
+    expect(existsSync(outside)).toBe(true);
+  });
+
+  it('rejects a path resolving to the handoff directory itself without deleting it', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    mkdirSync(handoff, { recursive: true });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: handoff }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).not.toContain('EISDIR');
+    expect(existsSync(handoff)).toBe(true);
+  });
+
+  it('rejects a contained sub-directory as a non-regular file without deleting it', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    const sub = path.join(handoff, 'secrets-sub');
+    mkdirSync(sub, { recursive: true });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: sub }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).not.toContain('EISDIR');
+    expect(existsSync(sub)).toBe(true);
   });
 });

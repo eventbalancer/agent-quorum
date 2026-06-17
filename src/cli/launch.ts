@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, openSync, renameSync, statSync, closeSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  statSync,
+  closeSync,
+  unlinkSync,
+} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -6,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { HaltError } from '../runtime/halt.js';
 import { packageRoot, projectRoot } from '../runtime/env.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
+import { ensureHandoffDir, sweepHandoffDir, writeSecretFile } from '../core/store.js';
 import { resolveResumeWorkdir } from '../core/resume.js';
 import {
   deriveRunName,
@@ -214,15 +223,31 @@ export async function runLaunchCli(
     env.AGENT_QUORUM_RESUME = '1';
   }
   env.AGENT_QUORUM_WORK_DIR = work;
-  if (overrides.configFile !== undefined) {
-    env.AGENT_QUORUM_CONFIG_FILE = overrides.configFile;
-  }
   env.AGENT_QUORUM_HOME = home;
   env.AGENT_QUORUM_STDIO_IS_RUNLOG = '1';
   if (mintedRunId !== undefined) {
     env.AGENT_QUORUM_RUN_ID = mintedRunId;
     env.AGENT_QUORUM_RUN_NAME = name;
   }
+
+  sweepHandoffDir(home);
+
+  // No bot token ever enters the child env: it goes to an owner-only 0600 handoff
+  // file and only its path is forwarded, and the ambient token is stripped so
+  // `{ ...process.env }` cannot leak it to the detached child or a grandchild.
+  if (overrides.config !== undefined) {
+    env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON = JSON.stringify(overrides.config);
+  }
+  const effectiveToken =
+    overrides.secrets?.telegramBotToken ?? process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
+  let handoffFile: string | undefined;
+  if (effectiveToken !== undefined && effectiveToken !== '') {
+    const dir = ensureHandoffDir(home);
+    handoffFile = path.join(dir, `secrets-${rotationStamp()}-${process.pid}.json`);
+    writeSecretFile(handoffFile, `${JSON.stringify({ telegramBotToken: effectiveToken })}\n`);
+    env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE = handoffFile;
+  }
+  delete env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
 
   const runner = runnerCommand();
   const logFd = openSync(logPath, 'w');
@@ -245,6 +270,14 @@ export async function runLaunchCli(
     alive = false;
   }
   if (!alive) {
+    // The child unlinks the handoff once read; on a startup failure the parent removes it.
+    if (handoffFile !== undefined && existsSync(handoffFile)) {
+      try {
+        unlinkSync(handoffFile);
+      } catch {
+        /* best-effort: the file is owner-only under <home>/handoff/ */
+      }
+    }
     fail(`launch failed: agent-quorum exited immediately; inspect log: ${logPath}`, 1);
   }
 
