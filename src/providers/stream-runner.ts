@@ -3,7 +3,7 @@ import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
-import { livenessHeartbeatSeconds, runLivenessHeartbeat } from './heartbeat.js';
+import { runLivenessHeartbeat } from './heartbeat.js';
 import { StreamState, watchStream, type StreamKnobs } from './watchdog.js';
 
 export interface StreamRunResult {
@@ -23,10 +23,11 @@ export interface StreamRunOptions {
   readonly traceContext: TraceContext;
   readonly diagnosticSink?: DiagnosticSink;
   readonly liveness?: boolean;
+  readonly heartbeatSeconds?: number;
 }
 
 export async function runStreamingCli(options: StreamRunOptions): Promise<StreamRunResult> {
-  const heartbeatSeconds = options.liveness === true ? livenessHeartbeatSeconds() : 0;
+  const heartbeatSeconds = options.liveness === true ? (options.heartbeatSeconds ?? 0) : 0;
   const child = spawnDetached(options.command, [...options.args], {
     cwd: options.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],

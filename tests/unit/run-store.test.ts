@@ -38,6 +38,8 @@ import {
 } from '../../src/core/run-store.js';
 import { HaltError } from '../../src/runtime/halt.js';
 
+const RETAIN_DEFAULTS = { keepCount: 50, maxAgeDays: 30 };
+
 let stateDir: string;
 
 function draft(overrides: Partial<RunRecordDraft> = {}): RunRecordDraft {
@@ -253,11 +255,11 @@ describe('pruneRuns', () => {
       seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
     }
 
-    const dry = pruneRuns(stateDir, { keepCount: 2, dryRun: true });
+    const dry = pruneRuns(stateDir, { keepCount: 2, dryRun: true }, RETAIN_DEFAULTS);
     expect(dry.removed).toHaveLength(2);
     expect(readRunRecords(stateDir)).toHaveLength(5);
 
-    const real = pruneRuns(stateDir, { keepCount: 2 });
+    const real = pruneRuns(stateDir, { keepCount: 2 }, RETAIN_DEFAULTS);
     expect(real.removed).toHaveLength(2);
     const remaining = readRunRecords(stateDir);
     expect(remaining).toHaveLength(3);
@@ -267,8 +269,25 @@ describe('pruneRuns', () => {
   it('removes terminal records older than maxAgeDays', () => {
     const old = seedFinished('old', '2020-01-01T00:00:00Z');
     const recent = seedFinished('recent', '2026-06-13T00:00:00Z');
-    const result = pruneRuns(stateDir, { keepCount: 100, maxAgeDays: 30 });
+    const result = pruneRuns(stateDir, { keepCount: 100, maxAgeDays: 30 }, RETAIN_DEFAULTS);
     expect(result.removed).toContain(old);
     expect(result.removed).not.toContain(recent);
+  });
+
+  it('resolved defaults bound retention when the policy omits the field', () => {
+    for (let i = 0; i < 4; i += 1) {
+      seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
+    }
+    const result = pruneRuns(stateDir, {}, { keepCount: 1, maxAgeDays: 0 });
+    expect(result.removed).toHaveLength(3);
+    expect(readRunRecords(stateDir)).toHaveLength(1);
+  });
+
+  it('an explicit policy keepCount overrides the resolved default', () => {
+    for (let i = 0; i < 4; i += 1) {
+      seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
+    }
+    const result = pruneRuns(stateDir, { keepCount: 3 }, { keepCount: 1, maxAgeDays: 0 });
+    expect(result.removed).toHaveLength(1);
   });
 });

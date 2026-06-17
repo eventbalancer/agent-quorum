@@ -1,13 +1,19 @@
 import { isJsonObject } from '../../core/json.js';
 import { telegramCall } from './client.js';
+import type { TelegramRuntime } from './config.js';
 
-export async function telegramSend(text: string): Promise<string | undefined> {
+export async function telegramSend(
+  runtime: TelegramRuntime,
+  text: string,
+): Promise<string | undefined> {
   const sendMessageParams = {
-    chat_id: process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '',
+    chat_id: runtime.chatId,
     text,
     disable_web_page_preview: 'true',
   };
-  const telegramCallResult = await telegramCall('sendMessage', sendMessageParams);
+  const telegramCallResult = await telegramCall(runtime, 'sendMessage', sendMessageParams, {
+    timeoutSeconds: runtime.httpTimeoutSeconds,
+  });
   if (!telegramCallResult.ok) {
     return undefined;
   }

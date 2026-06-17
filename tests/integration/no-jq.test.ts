@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../helpers/cli.js';
 import {
   emptyCritique,
-  writeDefaultPlanLoopConfig,
+  writeStoreConfig,
   writeFakeBin,
   writeStructuredPlanFile,
 } from '../helpers/harness.js';
@@ -39,7 +39,7 @@ describe('no jq/ajv/rg prerequisites (AC-9)', () => {
     rmSync(path.join(fake, 'pnpm'));
     const work = path.join(tmp, 'work');
     mkdirSync(work);
-    writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+    writeStoreConfig(path.join(tmp, 'home'));
     writeStructuredPlanFile(path.join(tmp, 'input.md'), 'No-JQ Input');
     emptyCritique(path.join(tmp, 'empty.json'));
 
@@ -88,7 +88,7 @@ describe('no jq/ajv/rg prerequisites (AC-9)', () => {
       ],
       {
         PATH: restrictedPath,
-        AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+        AGENT_QUORUM_HOME: path.join(tmp, 'home'),
         AGENT_QUORUM_WORK_DIR: work,
         AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
         AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),

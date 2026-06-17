@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { packageRoot } from '../runtime/env.js';
-import { configFilePath } from '../core/config.js';
+import { resolveArtifactRoots } from '../runtime/paths.js';
+import { DEFAULT_CONFIG } from '../core/defaults.js';
+import { readConfigStore } from '../core/store.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 
 // Single source of the run-lifecycle usage strings — the bin is `agent-quorum`;
@@ -74,32 +76,29 @@ function settingText(value: JsonValue | undefined): string | undefined {
   return undefined;
 }
 
-// Best-effort: read the effective config without validating it — an
-// unreadable or shape-broken config must not break --help, so the defaults
-// line is simply omitted.
+// Best-effort: surface the effective settings layered over the built-in
+// defaults. A malformed store must not break --help, so any failure simply omits
+// the line; an empty locale default is not shown.
 function defaultsLine(): string {
-  const file = configFilePath();
-  let parsed: JsonValue;
+  let settings: Record<string, JsonValue | undefined>;
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
+    const home = resolveArtifactRoots().home;
+    const store = readConfigStore(home).settings ?? {};
+    settings = { ...DEFAULT_CONFIG.settings, ...store };
   } catch {
     return '';
   }
-  if (!isJsonObject(parsed) || !isJsonObject(parsed.settings)) {
-    return '';
-  }
-  const settings = parsed.settings;
   const parts: string[] = [];
   for (const key of ['iters', 'effort', 'fix', 'locale', 'translate']) {
     const text = settingText(settings[key]);
-    if (text !== undefined) {
+    if (text !== undefined && text !== '') {
       parts.push(`${key}=${text}`);
     }
   }
   if (parts.length === 0) {
     return '';
   }
-  return `\ndefaults: ${parts.join(' ')} (from ${file})\n`;
+  return `\ndefaults: ${parts.join(' ')} (from agent-quorum config store)\n`;
 }
 
 export function globalHelp(stages: readonly StageSummary[]): string {

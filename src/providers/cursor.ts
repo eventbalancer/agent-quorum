@@ -49,6 +49,7 @@ async function cursorStream(
     progressEvent: cursorProgressEvent,
     traceContext,
     liveness: true,
+    heartbeatSeconds: providerRuntime.livenessHeartbeatSeconds,
     ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),
   });
   const output = extractResultField(result.streamLines, 'result');

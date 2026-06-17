@@ -10,12 +10,10 @@ import { runCreatorClarify } from './creator.js';
 import { operatorInterventionsFile } from './interventions.js';
 import { schemaValidQuiet } from '../../core/schema.js';
 import {
-  DEFAULT_TELEGRAM_POLL_TIMEOUT_SECONDS,
-  DEFAULT_TELEGRAM_RECEIVE_BACKOFF_SECONDS,
-  DEFAULT_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS,
   telegramConfigured,
   telegramSend,
   type TelegramFailure,
+  type TelegramRuntime,
 } from '../../channels/telegram/index.js';
 import {
   isPeerHeldResult,
@@ -23,7 +21,6 @@ import {
   openClarifyBroker,
   type ClarifyBroker,
 } from './clarify-broker.js';
-import { envNumber } from './env-number.js';
 import { ExitCode } from '../../exit-codes.js';
 import type { RunContext } from '../../core/run-context.js';
 
@@ -47,8 +44,7 @@ export function clarifyDoneFile(work: string): string {
 
 type GateMode = 'run' | 'skip' | 'error';
 
-export function clarifyGateEnabled(): GateMode {
-  const value = process.env.AGENT_QUORUM_CLARIFY ?? 'auto';
+export function clarifyGateEnabled(value: string, runtime: TelegramRuntime): GateMode {
   switch (value) {
     case '0':
     case 'false':
@@ -59,18 +55,18 @@ export function clarifyGateEnabled(): GateMode {
     case 'true':
     case 'on':
     case 'yes':
-      if (!telegramConfigured()) {
+      if (!telegramConfigured(runtime)) {
         err(
-          `clarification gate requested (AGENT_QUORUM_CLARIFY=${value}) but AGENT_QUORUM_TELEGRAM_BOT_TOKEN / AGENT_QUORUM_TELEGRAM_CHAT_ID are not set`,
+          `clarification gate requested (clarify=${value}) but Telegram bot token / chat id are not configured`,
         );
         return 'error';
       }
       return 'run';
     case 'auto':
     case '':
-      return telegramConfigured() ? 'run' : 'skip';
+      return telegramConfigured(runtime) ? 'run' : 'skip';
     default:
-      err(`AGENT_QUORUM_CLARIFY must be 1, 0, or auto (got '${value}')`);
+      err(`clarify must be 1, 0, or auto (got '${value}')`);
       return 'error';
   }
 }
@@ -375,7 +371,8 @@ export async function runClarificationGate(
     return { ok: true };
   }
 
-  const mode = clarifyGateEnabled();
+  const runtime = ctx.config.telegram;
+  const mode = clarifyGateEnabled(runtime.clarify, runtime);
   if (mode === 'error') {
     return {
       ok: false,
@@ -425,26 +422,16 @@ export async function runClarificationGate(
     `clarification gate: ${total} question(s), ${answered} already answered — waiting via Telegram`,
   );
 
-  const poll = envNumber(
-    'AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT',
-    DEFAULT_TELEGRAM_POLL_TIMEOUT_SECONDS,
-  );
-  const deadline = envNumber('AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS', 86400);
+  const poll = runtime.pollTimeoutSeconds;
+  const deadline = runtime.clarifyDeadlineSeconds;
   const deadlineEpoch = Math.floor(Date.now() / 1000) + deadline;
-  const failureWindowMs =
-    envNumber(
-      'AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS',
-      DEFAULT_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS,
-    ) * 1000;
-  const backoffSeconds = envNumber(
-    'AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS',
-    DEFAULT_TELEGRAM_RECEIVE_BACKOFF_SECONDS,
-  );
+  const failureWindowMs = runtime.receiveFailureWindowSeconds * 1000;
+  const backoffSeconds = runtime.receiveBackoffSeconds;
   const copy = clarifyCopy(ctx.settings.locale);
 
   let broker: ClarifyBroker;
   try {
-    broker = openClarifyBroker();
+    broker = openClarifyBroker(runtime);
   } catch (error) {
     const reason = `Telegram coordination dir unavailable: ${error instanceof Error ? error.message : 'unknown error'}`;
     err(`clarification gate: ${reason}`);
@@ -468,7 +455,7 @@ export async function runClarificationGate(
         return;
       }
       concurrencyNoticeSent = true;
-      await telegramSend(copy.concurrencyNotice);
+      await telegramSend(runtime, copy.concurrencyNotice);
     };
 
     await maybeNotifyConcurrency();
@@ -476,7 +463,7 @@ export async function runClarificationGate(
     if (answered === 0) {
       const base = path.basename(work).replace(/^loop-/, '');
       const intro = copy.intro(base, total);
-      if ((await telegramSend(intro)) === undefined) {
+      if ((await telegramSend(runtime, intro)) === undefined) {
         err('clarification gate: failed to reach Telegram (check token/chat_id/network)');
         return {
           ok: false,
@@ -495,7 +482,7 @@ export async function runClarificationGate(
 
       const qnum = idx + 1;
       const msg = renderClarifyQuestion({ copy, qnum, total, question, why, options });
-      const sent = await telegramSend(msg);
+      const sent = await telegramSend(runtime, msg);
       if (sent === undefined) {
         err(`clarification gate: failed to send Q${qnum} to Telegram`);
         return {
@@ -521,12 +508,12 @@ export async function runClarificationGate(
       });
       if (outcome.kind === 'cancel') {
         err('clarification gate: operator sent /cancel — aborting run');
-        await telegramSend(copy.cancelled);
+        await telegramSend(runtime, copy.cancelled);
         return { ok: false, exitCode: ExitCode.ClarifyCancelled, reason: 'operator sent /cancel' };
       }
       if (outcome.kind === 'deadline') {
         err(`clarification gate: timed out after ${deadline}s waiting for Q${qnum}`);
-        await telegramSend(copy.timeout(qnum));
+        await telegramSend(runtime, copy.timeout(qnum));
         return {
           ok: false,
           exitCode: ExitCode.ClarifyCancelled,
@@ -536,7 +523,7 @@ export async function runClarificationGate(
       if (outcome.kind === 'failure') {
         const reason = describeTransportFailure(outcome.failure);
         err(`clarification gate: ${reason}`);
-        await telegramSend(copy.transportFailure);
+        await telegramSend(runtime, copy.transportFailure);
         return { ok: false, exitCode: ExitCode.ClarifyTransportFailure, reason };
       }
 
@@ -554,7 +541,7 @@ export async function runClarificationGate(
       clarifyRecordIntervention(work, jqText(answer.question), jqText(answer.answer));
     }
 
-    await telegramSend(copy.done(total));
+    await telegramSend(runtime, copy.done(total));
     writeFileSync(clarifyDoneFile(work), '');
     log(
       `clarification gate: complete — ${answers.length} answer(s) folded into operator interventions`,

@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -23,16 +24,16 @@ import {
   listRuns,
   runPlanLoop,
 } from '../../src/index.js';
-import { resetConfigCache } from '../../src/core/config.js';
 import { readRunRecords, writeRunRecord, type RunRecordDraft } from '../../src/core/run-store.js';
 import { pgidOf, procStartToken } from '../../src/runtime/proc.js';
+import { startTelegramStub } from '../helpers/telegram-stub.js';
 import {
   captureStderr,
   emptyCritique,
   writeCritique,
-  writeDefaultPlanLoopConfig,
+  writeStoreConfig,
+  writeStoreConfigRoles,
   writeFakeBin,
-  writePlanLoopConfig,
   writeStructuredPlanFile,
   withCwd,
   withCwdAsync,
@@ -51,7 +52,7 @@ type EnvOverrides = Record<string, string | undefined>;
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_HOME: path.join(tmp, 'home'),
     AGENT_QUORUM_WORK_DIR: work,
     AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
     AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
@@ -114,10 +115,9 @@ beforeEach(() => {
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+  writeStoreConfig(path.join(tmp, 'home'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'API Input');
   emptyCritique(path.join(tmp, 'empty.json'));
-  resetConfigCache();
   capture = captureStderr();
 });
 
@@ -446,17 +446,17 @@ describe('launchPlanLoop (in-process)', () => {
   });
 });
 
-describe('typed workDir/configFile options', () => {
-  it('runPlanLoop honors workDir/configFile without mutating process.env', async () => {
+describe('typed workDir option (config via store)', () => {
+  it('runPlanLoop honors workDir without mutating process.env', async () => {
     const optWork = path.join(tmp, 'opt-work');
     mkdirSync(optWork);
-    const optConfig = path.join(tmp, 'opt-config.json');
-    writePlanLoopConfig(optConfig, 'critic:codex:custom-model-probe');
+    const optHome = path.join(tmp, 'opt-home');
+    writeStoreConfigRoles(optHome, 'critic:codex:custom-model-probe');
 
     const result = await withEnvAsync(
       baseEnv({
         AGENT_QUORUM_WORK_DIR: undefined,
-        AGENT_QUORUM_CONFIG_FILE: undefined,
+        AGENT_QUORUM_HOME: optHome,
         FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
       }),
       async () => {
@@ -468,7 +468,6 @@ describe('typed workDir/configFile options', () => {
           fix: false,
           translate: false,
           workDir: optWork,
-          configFile: optConfig,
         });
         expect(JSON.stringify(process.env)).toBe(envBefore);
         return run;
@@ -485,17 +484,17 @@ describe('typed workDir/configFile options', () => {
     expect(existsSync(path.join(tmp, 'plans', 'loop-input'))).toBe(false);
   });
 
-  it('launchPlanLoop forwards workDir/configFile to the detached child', async () => {
+  it('launchPlanLoop forwards workDir to the detached child', async () => {
     writeHangingCodex();
     const optWork = path.join(tmp, 'launch-work');
-    const optConfig = path.join(tmp, 'opt-config.json');
-    writePlanLoopConfig(optConfig, 'critic:codex:launch-model-probe');
+    const optHome = path.join(tmp, 'opt-home');
+    writeStoreConfigRoles(optHome, 'critic:codex:launch-model-probe');
 
     const result = await withEnvAsync(
       baseEnv({
         AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
         AGENT_QUORUM_WORK_DIR: undefined,
-        AGENT_QUORUM_CONFIG_FILE: undefined,
+        AGENT_QUORUM_HOME: optHome,
       }),
       async () => {
         const envBefore = JSON.stringify(process.env);
@@ -506,7 +505,6 @@ describe('typed workDir/configFile options', () => {
           fix: false,
           translate: false,
           workDir: optWork,
-          configFile: optConfig,
         });
         expect(JSON.stringify(process.env)).toBe(envBefore);
         return run;
@@ -639,4 +637,161 @@ describe('library cross-store discovery', () => {
 
     expect(listRuns({ store: homeStore }).map((record) => record.name)).toEqual(['home-run']);
   });
+});
+
+async function waitForCompletionNotification(
+  stub: Awaited<ReturnType<typeof startTelegramStub>>,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (stub.sent.some((text) => text.includes('agent-quorum finished'))) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return false;
+}
+
+describe('structured config and secrets (P5)', () => {
+  it('runPlanLoop({ config, secrets }) configures Telegram + roles structurally without mutating process.env', async () => {
+    const stub = await startTelegramStub();
+    const structHome = path.join(tmp, 'struct-home');
+    try {
+      const result = await withEnvAsync(
+        baseEnv({
+          AGENT_QUORUM_HOME: structHome,
+          AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: undefined,
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+        }),
+        async () => {
+          const envBefore = JSON.stringify(process.env);
+          const run = await runPlanLoop({
+            input: path.join(tmp, 'input.md'),
+            iters: 1,
+            effort: 'low',
+            fix: false,
+            translate: false,
+            config: {
+              telegram: { chatId: '77' },
+              roles: { critic: { model: 'struct-model-probe' } },
+            },
+            secrets: { telegramBotToken: 'STRUCT-INPROC-TOKEN' },
+          });
+          expect(JSON.stringify(process.env)).toBe(envBefore);
+          return run;
+        },
+      );
+
+      expect(result.exitCode).toBe(ExitCode.Ok);
+      expect(readFileSync(path.join(work, 'run.meta.tsv'), 'utf8')).toContain('struct-model-probe');
+      expect(stub.sent.some((text) => text.includes('agent-quorum finished'))).toBe(true);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('runPlanLoop top-level iters wins over config.settings.iters (tie-break)', async () => {
+    const result = await withEnvAsync(
+      baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
+      () =>
+        runPlanLoop({
+          input: path.join(tmp, 'input.md'),
+          iters: 1,
+          effort: 'low',
+          fix: false,
+          translate: false,
+          config: { settings: { iters: 9 } },
+        }),
+    );
+    expect(result.exitCode).toBe(ExitCode.Ok);
+    expect(readFileSync(path.join(work, 'run.meta.tsv'), 'utf8')).toMatch(/^max_iters\t1$/m);
+  });
+});
+
+describe('launchPlanLoop secret handoff round-trip (P5)', () => {
+  it('hands a structured token to the detached child via the handoff file, notifies, and keeps it out of the provider env', async () => {
+    const stub = await startTelegramStub();
+    const home = path.join(tmp, 'home');
+    const envDump = path.join(tmp, 'codex.env');
+    try {
+      const result = await withEnvAsync(
+        baseEnv({
+          AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
+          AGENT_QUORUM_WORK_DIR: undefined,
+          AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CODEX_ENVDUMP: envDump,
+        }),
+        () =>
+          launchPlanLoop({
+            input: path.join(tmp, 'input.md'),
+            iters: 1,
+            effort: 'low',
+            fix: false,
+            translate: false,
+            config: { telegram: { chatId: '42' } },
+            secrets: { telegramBotToken: 'SECRET-STRUCT-TOKEN' },
+          }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      const pid = result.pid ?? 0;
+      try {
+        expect(await waitForCompletionNotification(stub)).toBe(true);
+        const dump = readFileSync(envDump, 'utf8');
+        expect(dump).not.toContain('SECRET-STRUCT-TOKEN');
+        expect(dump).not.toMatch(/^AGENT_QUORUM_TELEGRAM_BOT_TOKEN=/m);
+        expect(dump).not.toMatch(/^AGENT_QUORUM_SECRETS_OVERRIDE_JSON=/m);
+        const handoff = path.join(home, 'handoff');
+        expect(existsSync(handoff) ? readdirSync(handoff) : []).toEqual([]);
+      } finally {
+        await killDetachedRun(pid);
+      }
+    } finally {
+      await stub.close();
+    }
+  }, 30_000);
+
+  it('strips an ambient bot token from the detached child env yet still notifies via the handoff file', async () => {
+    const stub = await startTelegramStub();
+    const home = path.join(tmp, 'home');
+    const envDump = path.join(tmp, 'codex.env');
+    try {
+      const result = await withEnvAsync(
+        baseEnv({
+          AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.3',
+          AGENT_QUORUM_WORK_DIR: undefined,
+          AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
+          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
+          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 'SECRET-AMBIENT-TOKEN',
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CODEX_ENVDUMP: envDump,
+        }),
+        () =>
+          launchPlanLoop({
+            input: path.join(tmp, 'input.md'),
+            iters: 1,
+            effort: 'low',
+            fix: false,
+            translate: false,
+          }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      const pid = result.pid ?? 0;
+      try {
+        expect(await waitForCompletionNotification(stub)).toBe(true);
+        const dump = readFileSync(envDump, 'utf8');
+        expect(dump).not.toContain('SECRET-AMBIENT-TOKEN');
+        const handoff = path.join(home, 'handoff');
+        expect(existsSync(handoff) ? readdirSync(handoff) : []).toEqual([]);
+      } finally {
+        await killDetachedRun(pid);
+      }
+    } finally {
+      await stub.close();
+    }
+  }, 30_000);
 });

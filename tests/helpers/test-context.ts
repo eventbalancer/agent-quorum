@@ -1,5 +1,12 @@
 import path from 'node:path';
-import type { RoleMatrix, RolePermissions } from '../../src/core/config.js';
+import {
+  resolveConfig,
+  type ResolvedConfig,
+  type ResolvedTelegram,
+  type RoleMatrix,
+  type RolePermissions,
+  type RunSettings,
+} from '../../src/core/config.js';
 import { effortMatrix } from '../../src/core/effort.js';
 import { DEFAULT_SPLIT_MIN_PHASES } from '../../src/stages/plan/plan-package.js';
 import type { SplitMode } from '../../src/core/split-policy.js';
@@ -57,6 +64,8 @@ export interface TestContextOptions {
   splitMode?: SplitMode;
   splitMinPhases?: number;
   maxPlanLines?: number;
+  telegram?: Partial<ResolvedTelegram>;
+  claudePermissionMode?: string;
 }
 
 export function makeTestRunContext(
@@ -66,23 +75,35 @@ export function makeTestRunContext(
   options: TestContextOptions = {},
 ): RunContext {
   const effort = options.effort ?? 'low';
+  const settings: RunSettings = {
+    maxIters: options.maxIters ?? 1,
+    effort,
+    fixPass: options.fixPass ?? 0,
+    translatePass: options.translatePass ?? 0,
+    locale: options.locale ?? 'en',
+    diffThreshold: options.diffThreshold ?? 5,
+    retryCount: 0,
+    retryDelaySeconds: 0,
+  };
+  const matrix = options.matrix ?? fixtureMatrix();
+  const permissions = fixturePermissions();
+  const base = resolveConfig({ overrides: {}, env: {}, home: tmp }).config;
+  const config: ResolvedConfig = {
+    ...base,
+    settings,
+    matrix,
+    permissions,
+    telegram: { ...base.telegram, ...options.telegram },
+  };
   return {
     work,
     mode: options.mode ?? 'plan',
     inputPath: path.join(tmp, 'input.md'),
     plansDir: path.join(tmp, 'plans'),
-    settings: {
-      maxIters: options.maxIters ?? 1,
-      effort,
-      fixPass: options.fixPass ?? 0,
-      translatePass: options.translatePass ?? 0,
-      locale: options.locale ?? 'en',
-      diffThreshold: options.diffThreshold ?? 5,
-      retryCount: 0,
-      retryDelaySeconds: 0,
-    },
+    config,
+    settings,
     effort: effortMatrix(effort),
-    permissions: fixturePermissions(),
+    permissions,
     skills: skillPaths(REPO_ROOT),
     provider: {
       scratch,
@@ -93,11 +114,16 @@ export function makeTestRunContext(
         claude: BASE_STREAM_KNOBS,
         cursor: BASE_STREAM_KNOBS,
       },
-      matrix: options.matrix ?? fixtureMatrix(),
+      matrix,
       sessionMode: effortMatrix(effort).sessionMode,
       creatorSessionFile: path.join(work, 'creator.session-id'),
       markdownSchemaPath: path.join(REPO_ROOT, 'skills', '_shared', 'markdown.schema.json'),
       binaries: { codex: 'codex', claude: 'claude', cursor: 'cursor-agent' },
+      livenessHeartbeatSeconds: 0,
+      claudeThinkingEvery: 3,
+      ...(options.claudePermissionMode !== undefined
+        ? { claudePermissionMode: options.claudePermissionMode }
+        : {}),
     },
     passes: {
       fixPass: { timeoutSeconds: 0, semanticIdleTimeoutSeconds: 0, retryCount: 0 },

@@ -4,7 +4,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { providerRun } from '../../src/providers/provider.js';
 import { DISABLED_STREAM_KNOBS, resolveRunnerBinaries } from '../../src/providers/registry.js';
-import { HaltError } from '../../src/runtime/halt.js';
 import type { ProviderRuntime } from '../../src/providers/runtime.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { BASE_STREAM_KNOBS, fixtureMatrix } from '../helpers/test-context.js';
@@ -21,7 +20,6 @@ import {
   type StderrCapture,
 } from '../helpers/harness.js';
 
-const LIVENESS_ENV = 'AGENT_QUORUM_LIVENESS_HEARTBEAT_SECONDS';
 const CRITIC_SKILL = path.join(SKILLS_DIR, 'plan-critic', 'SKILL.md');
 const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json');
 const CREATOR_SKILL = path.join(SKILLS_DIR, 'plan-creator', 'SKILL.md');
@@ -48,6 +46,8 @@ function makeRuntime(partial?: Partial<ProviderRuntime>): ProviderRuntime {
     creatorSessionFile: path.join(tmp, 'creator.session-id'),
     markdownSchemaPath: path.join(SKILLS_DIR, '_shared', 'markdown.schema.json'),
     binaries: { codex: 'codex', claude: 'claude', cursor: 'cursor-agent' },
+    livenessHeartbeatSeconds: 0,
+    claudeThinkingEvery: 3,
     ...partial,
   };
 }
@@ -194,6 +194,7 @@ describe('claude argv contract', () => {
     const createArgv = path.join(tmp, 'create.argv');
     const criticArgv = path.join(tmp, 'critic.argv');
     const providerRuntime = makeRuntime({
+      claudePermissionMode: 'plan',
       matrix: {
         ...fixtureMatrix(),
         critic: { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'xhigh' },
@@ -203,7 +204,6 @@ describe('claude argv contract', () => {
     const createStatus = await withEnvAsync(
       {
         PATH: fakePath(),
-        CLAUDE_PERMISSION_MODE: 'plan',
         FAKE_CLAUDE_MARKDOWN_RESULT: created,
         FAKE_CLAUDE_ARGV_LOG: createArgv,
       },
@@ -227,7 +227,6 @@ describe('claude argv contract', () => {
     const criticStatus = await withEnvAsync(
       {
         PATH: fakePath(),
-        CLAUDE_PERMISSION_MODE: 'plan',
         FAKE_CLAUDE_JSON_RESULT: critique,
         FAKE_CLAUDE_ARGV_LOG: criticArgv,
       },
@@ -740,14 +739,13 @@ describe('codex liveness heartbeat', () => {
     const critique = path.join(tmp, 'critique.json');
     emptyCritique(critique);
     const out = path.join(tmp, 'out.json');
-    const providerRuntime = makeRuntime();
+    const providerRuntime = makeRuntime({ livenessHeartbeatSeconds: 1 });
 
     const status = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
-        [LIVENESS_ENV]: '1',
         FAKE_CODEX_SILENT_SECONDS: '3',
       },
       () =>
@@ -786,7 +784,6 @@ describe('codex liveness heartbeat', () => {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
-        [LIVENESS_ENV]: '0',
         FAKE_CODEX_SILENT_SECONDS: '2',
       },
       () =>
@@ -806,39 +803,6 @@ describe('codex liveness heartbeat', () => {
     expect(status).toBe(0);
     expect(capture.text()).not.toContain('still working');
   }, 30_000);
-
-  it('halts on an invalid cadence before the codex child is spawned', async () => {
-    const argvLog = path.join(tmp, 'codex.argv');
-    const promptCapture = path.join(tmp, 'codex.prompt');
-    const providerRuntime = makeRuntime({ retry: { retryCount: 3, retryDelaySeconds: 0 } });
-
-    await expect(
-      withEnvAsync(
-        {
-          PATH: fakePath(),
-          FAKE_CODEX_OUTPUT: path.join(tmp, 'unused.json'),
-          FAKE_CODEX_ARGV_LOG: argvLog,
-          FAKE_CODEX_PROMPT: promptCapture,
-          [LIVENESS_ENV]: 'abc',
-        },
-        () =>
-          providerRun(
-            providerRuntime,
-            'critic',
-            'json',
-            path.join(tmp, 'out.json'),
-            CRITIC_SKILL,
-            CRITIC_SCHEMA,
-            '',
-            '',
-            'P\n',
-          ),
-      ),
-    ).rejects.toThrow(HaltError);
-
-    expect(existsSync(argvLog)).toBe(false);
-    expect(existsSync(promptCapture)).toBe(false);
-  });
 });
 
 describe('cursor adapter', () => {
@@ -972,6 +936,7 @@ describe('cursor adapter', () => {
 describe('cursor liveness heartbeat', () => {
   function cursorRuntime(partial?: Partial<ProviderRuntime>): ProviderRuntime {
     return makeRuntime({
+      livenessHeartbeatSeconds: 1,
       matrix: {
         ...fixtureMatrix(),
         creator: { runner: 'cursor', model: 'composer-2.5', reasoning: '' },
@@ -990,7 +955,6 @@ describe('cursor liveness heartbeat', () => {
       {
         PATH: fakePath(),
         FAKE_CURSOR_MARKDOWN_RESULT: created,
-        [LIVENESS_ENV]: '1',
         FAKE_CURSOR_SILENT_SECONDS: '3',
       },
       () =>
@@ -1028,7 +992,6 @@ describe('cursor liveness heartbeat', () => {
       {
         PATH: fakePath(),
         FAKE_CURSOR_MARKDOWN_RESULT: created,
-        [LIVENESS_ENV]: '1',
         FAKE_CURSOR_SILENT_SECONDS: '5',
       },
       () =>
@@ -1049,58 +1012,22 @@ describe('cursor liveness heartbeat', () => {
     expect(capture.text()).toContain('still working');
     expect(capture.text()).toContain('cursor stream stalled');
   }, 30_000);
-
-  it('halts on an invalid cadence before the detached cursor stream spawns', async () => {
-    const created = path.join(tmp, 'created.md');
-    writeStructuredPlanFile(created, 'Cursor Created');
-    const argvLog = path.join(tmp, 'cursor.argv');
-    const promptCapture = path.join(tmp, 'cursor.prompt');
-    const providerRuntime = cursorRuntime({ retry: { retryCount: 3, retryDelaySeconds: 0 } });
-
-    await expect(
-      withEnvAsync(
-        {
-          PATH: fakePath(),
-          FAKE_CURSOR_MARKDOWN_RESULT: created,
-          FAKE_CURSOR_ARGV_LOG: argvLog,
-          FAKE_CURSOR_PROMPT: promptCapture,
-          [LIVENESS_ENV]: 'abc',
-        },
-        () =>
-          providerRun(
-            providerRuntime,
-            'creator',
-            'markdown',
-            path.join(tmp, 'out.md'),
-            CREATOR_SKILL,
-            '',
-            TOOLS,
-            DISALLOWED,
-            'Go.\n',
-          ),
-      ),
-    ).rejects.toThrow(HaltError);
-
-    expect(existsSync(argvLog)).toBe(false);
-    expect(existsSync(promptCapture)).toBe(false);
-  });
 });
 
 describe('claude liveness heartbeat (AC-4)', () => {
-  it('never reads the new knob: no liveness line and no halt on an invalid value', async () => {
+  it('never emits a liveness line even when the cadence is configured', async () => {
     const created = path.join(tmp, 'created.md');
     writeStructuredPlanFile(created, 'Claude Created');
     const out = path.join(tmp, 'out.md');
 
-    const validStatus = await withEnvAsync(
+    const status = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: created,
-        [LIVENESS_ENV]: '1',
       },
       () =>
         providerRun(
-          makeRuntime(),
+          makeRuntime({ livenessHeartbeatSeconds: 1 }),
           'creator',
           'markdown',
           out,
@@ -1111,29 +1038,7 @@ describe('claude liveness heartbeat (AC-4)', () => {
           'X\n',
         ),
     );
-    expect(validStatus).toBe(0);
-    expect(capture.text()).not.toContain('still working');
-
-    const invalidStatus = await withEnvAsync(
-      {
-        PATH: fakePath(),
-        FAKE_CLAUDE_MARKDOWN_RESULT: created,
-        [LIVENESS_ENV]: 'abc',
-      },
-      () =>
-        providerRun(
-          makeRuntime(),
-          'creator',
-          'markdown',
-          out,
-          CREATOR_SKILL,
-          '',
-          TOOLS,
-          DISALLOWED,
-          'X\n',
-        ),
-    );
-    expect(invalidStatus).toBe(0);
+    expect(status).toBe(0);
     expect(capture.text()).not.toContain('still working');
   });
 });

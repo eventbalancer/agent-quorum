@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, openSync, renameSync, statSync, closeSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  statSync,
+  closeSync,
+  unlinkSync,
+} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -6,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { HaltError } from '../runtime/halt.js';
 import { packageRoot, projectRoot } from '../runtime/env.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
+import { ensureStoreHome, handoffDir, writeSecretFile } from '../core/store.js';
 import { resolveResumeWorkdir } from '../core/resume.js';
 import {
   deriveRunName,
@@ -214,15 +224,36 @@ export async function runLaunchCli(
     env.AGENT_QUORUM_RESUME = '1';
   }
   env.AGENT_QUORUM_WORK_DIR = work;
-  if (overrides.configFile !== undefined) {
-    env.AGENT_QUORUM_CONFIG_FILE = overrides.configFile;
-  }
   env.AGENT_QUORUM_HOME = home;
   env.AGENT_QUORUM_STDIO_IS_RUNLOG = '1';
   if (mintedRunId !== undefined) {
     env.AGENT_QUORUM_RUN_ID = mintedRunId;
     env.AGENT_QUORUM_RUN_NAME = name;
   }
+
+  // Split the override by sensitivity: the non-secret config rides the child env
+  // as JSON, but no bot token ever enters it. The effective token (structured
+  // override, else the parent's ambient one) goes to an owner-only 0600 file
+  // under <home>/handoff/ and only its path is forwarded; the ambient token is
+  // stripped from the child env so `{ ...process.env }` cannot copy it into the
+  // detached child or any provider grandchild. A token sourced only from the
+  // store is not forwarded — the child reads secrets.json from disk.
+  if (overrides.config !== undefined) {
+    env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON = JSON.stringify(overrides.config);
+  }
+  const effectiveToken =
+    overrides.secrets?.telegramBotToken ?? process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
+  let handoffFile: string | undefined;
+  if (effectiveToken !== undefined && effectiveToken !== '') {
+    ensureStoreHome(home);
+    const dir = handoffDir(home);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
+    handoffFile = path.join(dir, `secrets-${rotationStamp()}-${process.pid}.json`);
+    writeSecretFile(handoffFile, `${JSON.stringify({ telegramBotToken: effectiveToken })}\n`);
+    env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE = handoffFile;
+  }
+  delete env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
 
   const runner = runnerCommand();
   const logFd = openSync(logPath, 'w');
@@ -245,6 +276,15 @@ export async function runLaunchCli(
     alive = false;
   }
   if (!alive) {
+    // The child unlinks the handoff itself once it reads it; on a startup failure
+    // it never got that far, so the parent removes the owner-only file here.
+    if (handoffFile !== undefined && existsSync(handoffFile)) {
+      try {
+        unlinkSync(handoffFile);
+      } catch {
+        /* best-effort: the file is owner-only under <home>/handoff/ */
+      }
+    }
     fail(`launch failed: agent-quorum exited immediately; inspect log: ${logPath}`, 1);
   }
 

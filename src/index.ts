@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { HaltError } from './runtime/halt.js';
+import { resolveConfigForHome, type DeepPartial, type OperatorConfig } from './core/config.js';
 import { knownStateDirs, resolveArtifactRoots } from './runtime/paths.js';
 import { runInterveneCli } from './cli/intervene.js';
 import { runLaunchCli } from './cli/launch.js';
@@ -24,6 +25,7 @@ import type { Effort, RunOverrides } from './types.js';
 
 export { ExitCode } from './exit-codes.js';
 export type { Effort, Role, RunMode, RunOverrides, Runner } from './types.js';
+export type { DeepPartial, OperatorConfig, ResolvedConfig, Secrets } from './core/config.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
 export type RunSelector = Selector;
 
@@ -45,8 +47,9 @@ export interface RunPlanLoopOptions {
   translate?: boolean;
   locale?: string;
   workDir?: string;
-  configFile?: string;
   home?: string;
+  config?: DeepPartial<OperatorConfig>;
+  secrets?: { telegramBotToken?: string };
 }
 
 export interface LaunchPlanLoopOptions extends RunPlanLoopOptions {
@@ -126,8 +129,9 @@ function commonArgs(options: RunPlanLoopOptions): string[] {
 function runOverrides(options: RunPlanLoopOptions): RunOverrides {
   return {
     ...(options.workDir !== undefined ? { workDir: options.workDir } : {}),
-    ...(options.configFile !== undefined ? { configFile: options.configFile } : {}),
     ...(options.home !== undefined ? { home: options.home } : {}),
+    ...(options.config !== undefined ? { config: options.config } : {}),
+    ...(options.secrets !== undefined ? { secrets: options.secrets } : {}),
   };
 }
 
@@ -314,7 +318,10 @@ export function interveneRun(
 }
 
 // Bound the durable ledger by retention policy (record-only; never deletes
-// functional workdirs). See RetentionPolicy for defaults and env overrides.
+// functional workdirs). Retention defaults resolve from the config store under
+// the options home; an explicit RetentionPolicy field stays highest.
 export function pruneRuns(policy?: RetentionPolicy, options?: RunLookupOptions): PruneResult {
-  return pruneRunsStore(lookupStateDir(options), policy ?? {});
+  const home = resolveArtifactRoots(options?.home !== undefined ? { home: options.home } : {}).home;
+  const defaults = resolveConfigForHome(home).retention;
+  return pruneRunsStore(lookupStateDir(options), policy ?? {}, defaults);
 }

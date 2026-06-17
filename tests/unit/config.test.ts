@@ -1,319 +1,126 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  resetConfigCache,
-  resolveRoleConfig,
-  resolveRolePermissions,
-  resolveRunSettings,
-  runnersInUse,
-} from '../../src/core/config.js';
+import { resolveConfig, runnersInUse, type RunSettings } from '../../src/core/config.js';
 import type { JsonObject } from '../../src/core/json.js';
 import { effortMatrix } from '../../src/core/effort.js';
-import { HaltError } from '../../src/runtime/halt.js';
-import {
-  captureStderr,
-  defaultPlanLoopConfig,
-  writeDefaultPlanLoopConfig,
-  writePlanLoopConfig,
-  withEnv,
-} from '../helpers/harness.js';
+import { captureStderr } from '../helpers/harness.js';
 
 let tmp: string;
 
-function configPath(name: string): string {
-  return path.join(tmp, `${name}.agent-quorum.json`);
+function writeStore(config: JsonObject): void {
+  writeFileSync(path.join(tmp, 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
 }
 
-function writeSettingsConfig(file: string, settings: JsonObject): void {
-  const config = defaultPlanLoopConfig();
-  config.settings = { ...(config.settings as JsonObject), ...settings };
-  writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+function resolvedSettings(env: NodeJS.ProcessEnv = {}): RunSettings {
+  return resolveConfig({ env, home: tmp }).config.settings;
 }
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-configtest.'));
-  resetConfigCache();
 });
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('run settings resolution', () => {
-  it('file .settings drives iters/effort/fix/diffThreshold', () => {
-    const file = configPath('file-settings');
-    writeSettingsConfig(file, { iters: 7, effort: 'low', fix: false, diffThreshold: 9 });
+describe('resolveConfig validation', () => {
+  it('halts on a non-positive iters', () => {
+    writeStore({ settings: { iters: 0 } });
     const capture = captureStderr();
     try {
-      const settings = resolveRunSettings({}, file);
-      expect(settings.maxIters).toBe(7);
-      expect(settings.effort).toBe('low');
-      expect(settings.fixPass).toBe(0);
-      expect(settings.diffThreshold).toBe(9);
+      expect(() => resolvedSettings()).toThrow(/iters must be a positive integer/);
     } finally {
       capture.restore();
     }
   });
 
-  it('env overrides a file setting', () => {
-    const file = configPath('env-over-setting');
-    writeSettingsConfig(file, { iters: 7 });
-    const settings = withEnv({ AGENT_QUORUM_MAX_ITERS: '11' }, () => resolveRunSettings({}, file));
-    expect(settings.maxIters).toBe(11);
-  });
-
-  it('CLI overrides both env and file settings', () => {
-    const file = configPath('cli-over-setting');
-    writeSettingsConfig(file, { iters: 7 });
-    const settings = withEnv({ AGENT_QUORUM_MAX_ITERS: '11' }, () =>
-      resolveRunSettings({ maxIters: '3' }, file),
-    );
-    expect(settings.maxIters).toBe(3);
-  });
-
-  it('an invalid settings.fix halts with a controlled validation error', () => {
-    const file = configPath('invalid-fix');
-    writeSettingsConfig(file, { fix: 'maybe' });
+  it('halts on a non-boolean fix', () => {
+    writeStore({ settings: { fix: 'maybe' } });
     const capture = captureStderr();
     try {
-      expect(() => resolveRunSettings({}, file)).toThrow(HaltError);
-      resetConfigCache();
-      expect(() => resolveRunSettings({}, file)).toThrow(
-        /settings\.fix must be true or false \(got 'maybe'\)/,
-      );
-      expect(capture.text()).toContain('settings.fix must be true or false');
+      expect(() => resolvedSettings()).toThrow(/settings\.fix must be true or false/);
     } finally {
       capture.restore();
     }
   });
 
-  it('an unknown setting is warned and ignored', () => {
-    const file = configPath('unknown-setting');
-    writeSettingsConfig(file, { iters: 1, bogus: true });
+  it('halts on an invalid runner', () => {
+    writeStore({ roles: { critic: { runner: 'gemini', model: 'm', reasoning: 'high' } } });
     const capture = captureStderr();
     try {
-      resolveRunSettings({}, file);
-      expect(capture.text()).toContain("ignoring unknown setting 'bogus'");
+      expect(() => resolveConfig({ env: {}, home: tmp })).toThrow(/invalid runner 'gemini'/);
     } finally {
       capture.restore();
     }
   });
 
-  it('a missing required setting halts with a controlled validation error', () => {
-    const file = configPath('missing-setting');
-    const config = defaultPlanLoopConfig();
-    const settings = config.settings as JsonObject;
-    Reflect.deleteProperty(settings, 'retryCount');
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  it('halts on an invalid locale tag', () => {
+    writeStore({ settings: { locale: '../ru' } });
     const capture = captureStderr();
     try {
-      expect(() => resolveRunSettings({}, file)).toThrow(
-        /missing required field settings\.retryCount/,
-      );
+      expect(() => resolvedSettings()).toThrow(/settings\.locale/);
     } finally {
       capture.restore();
     }
   });
 });
 
-describe('role matrix resolution', () => {
-  it('env runner overrides file runner without mutating the file', () => {
-    const file = configPath('env-over-file');
-    writePlanLoopConfig(file, 'critic:claude');
-    const before = readFileSync(file, 'utf8');
+describe('resolveConfig role matrix', () => {
+  it('an env runner override beats the store and preserves the store model', () => {
+    writeStore({ roles: { critic: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' } } });
     const capture = captureStderr();
     try {
-      const matrix = withEnv({ AGENT_QUORUM_CRITIC_RUNNER: 'codex' }, () =>
-        resolveRoleConfig(file),
-      );
-      expect(matrix.critic.runner).toBe('codex');
-      expect(readFileSync(file, 'utf8')).toBe(before);
-      const onDisk = JSON.parse(readFileSync(file, 'utf8')) as {
-        roles: { critic: { runner: string } };
-      };
-      expect(onDisk.roles.critic.runner).toBe('claude');
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('an env runner override preserves the explicit config model', () => {
-    const file = configPath('env-runner');
-    writePlanLoopConfig(file, 'critic:codex:gpt-5.5');
-    const capture = captureStderr();
-    try {
-      const matrix = withEnv({ AGENT_QUORUM_CRITIC_RUNNER: 'claude' }, () =>
-        resolveRoleConfig(file),
-      );
-      expect(matrix.critic.runner).toBe('claude');
-      expect(matrix.critic.model).toBe('gpt-5.5');
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('a same-layer model/reasoning pin is honored as the deliberate pairing', () => {
-    const file = configPath('same-layer');
-    writePlanLoopConfig(file, 'critic:codex:gpt-5.4:high');
-    const capture = captureStderr();
-    try {
-      const matrix = resolveRoleConfig(file);
-      expect(matrix.critic.model).toBe('gpt-5.4');
-      expect(matrix.critic.reasoning).toBe('high');
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('role defaults resolve from the explicit config file', () => {
-    const file = configPath('file-role-defaults');
-    writeDefaultPlanLoopConfig(file);
-    const capture = captureStderr();
-    try {
-      const matrix = resolveRoleConfig(file);
-      expect(matrix.critic).toEqual({ runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' });
-      expect(matrix.creator).toEqual({
-        runner: 'claude',
-        model: 'claude-opus-4-8',
-        reasoning: 'xhigh',
+      const { config, provenance } = resolveConfig({
+        env: { AGENT_QUORUM_CRITIC_RUNNER: 'claude' },
+        home: tmp,
       });
-      expect(matrix.fixer.runner).toBe('claude');
-      expect(matrix.reviewer.runner).toBe('codex');
+      expect(config.matrix.critic.runner).toBe('claude');
+      expect(config.matrix.critic.model).toBe('gpt-5.5');
+      expect(provenance.get('roles.critic.runner')).toBe('env');
+      expect(provenance.get('roles.critic.model')).toBe('store');
     } finally {
       capture.restore();
     }
   });
 
-  it('an absent config halts instead of seeding hidden defaults', () => {
-    const file = configPath('missing-config');
-    const capture = captureStderr();
-    try {
-      expect(() => resolveRoleConfig(file)).toThrow(/agent-quorum config: file not found/);
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('an existing config is never overwritten', () => {
-    const file = configPath('no-overwrite');
-    writePlanLoopConfig(file, 'critic:claude', 'reviewer:claude');
-    const before = readFileSync(file, 'utf8');
-    const capture = captureStderr();
-    try {
-      resolveRoleConfig(file);
-      resolveRolePermissions(file);
-      resolveRunSettings({}, file);
-      expect(readFileSync(file, 'utf8')).toBe(before);
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('an invalid runner halts with a controlled validation error', () => {
-    const file = configPath('invalid-runner');
-    writePlanLoopConfig(file, 'critic:gemini');
-    const capture = captureStderr();
-    try {
-      expect(() => resolveRoleConfig(file)).toThrow(/invalid runner 'gemini'/);
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('every role resolves runner/model/reasoning (run.meta.tsv source fields)', () => {
-    const file = configPath('meta-keys');
-    writeDefaultPlanLoopConfig(file);
-    const capture = captureStderr();
-    try {
-      const matrix = resolveRoleConfig(file);
-      for (const role of ['critic', 'creator', 'fixer', 'reviewer'] as const) {
-        expect(matrix[role].runner).toBeTruthy();
-        expect(matrix[role].model).toBeTruthy();
-        expect(matrix[role].reasoning).toBeTruthy();
-      }
-    } finally {
-      capture.restore();
-    }
+  it('falls through to DEFAULT_CONFIG roles when the store is silent', () => {
+    const { config } = resolveConfig({ env: {}, home: tmp });
+    expect(config.matrix.critic).toEqual({ runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' });
+    expect(config.matrix.creator.runner).toBe('claude');
+    expect(runnersInUse(config.matrix, 0, 0)).toEqual(['codex', 'claude']);
   });
 });
 
-describe('role permissions resolution', () => {
-  it('role tool permissions resolve from agent-quorum.json (array and string forms)', () => {
-    const file = configPath('role-permissions');
-    const config = defaultPlanLoopConfig();
-    const roles = config.roles as Record<string, JsonObject>;
-    roles.creator = {
-      ...roles.creator,
-      createTools: ['Read', 'Grep', 'Glob', 'Bash'],
-      createDisallowedTools: 'Write,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion',
-      updateTools: 'Read',
-      updateDisallowedTools: 'Write,Bash,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion',
-    };
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-    const capture = captureStderr();
-    try {
-      const permissions = resolveRolePermissions(file);
-      expect(permissions.creator.createTools).toBe('Read,Grep,Glob,Bash');
-      expect(permissions.creator.createDisallowedTools).toBe(
-        'Write,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion',
-      );
-      expect(permissions.creator.updateTools).toBe('Read');
-      expect(permissions.critic.tools).toBe('Read,Grep,Glob');
-    } finally {
-      capture.restore();
-    }
+describe('resolveConfig role permissions', () => {
+  it('resolves tool permissions from the store in array and string forms', () => {
+    writeStore({
+      roles: {
+        creator: {
+          runner: 'claude',
+          model: 'claude-opus-4-8',
+          reasoning: 'xhigh',
+          createTools: ['Read', 'Grep', 'Glob', 'Bash'],
+          createDisallowedTools: 'Write,Edit',
+          updateTools: 'Read',
+          updateDisallowedTools: 'Write,Bash',
+        },
+      },
+    });
+    const { config } = resolveConfig({ env: {}, home: tmp });
+    expect(config.permissions.creator.createTools).toBe('Read,Grep,Glob,Bash');
+    expect(config.permissions.creator.createDisallowedTools).toBe('Write,Edit');
+    expect(config.permissions.critic.tools).toBe('Read,Grep,Glob');
   });
 
-  it('an invalid role permission halts with a controlled validation error', () => {
-    const file = configPath('invalid-role-permission');
-    const config = defaultPlanLoopConfig();
-    const roles = config.roles as Record<string, JsonObject>;
-    roles.creator = { ...roles.creator, createTools: { bad: true } };
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-    const capture = captureStderr();
-    try {
-      expect(() => resolveRolePermissions(file)).toThrow(
-        /missing required field roles\.creator\.createTools/,
-      );
-    } finally {
-      capture.restore();
-    }
-  });
-
-  it('a missing required role permission halts with a controlled validation error', () => {
-    const file = configPath('missing-role-permission');
-    const config = defaultPlanLoopConfig();
-    const roles = config.roles as Record<string, JsonObject>;
-    const reviewer = roles.reviewer;
-    if (reviewer) {
-      Reflect.deleteProperty(reviewer, 'disallowedTools');
-    }
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-    const capture = captureStderr();
-    try {
-      expect(() => resolveRolePermissions(file)).toThrow(
-        /missing required field roles\.reviewer\.disallowedTools/,
-      );
-    } finally {
-      capture.restore();
-    }
-  });
-});
-
-describe('runners in use', () => {
-  it('only resolved roles contribute required runners (codex off-path equivalence)', () => {
-    const file = configPath('codex-off-path');
-    writePlanLoopConfig(file, 'critic:claude', 'creator:claude');
-    const capture = captureStderr();
-    try {
-      const matrix = resolveRoleConfig(file);
-      expect(runnersInUse(matrix, 0, 0)).toEqual(['claude']);
-      expect(runnersInUse(matrix, 1, 0)).toEqual(['codex', 'claude']);
-    } finally {
-      capture.restore();
-    }
+  it('an empty store tool field falls through to the default', () => {
+    writeStore({
+      roles: { reviewer: { runner: 'codex', model: 'm', reasoning: 'high', disallowedTools: [] } },
+    });
+    const { config, provenance } = resolveConfig({ env: {}, home: tmp });
+    expect(config.permissions.reviewer.disallowedTools).toContain('Write');
+    expect(provenance.get('roles.reviewer.disallowedTools')).toBe('default');
   });
 });
 
@@ -338,5 +145,110 @@ describe('effort matrix', () => {
       topology: 'full',
     });
     expect(() => effortMatrix('medium')).toThrow('--effort expects low, high, or max');
+  });
+});
+
+describe('resolveConfig precedence and provenance', () => {
+  function writeSettingsStore(settings: JsonObject, extra: JsonObject = {}): void {
+    writeFileSync(
+      path.join(tmp, 'config.json'),
+      `${JSON.stringify({ settings, ...extra }, null, 2)}\n`,
+    );
+  }
+
+  it('falls through to DEFAULT_CONFIG when no layer supplies a value', () => {
+    const { config, provenance } = resolveConfig({ env: {}, home: tmp });
+    expect(config.settings.maxIters).toBe(5);
+    expect(config.settings.effort).toBe('high');
+    expect(provenance.get('settings.iters')).toBe('default');
+    expect(config.providers.claudePermissionMode).toBe('default');
+    expect(provenance.get('claudePermissionMode')).toBe('default');
+  });
+
+  it('store wins over the default', () => {
+    writeSettingsStore({ iters: 7 });
+    const { config, provenance } = resolveConfig({ env: {}, home: tmp });
+    expect(config.settings.maxIters).toBe(7);
+    expect(provenance.get('settings.iters')).toBe('store');
+  });
+
+  it('env wins over the store', () => {
+    writeSettingsStore({ iters: 7 });
+    const { config, provenance } = resolveConfig({
+      env: { AGENT_QUORUM_MAX_ITERS: '9' },
+      home: tmp,
+    });
+    expect(config.settings.maxIters).toBe(9);
+    expect(provenance.get('settings.iters')).toBe('env');
+  });
+
+  it('a CLI override wins over env (override tier)', () => {
+    writeSettingsStore({ iters: 7 });
+    const { config, provenance } = resolveConfig({
+      overrides: { cli: { maxIters: '11' } },
+      env: { AGENT_QUORUM_MAX_ITERS: '9' },
+      home: tmp,
+    });
+    expect(config.settings.maxIters).toBe(11);
+    expect(provenance.get('settings.iters')).toBe('override');
+  });
+
+  it('a structured config override wins over env (override tier)', () => {
+    const { config, provenance } = resolveConfig({
+      overrides: { config: { settings: { iters: 13 } } },
+      env: { AGENT_QUORUM_MAX_ITERS: '9' },
+      home: tmp,
+    });
+    expect(config.settings.maxIters).toBe(13);
+    expect(provenance.get('settings.iters')).toBe('override');
+  });
+
+  it('intra-override tie-break: a top-level CLI scalar beats structured config', () => {
+    const { config } = resolveConfig({
+      overrides: { cli: { maxIters: '11' }, config: { settings: { iters: 13 } } },
+      env: {},
+      home: tmp,
+    });
+    expect(config.settings.maxIters).toBe(11);
+  });
+
+  it('records the winning layer for claudePermissionMode at each tier', () => {
+    writeSettingsStore({}, { claudePermissionMode: 'plan' });
+    const fromStore = resolveConfig({ env: {}, home: tmp });
+    expect(fromStore.config.providers.claudePermissionMode).toBe('plan');
+    expect(fromStore.provenance.get('claudePermissionMode')).toBe('store');
+
+    const fromEnv = resolveConfig({ env: { CLAUDE_PERMISSION_MODE: 'acceptEdits' }, home: tmp });
+    expect(fromEnv.config.providers.claudePermissionMode).toBe('acceptEdits');
+    expect(fromEnv.provenance.get('claudePermissionMode')).toBe('env');
+
+    const fromOverride = resolveConfig({
+      overrides: { config: { claudePermissionMode: 'bypassPermissions' } },
+      env: { CLAUDE_PERMISSION_MODE: 'acceptEdits' },
+      home: tmp,
+    });
+    expect(fromOverride.config.providers.claudePermissionMode).toBe('bypassPermissions');
+    expect(fromOverride.provenance.get('claudePermissionMode')).toBe('override');
+  });
+
+  it('resolves status max-plan-lines, retention, and provider knobs from the store', () => {
+    writeFileSync(
+      path.join(tmp, 'config.json'),
+      `${JSON.stringify({
+        status: { maxPlanLines: 1234 },
+        retention: { keepCount: 7, maxAgeDays: 14 },
+        providers: { cursorBin: '/opt/cursor', livenessHeartbeatSeconds: 12 },
+      })}\n`,
+    );
+    const { config, provenance } = resolveConfig({ env: {}, home: tmp });
+    expect(config.status.maxPlanLines).toBe(1234);
+    expect(provenance.get('status.maxPlanLines')).toBe('store');
+    expect(config.retention).toEqual({ keepCount: 7, maxAgeDays: 14 });
+    expect(config.providers.cursorBin).toBe('/opt/cursor');
+    expect(config.providers.livenessHeartbeatSeconds).toBe(12);
+
+    const env = resolveConfig({ env: { AGENT_QUORUM_MAX_PLAN_LINES: '50' }, home: tmp });
+    expect(env.config.status.maxPlanLines).toBe(50);
+    expect(env.provenance.get('status.maxPlanLines')).toBe('env');
   });
 });

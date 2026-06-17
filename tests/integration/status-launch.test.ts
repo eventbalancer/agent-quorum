@@ -15,11 +15,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../helpers/cli.js';
 import { pgidOf } from '../../src/runtime/proc.js';
-import {
-  writeDefaultPlanLoopConfig,
-  writeFakeBin,
-  writeStructuredPlanFile,
-} from '../helpers/harness.js';
+import { writeStoreConfig, writeFakeBin, writeStructuredPlanFile } from '../helpers/harness.js';
 
 let tmp: string;
 let fake: string;
@@ -68,7 +64,7 @@ async function launchHangingRun(
     ['launch', '--effort', 'low', '--iters', '1', input, '--no-fix', '--no-translate'],
     {
       PATH: `${fake}:${process.env.PATH ?? ''}`,
-      AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
       AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
       AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
       AGENT_QUORUM_CLARIFY: '0',
@@ -112,7 +108,7 @@ beforeEach(() => {
   writeSlowCodex();
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+  writeStoreConfig(path.join(tmp, 'home'));
 });
 
 afterEach(async () => {

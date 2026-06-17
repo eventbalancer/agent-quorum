@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { log } from '../../runtime/log.js';
-import { telegramConfigured } from './config.js';
+import { telegramConfigured, type TelegramRuntime } from './config.js';
 import { telegramSend } from './send.js';
 
 const COMPLETION_REASON_MAX_LENGTH = 180;
@@ -57,12 +57,13 @@ export function renderTelegramCompletionNotification(
 }
 
 export async function telegramNotifyCompletion(
+  runtime: TelegramRuntime,
   notification: TelegramCompletionNotification,
 ): Promise<void> {
-  if (!telegramConfigured()) {
+  if (!telegramConfigured(runtime)) {
     return;
   }
-  const messageId = await telegramSend(renderTelegramCompletionNotification(notification));
+  const messageId = await telegramSend(runtime, renderTelegramCompletionNotification(notification));
   if (messageId === undefined) {
     log('WARNING: failed to send Telegram completion notification');
   }

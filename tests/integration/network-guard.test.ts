@@ -18,7 +18,7 @@ import { runCliAsync, type EnvOverrides } from '../helpers/cli.js';
 import {
   emptyCritique,
   withEnvAsync,
-  writeDefaultPlanLoopConfig,
+  writeStoreConfig,
   writeFakeBin,
   writeStructuredPlanFile,
 } from '../helpers/harness.js';
@@ -225,7 +225,7 @@ function writeSlowCompletingCodex(): void {
 function childEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
     PATH: `${fake}:${process.env.PATH ?? ''}`,
-    AGENT_QUORUM_CONFIG_FILE: path.join(tmp, 'agent-quorum.json'),
+    AGENT_QUORUM_HOME: path.join(tmp, 'home'),
     AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
     AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
     AGENT_QUORUM_CLARIFY: '0',
@@ -255,7 +255,7 @@ beforeEach(() => {
   mkdirSync(work);
   mkdirSync(path.join(tmp, 'plans'), { recursive: true });
   mkdirSync(path.join(tmp, 'state'), { recursive: true });
-  writeDefaultPlanLoopConfig(path.join(tmp, 'agent-quorum.json'));
+  writeStoreConfig(path.join(tmp, 'home'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'Guard Input');
   emptyCritique(path.join(tmp, 'empty.json'));
 });

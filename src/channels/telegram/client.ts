@@ -1,5 +1,5 @@
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS, telegramApiBase } from './config.js';
+import { DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS, type TelegramTransport } from './config.js';
 
 export type TelegramFailureKind =
   | 'http'
@@ -80,15 +80,13 @@ function classifyTelegramFailure(signals: TelegramFailureSignals): TelegramFailu
 }
 
 function buildTelegramRequest(
+  transport: TelegramTransport,
   method: string,
   params: URLSearchParams,
   options: TelegramCallOptions,
 ): { url: string; init: RequestInit } {
-  const token = process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN ?? '';
-  const url = `${telegramApiBase()}/bot${token}/${method}`;
-  const timeoutSeconds =
-    options.timeoutSeconds ??
-    Number(process.env.AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT ?? DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS);
+  const url = `${transport.apiBase}/bot${transport.botToken}/${method}`;
+  const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS;
   const signal = AbortSignal.timeout(timeoutSeconds * 1000);
   if (options.get) {
     return { url: `${url}?${params.toString()}`, init: { method: 'GET', signal } };
@@ -128,11 +126,17 @@ async function readTelegramResponseBody(response: Response): Promise<TelegramRes
 
 // Parses the body even on a non-2xx response so the Bot API error_code can classify the failure.
 export async function telegramCall(
+  transport: TelegramTransport,
   method: string,
   params: Record<string, string>,
   options: TelegramCallOptions = {},
 ): Promise<TelegramCallResult> {
-  const { url, init } = buildTelegramRequest(method, new URLSearchParams(params), options);
+  const { url, init } = buildTelegramRequest(
+    transport,
+    method,
+    new URLSearchParams(params),
+    options,
+  );
 
   let response: Response;
   try {

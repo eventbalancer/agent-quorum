@@ -9,22 +9,17 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { isTelegramFailureKind } from '../../channels/telegram/client.js';
 import {
-  DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS,
-  DEFAULT_TELEGRAM_POLL_TIMEOUT_SECONDS,
-  DEFAULT_TELEGRAM_RECEIVE_BACKOFF_SECONDS,
-  DEFAULT_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS,
   TELEGRAM_HTTP_TIMEOUT_SLACK_SECONDS,
   telegramGetUpdates,
   type TelegramFailure,
+  type TelegramRuntime,
   type TelegramUpdate,
 } from '../../channels/telegram/index.js';
-import { envNumber } from './env-number.js';
 
 const LEASE_SLACK_SECONDS = 5;
 const DIR_MODE = 0o700;
@@ -113,27 +108,15 @@ export function isPollFailure(result: PollResult): result is { readonly failure:
   return 'failure' in result;
 }
 
-function resolveBrokerConfig(): BrokerConfig {
+function resolveBrokerConfig(runtime: TelegramRuntime): BrokerConfig {
   return {
-    token: process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN ?? '',
-    chatId: process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '',
-    pollTimeout: envNumber(
-      'AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT',
-      DEFAULT_TELEGRAM_POLL_TIMEOUT_SECONDS,
-    ),
-    httpTimeout: envNumber(
-      'AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT',
-      DEFAULT_TELEGRAM_HTTP_TIMEOUT_SECONDS,
-    ),
-    failureWindowSeconds: envNumber(
-      'AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS',
-      DEFAULT_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS,
-    ),
-    backoffSeconds: envNumber(
-      'AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS',
-      DEFAULT_TELEGRAM_RECEIVE_BACKOFF_SECONDS,
-    ),
-    stateRoot: process.env.AGENT_QUORUM_TELEGRAM_STATE_DIR ?? os.tmpdir(),
+    token: runtime.botToken,
+    chatId: runtime.chatId,
+    pollTimeout: runtime.pollTimeoutSeconds,
+    httpTimeout: runtime.httpTimeoutSeconds,
+    failureWindowSeconds: runtime.receiveFailureWindowSeconds,
+    backoffSeconds: runtime.receiveBackoffSeconds,
+    stateRoot: runtime.stateDir,
   };
 }
 
@@ -176,8 +159,8 @@ function serializeJournalLine(entry: JournalEntry, ts: number): string {
 // append-only log, and advances a bot-global offset. The shared coordination
 // directory holds operator reply text, so it is created 0700 with 0600 files,
 // compacted below the minimum live cursor, and removed when the last run exits.
-export function openClarifyBroker(): ClarifyBroker {
-  const config = resolveBrokerConfig();
+export function openClarifyBroker(runtime: TelegramRuntime): ClarifyBroker {
+  const config = resolveBrokerConfig(runtime);
   const leaseWindowMs = (config.pollTimeout + config.httpTimeout + LEASE_SLACK_SECONDS) * 1000;
   const failureWindowMs = config.failureWindowSeconds * 1000;
   const runId = randomUUID();
@@ -478,7 +461,9 @@ export function openClarifyBroker(): ClarifyBroker {
     try {
       heartbeat();
       const sharedOffset = readOffset();
-      const fetch = await telegramGetUpdates(sharedOffset, longPoll, { httpTimeoutSeconds });
+      const fetch = await telegramGetUpdates(runtime, sharedOffset, longPoll, {
+        httpTimeoutSeconds,
+      });
       if (fetch.ok) {
         appendJournal(fetch.updates, sharedOffset);
         writeOffset(Math.max(sharedOffset, fetch.nextOffset));

@@ -4,14 +4,14 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clarifyGateEnabled, runClarificationGate } from '../../src/stages/plan/clarify.js';
+import type { ResolvedTelegram } from '../../src/core/config.js';
+import type { TelegramRuntime } from '../../src/channels/telegram/index.js';
 import { ExitCode, runPlanLoop } from '../../src/index.js';
-import { resetConfigCache } from '../../src/core/config.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import {
   captureStderr,
-  withEnv,
   withEnvAsync,
-  writeDefaultPlanLoopConfig,
+  writeStoreConfig,
   writeFakeBin,
   type StderrCapture,
 } from '../helpers/harness.js';
@@ -83,6 +83,23 @@ function gateEnv(): Record<string, string | undefined> {
   };
 }
 
+function gateTelegram(): Partial<ResolvedTelegram> {
+  return {
+    botToken: process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN ?? '',
+    chatId: process.env.AGENT_QUORUM_TELEGRAM_CHAT_ID ?? '',
+    apiBase: process.env.AGENT_QUORUM_TELEGRAM_API_BASE ?? 'https://api.telegram.org',
+    stateDir: process.env.AGENT_QUORUM_TELEGRAM_STATE_DIR ?? os.tmpdir(),
+    pollTimeoutSeconds: Number(process.env.AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT ?? 50),
+    httpTimeoutSeconds: Number(process.env.AGENT_QUORUM_TELEGRAM_HTTP_TIMEOUT ?? 70),
+    receiveFailureWindowSeconds: Number(
+      process.env.AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS ?? 120,
+    ),
+    receiveBackoffSeconds: Number(process.env.AGENT_QUORUM_TELEGRAM_RECEIVE_BACKOFF_SECONDS ?? 2),
+    clarifyDeadlineSeconds: Number(process.env.AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS ?? 86400),
+    clarify: process.env.AGENT_QUORUM_CLARIFY ?? 'auto',
+  };
+}
+
 function readJsonl(file: string): Record<string, unknown>[] {
   return readFileSync(file, 'utf8')
     .trim()
@@ -109,47 +126,29 @@ afterEach(async () => {
 });
 
 describe('clarify gate enablement', () => {
-  it('honors AGENT_QUORUM_CLARIFY and credentials', () => {
-    expect(
-      withEnv(
-        {
-          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
-          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
-          AGENT_QUORUM_CLARIFY: 'auto',
-        },
-        () => clarifyGateEnabled(),
-      ),
-    ).toBe('run');
-    expect(
-      withEnv(
-        {
-          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
-          AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
-          AGENT_QUORUM_CLARIFY: '0',
-        },
-        () => clarifyGateEnabled(),
-      ),
-    ).toBe('skip');
-    expect(
-      withEnv(
-        {
-          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
-          AGENT_QUORUM_TELEGRAM_CHAT_ID: undefined,
-          AGENT_QUORUM_CLARIFY: 'auto',
-        },
-        () => clarifyGateEnabled(),
-      ),
-    ).toBe('skip');
-    expect(
-      withEnv(
-        {
-          AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
-          AGENT_QUORUM_TELEGRAM_CHAT_ID: undefined,
-          AGENT_QUORUM_CLARIFY: '1',
-        },
-        () => clarifyGateEnabled(),
-      ),
-    ).toBe('error');
+  function runtime(botToken: string, chatId: string): TelegramRuntime {
+    return {
+      botToken,
+      chatId,
+      apiBase: 'http://127.0.0.1:1',
+      httpTimeoutSeconds: 70,
+      pollTimeoutSeconds: 50,
+      receiveFailureWindowSeconds: 120,
+      receiveBackoffSeconds: 2,
+      stateDir: '/tmp',
+    };
+  }
+
+  it('honors the clarify mode and credentials', () => {
+    expect(clarifyGateEnabled('auto', runtime('t', '42'))).toBe('run');
+    expect(clarifyGateEnabled('0', runtime('t', '42'))).toBe('skip');
+    expect(clarifyGateEnabled('auto', runtime('', ''))).toBe('skip');
+    const capture = captureStderr();
+    try {
+      expect(clarifyGateEnabled('1', runtime('', ''))).toBe('error');
+    } finally {
+      capture.restore();
+    }
   });
 });
 
@@ -158,10 +157,11 @@ describe('clarification gate', () => {
     seedQuestions();
     stub.queueReply(100, 'IO and RU');
     stub.queueReply(101, 'Hard cutover');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(true);
@@ -195,10 +195,11 @@ describe('clarification gate', () => {
     seedQuestions();
     stub.queueReply(100, '3');
     stub.queueReply(101, '1');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(true);
@@ -222,10 +223,15 @@ describe('clarification gate', () => {
       ],
     });
     stub.queueReply(150, '2');
-    const ctx = makeTestRunContext(tmp, work, scratch, { locale: 'ru', translatePass: 1 });
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, {
+          locale: 'ru',
+          translatePass: 1,
+          telegram: gateTelegram(),
+        }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(true);
@@ -238,10 +244,11 @@ describe('clarification gate', () => {
 
   it('is a no-op when the creator raises no blocking questions', async () => {
     seedQuestions({ questions: [] });
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(true);
@@ -266,10 +273,11 @@ describe('clarification gate', () => {
       `${JSON.stringify({ id: 'Q1', question: 'Which regions?', answer: 'IO only', ts: 't' })}\n`,
     );
     stub.queueReply(300, 'Staged');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(true);
@@ -283,10 +291,11 @@ describe('clarification gate', () => {
   it('/cancel aborts the gate', async () => {
     seedQuestions();
     stub.queueReply(400, '/cancel');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(gateEnv(), () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
 
     expect(result.ok).toBe(false);
@@ -299,15 +308,17 @@ describe('clarification gate', () => {
 
   it('deadline expiry aborts the gate', async () => {
     seedQuestions();
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(
       {
         ...gateEnv(),
         AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '1',
         AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT: '1',
       },
-      () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
     );
 
     expect(result.ok).toBe(false);
@@ -341,15 +352,19 @@ describe('clarification gate concurrency and failures', () => {
     // poll-lease contention between a waiting run and a second baseline.
     writeFileSync(path.join(workA, 'clarify.offset'), '1');
     writeFileSync(path.join(workB, 'clarify.offset'), '1');
-    const ctxA = makeTestRunContext(tmp, workA, scratch);
-    const ctxB = makeTestRunContext(tmp, workB, scratch);
     const env = { ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' };
 
     // Both gates run inside one env scope: process.env is shared, so concurrent
     // withEnvAsync calls would restore each other's vars mid-run.
     const [resultA, resultB] = await withEnvAsync(env, async () => {
-      const runA = runClarificationGate(ctxA, path.join(tmp, 'prompt.md'));
-      const runB = runClarificationGate(ctxB, path.join(tmp, 'prompt.md'));
+      const runA = runClarificationGate(
+        makeTestRunContext(tmp, workA, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      );
+      const runB = runClarificationGate(
+        makeTestRunContext(tmp, workB, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      );
       const idA = await waitForSent(stub, 'RUN-A region?');
       const idB = await waitForSent(stub, 'RUN-B region?');
       stub.queueReply(5000, 'answer for A', { replyTo: idA });
@@ -366,11 +381,13 @@ describe('clarification gate concurrency and failures', () => {
   it('surfaces a persistent 401 as transport exit 8 before the deadline', async () => {
     seedQuestions();
     stub.failNext({ status: 401, errorCode: 401, times: 1000 });
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(
       { ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' },
-      () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
     );
 
     expect(result.ok).toBe(false);
@@ -384,11 +401,13 @@ describe('clarification gate concurrency and failures', () => {
   it('surfaces a persistent receive hang as transport exit 8', async () => {
     seedQuestions();
     stub.failNext({ hang: true, times: 1000 });
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(
       { ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' },
-      () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
     );
 
     expect(result.ok).toBe(false);
@@ -402,15 +421,17 @@ describe('clarification gate concurrency and failures', () => {
     seedQuestions(singleQuestion('Region?'));
     stub.failNext({ status: 500, times: 1 });
     stub.queueReply(7000, 'recovered answer');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(
       {
         ...gateEnv(),
         AGENT_QUORUM_TELEGRAM_RECEIVE_FAILURE_WINDOW_SECONDS: '30',
         AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30',
       },
-      () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
     );
 
     expect(result.ok).toBe(true);
@@ -428,11 +449,13 @@ describe('clarification gate concurrency and failures', () => {
     async ({ spec }) => {
       seedQuestions();
       stub.failNext(spec);
-      const ctx = makeTestRunContext(tmp, work, scratch);
-
       const result = await withEnvAsync(
         { ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' },
-        () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+        () =>
+          runClarificationGate(
+            makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+            path.join(tmp, 'prompt.md'),
+          ),
       );
 
       expect(result.ok).toBe(false);
@@ -450,10 +473,11 @@ describe('clarification gate concurrency and failures', () => {
     seedQuestions(singleQuestion('Region?'), { offset: false });
     stub.queueReply(50, 'pre-gate one');
     stub.queueReply(51, 'pre-gate two');
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const run = withEnvAsync({ ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' }, () =>
-      runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      runClarificationGate(
+        makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+        path.join(tmp, 'prompt.md'),
+      ),
     );
     await waitForSent(stub, 'Region?');
     stub.queueReply(100, 'real answer');
@@ -468,11 +492,13 @@ describe('clarification gate concurrency and failures', () => {
   it('fails fast with exit 8 when the baseline drain cannot reach Telegram, sending nothing', async () => {
     seedQuestions(FIXED_QUESTIONS, { offset: false });
     stub.failNext({ status: 401, errorCode: 401, times: 1000 });
-    const ctx = makeTestRunContext(tmp, work, scratch);
-
     const result = await withEnvAsync(
       { ...gateEnv(), AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '30' },
-      () => runClarificationGate(ctx, path.join(tmp, 'prompt.md')),
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
     );
 
     expect(result.ok).toBe(false);
@@ -499,9 +525,8 @@ describe('run-level clarify transport mapping', () => {
     mkdirSync(runWork);
     mkdirSync(path.join(runTmp, 'plans'), { recursive: true });
     mkdirSync(path.join(runTmp, 'state'), { recursive: true });
-    writeDefaultPlanLoopConfig(path.join(runTmp, 'agent-quorum.json'));
+    writeStoreConfig(path.join(runTmp, 'home'));
     writeFileSync(path.join(runTmp, 'prompt.md'), 'Build the fixture.\n');
-    resetConfigCache();
     runStub = await startTelegramStub();
     runCapture = captureStderr();
   });
@@ -522,7 +547,7 @@ describe('run-level clarify transport mapping', () => {
     const result = await withEnvAsync(
       {
         PATH: `${fake}:${process.env.PATH ?? ''}`,
-        AGENT_QUORUM_CONFIG_FILE: path.join(runTmp, 'agent-quorum.json'),
+        AGENT_QUORUM_HOME: path.join(runTmp, 'home'),
         AGENT_QUORUM_WORK_DIR: runWork,
         AGENT_QUORUM_PLANS_DIR: path.join(runTmp, 'plans'),
         AGENT_QUORUM_STATE_DIR: path.join(runTmp, 'state'),
