@@ -42,6 +42,11 @@ adapter is a **compile error naming the runner** — the registry entry forces i
 The adapter reads `input.providerRuntime.binaries[runner]` for the command and
 `input.providerRuntime.streamKnobs[runner]` for the watchdog cadence.
 
+The **two edits** are the registry wiring. A genuinely new provider also needs
+its own invoke module (`myproviderInvoke` plus its streaming/parsing), on par
+with `src/providers/{codex,claude,cursor}.ts`; the dispatch adapter above only
+calls into it.
+
 ## That is all
 
 With those two edits the provider is fully wired: config validation/allow-list,

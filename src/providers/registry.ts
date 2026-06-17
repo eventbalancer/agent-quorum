@@ -52,15 +52,16 @@ export function isRunner(value: string): value is Runner {
 
 // All-zero sentinel for non-streaming runners (codex): the watchdog treats it
 // as a no-op and the streamKnobs map entry is never read, keeping the
-// Record<Runner, StreamKnobs> total.
-export const DISABLED_STREAM_KNOBS: StreamKnobs = {
+// Record<Runner, StreamKnobs> total. Frozen because this one instance is shared
+// by reference across every ProviderRuntime, so a stray mutation cannot leak.
+export const DISABLED_STREAM_KNOBS: StreamKnobs = Object.freeze({
   stallStatus: 0,
   pollSeconds: 0,
   graceSeconds: 0,
   byteTimeoutSeconds: 0,
   semanticTimeoutSeconds: 0,
   wallTimeoutSeconds: 0,
-};
+});
 
 // Nullish coalescing keeps an empty-string env override (e.g.
 // AGENT_QUORUM_CURSOR_BIN='') as the spawned command rather than falling back to

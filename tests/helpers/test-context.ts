@@ -9,7 +9,7 @@ import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';
 
-const BASE_STREAM_KNOBS: StreamKnobs = {
+export const BASE_STREAM_KNOBS: StreamKnobs = {
   stallStatus: 124,
   pollSeconds: 1,
   graceSeconds: 1,

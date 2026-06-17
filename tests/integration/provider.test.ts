@@ -6,9 +6,8 @@ import { providerRun } from '../../src/providers/provider.js';
 import { DISABLED_STREAM_KNOBS, resolveRunnerBinaries } from '../../src/providers/registry.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import type { ProviderRuntime } from '../../src/providers/runtime.js';
-import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import { Scratch } from '../../src/runtime/scratch.js';
-import { fixtureMatrix } from '../helpers/test-context.js';
+import { BASE_STREAM_KNOBS, fixtureMatrix } from '../helpers/test-context.js';
 import {
   argvRecords,
   captureStderr,
@@ -28,17 +27,6 @@ const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json
 const CREATOR_SKILL = path.join(SKILLS_DIR, 'plan-creator', 'SKILL.md');
 const TOOLS = 'Read,Grep,Glob';
 const DISALLOWED = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
-
-// Streaming runners share the same fast, mostly-disabled cadence in tests; the
-// watchdog cases below override individual claude/cursor fields off this base.
-const BASE_STREAM_KNOBS: StreamKnobs = {
-  stallStatus: 124,
-  pollSeconds: 1,
-  graceSeconds: 1,
-  byteTimeoutSeconds: 0,
-  semanticTimeoutSeconds: 0,
-  wallTimeoutSeconds: 0,
-};
 
 let tmp: string;
 let fake: string;
