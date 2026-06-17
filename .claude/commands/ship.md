@@ -12,7 +12,10 @@ never invent package, infra, Docker, migration, or pin-rewrite reconciliation.
 One skill, two flows:
 
 - **Change-set flow**: verify, commit, and optionally push dirty changes in
-  this repository, then mark the session worktree done after a successful push.
+  this repository. Detect the delivery target - a new branch, a follow-up to an
+  existing branch and its open PR, or an admin's direct push to `main` that
+  bypasses the PR ruleset - deliver into the right one, then mark the session
+  worktree done after a successful push.
 - **Release flow**: follow `docs/release.md` for version bump, release commit,
   tag, GitHub Actions publish approval, npm verification, and GitHub Release.
 
@@ -29,6 +32,8 @@ tagging, deleting tags, or triggering publish-related workflows.
 /ship --dry-run [<path>...]
 /ship --no-push [<path>...]
 /ship --no-done [<path>...]
+/ship --no-pr [<path>...]
+/ship --to-main [<path>...]
 /ship --worktree <branch|path>
 /ship --release patch|minor|major|X.Y.Z
 /ship --release vX.Y.Z
@@ -39,6 +44,17 @@ tagging, deleting tags, or triggering publish-related workflows.
 `agent-quorum` equivalent; route it to release flow only when release, version,
 tag, or publish intent is also present. Otherwise stop and explain that this
 repository has no reconciler.
+
+`--no-pr` keeps the change-set flow from touching any PR: it skips both the
+follow-up PR refresh and the new-branch PR-creation offer, pushing the branch and
+nothing more.
+
+`--to-main` selects a direct-to-main delivery: it commits and fast-forward pushes
+straight to `origin/main`, bypassing the PR and required-status-checks ruleset.
+Only the repository's ruleset bypass actor (an admin) can land it, and because no
+server CI gate runs, `pnpm run check` locally is mandatory. Never force-push
+`main`, and always confirm before the push. See
+[Direct-to-main delivery](#direct-to-main-delivery).
 
 Unknown flags are not passed through to another tool. Stop, explain the
 accepted arguments, and ask for the intended operation.
@@ -109,7 +125,39 @@ and the presentation surface.
    whether to sync. Do not rebase, merge, or pull while dirty. If the branch has
    no upstream, ask for the push target before pushing.
 
-3. Route the flow:
+3. Detect the delivery target. A change-set delivery opens a new line of work,
+   extends one already in flight, or - for an admin - lands straight on `main`;
+   tell them apart so a follow-up updates its open PR instead of forking a second
+   one, and a direct push is taken deliberately rather than by accident. This
+   step is informational only for the release flow, which always targets `main`.
+   With `origin` present:
+
+   ```sh
+   git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null   # upstream or nothing
+   git log --oneline @{u}..HEAD 2>/dev/null                            # commits not yet pushed
+   gh pr view "$(git branch --show-current)" --json number,state,isDraft,url,baseRefName,headRefOid 2>/dev/null
+   ```
+
+   Classify the result:
+
+   - **New delivery**: the branch has no upstream and `gh` finds no open PR. The
+     first push publishes the branch; opening a PR is a separate, explicit step.
+   - **Follow-up delivery**: the branch already has an upstream, an open PR, or
+     both. The new commit appends to that branch and the push updates the
+     existing PR. Never open a second PR for the same branch, and never
+     force-push or rebase to reshape it - history rewriting is `/sync-main`.
+   - **Direct-to-main delivery**: the commit lands on `main` and pushes to
+     `origin/main` with no PR, relying on the operator's bypass of the
+     `main-protection` ruleset. Select it only when `--to-main` is given. When the
+     current branch is `main`, do not silently push: ask whether to deliver
+     directly to `main` or move the work onto a session branch and open a PR. Its
+     guardrails live in [Direct-to-main delivery](#direct-to-main-delivery).
+
+   Record the open PR number and URL when one exists; the change-set flow reports
+   them. If `gh` is unavailable, fall back to the upstream signal alone and treat
+   the PR state as unverified.
+
+4. Route the flow:
 
    - Use **release flow** when arguments contain `--release`, `release`,
      `publish`, `version`, `tag`, `vX.Y.Z`, or a bare semver bump
@@ -117,7 +165,7 @@ and the presentation surface.
    - Use **change-set flow** otherwise.
    - In `--dry-run`, inspect and print the plan only.
 
-4. Reject generated or unsafe scope unless the file is produced by the
+5. Reject generated or unsafe scope unless the file is produced by the
    documented entry point for this flow:
 
    - never hand-edit or manually include `dist/`, `coverage/`, package-manager
@@ -129,7 +177,9 @@ and the presentation surface.
 ## Change-set flow
 
 Use this for normal implementation, docs, tests, config, scripts, and
-repository-local skill changes that do not publish a new npm version.
+repository-local skill changes that do not publish a new npm version. A
+`--to-main` delivery runs these same steps with the overrides in
+[Direct-to-main delivery](#direct-to-main-delivery).
 
 1. Inspect every scoped change before planning a commit:
 
@@ -204,6 +254,7 @@ repository-local skill changes that do not publish a new npm version.
    cmp -s .claude/commands/prompt-architect.md .agents/skills/prompt-architect/SKILL.md
    cmp -s .claude/commands/execute.md .agents/skills/execute/SKILL.md
    cmp -s .claude/commands/tidy.md .agents/skills/tidy/SKILL.md
+   cmp -s .claude/commands/sync-main.md .agents/skills/sync-main/SKILL.md
    cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
    ```
 
@@ -232,7 +283,9 @@ repository-local skill changes that do not publish a new npm version.
 
    ```text
    FLOW        change-set
+   DELIVERY    new branch | follow-up to existing branch/PR | direct to main (bypass)
    BRANCH      <current branch> -> <upstream or requested push target>
+   PR          update #<n> <url> | open after push | none (direct to main) | none
    FILES       <exact scoped files>
    VERIFY      <commands run and result>
    COMMIT      <header>
@@ -256,16 +309,54 @@ repository-local skill changes that do not publish a new npm version.
    Use `git add -p` only when the operator asks for partial staging. Never use
    `git add .` for this command.
 
-9. Push only when requested or when the approved plan says `PUSH yes`:
+9. Push only when requested or when the approved plan says `PUSH yes`. The push
+   appends the new commit; never force-push or rebase from this skill (history
+   rewriting is `/sync-main`):
 
    ```sh
-   git push origin <branch>
+   git push origin <branch>             # follow-up: fast-forward an existing branch
+   git push -u origin <branch>          # new branch: set upstream on the first push
+   git push origin main                 # direct-to-main: see Direct-to-main delivery
    ```
 
    If push is skipped, report the local commit hash and the exact push command
    the operator can approve later.
 
-10. Mark the session worktree done after a successful push. When the change-set
+10. Reconcile with the delivery target from Step 0 unless `--no-pr` is set or the
+    push was skipped:
+
+    - **Follow-up to an existing PR**: the push already moved the PR head. Confirm
+      it and that checks restarted, and refresh only the parts that drifted - do
+      not rewrite the whole PR:
+
+      ```sh
+      gh pr view <n> --json number,state,isDraft,headRefOid,url
+      gh pr checks <n>
+      ```
+
+      When the new commit widened the PR beyond its stated scope (new files, a new
+      public or runtime surface, a different closing issue), update the title or
+      body and the `Closes #`/`Refs #` line to match; otherwise leave the PR copy
+      as is. Confirm `headRefOid` equals local `HEAD`. A full title/body rewrite
+      after a rebase belongs to `/sync-main`, not here.
+
+    - **New branch with no PR**: opening a PR is a separate, outward-facing step.
+      Offer it after the first push and run it only on explicit confirmation:
+
+      ```sh
+      gh pr create --base main --head <branch> --title "<header>" --body-file <body>
+      ```
+
+      Build the body from the commit message and the issue link; open it as a
+      draft when work remains. Skip the offer in `--dry-run`, `--no-push`, or
+      `--no-pr`, or when the operator declines, and report the branch as pushed
+      without a PR.
+
+    - **Direct-to-main delivery**: there is no PR to reconcile. Follow
+      [Direct-to-main delivery](#direct-to-main-delivery) to confirm `main`
+      advanced and its CI started.
+
+11. Mark the session worktree done after a successful push. When the change-set
     flow ran inside a session worktree (the current branch matches `session/*`)
     and the branch was pushed, flag the session complete so the selection gate
     stops offering it by default:
@@ -280,6 +371,57 @@ repository-local skill changes that do not publish a new npm version.
     primary checkout. The worktree stays on disk and inspectable; reopen later
     with `pnpm run worktree:reopen <branch>`, and remove it with
     `pnpm run worktree:release <branch>` once it is merged into `main`.
+
+### Direct-to-main delivery
+
+Use this only when `--to-main` is given, or when the operator confirms it after
+the Step 0 prompt on `main`. It commits and pushes straight to `origin/main` with
+no PR, relying on the operator's bypass of the `main-protection` ruleset. This is
+the riskiest change-set delivery: it skips both the PR and the
+required-status-checks gate. Run the same change-set steps with these overrides.
+
+1. Confirm the bypass before staging. The push skips the PR and
+   required-status-checks rules; only the ruleset's bypass actor can land it.
+   Verify rather than assume:
+
+   ```sh
+   RULESET=$(gh api "repos/:owner/:repo/rulesets" --jq '.[] | select(.target=="branch") | .id' | head -1)
+   gh api "repos/:owner/:repo/rulesets/$RULESET" --jq '.current_user_can_bypass'   # want: always
+   ```
+
+   If it is not `always`, do not push to `main`. Route the work to a session
+   branch and open a PR instead.
+
+2. Verification is mandatory, not best-effort. Run `pnpm run check` (and
+   `pnpm run build` for public-API, package, or schema changes) and require it
+   green. The residual-risk skip in the change-set verify step does not apply
+   here: the push bypasses the server CI gate, so local verification is the only
+   gate. If a required check cannot run, do not push to `main`.
+
+3. Start from an up-to-date `main`. Be on `main` and confirm it is not behind
+   `origin/main` before committing; Step 0 already fetches and measures this, and
+   a behind branch stops there. To land commits that already sit on a session
+   branch instead, push the branch tip with `git push origin <branch>:main`.
+   Either way the push is fast-forward only; never force-push `main`, even though
+   the bypass would allow it.
+
+4. Always confirm. A direct-to-main delivery writes the shared default branch and
+   skips review, so present the plan and require explicit confirmation even when
+   an exact commit/push instruction was supplied in the same turn. The plan's
+   `DELIVERY` line reads `direct to main (bypass)`, `BRANCH` reads
+   `main -> origin/main`, and `PR` reads `none (direct to main)`.
+
+5. Push fast-forward only, then verify the result. There is no PR to reconcile;
+   confirm `main` advanced and its CI started:
+
+   ```sh
+   git push origin main                 # fast-forward only, never --force
+   git rev-parse origin/main            # equals local HEAD
+   gh run list --workflow ci --branch main --limit 3
+   ```
+
+   The commit body's `Closes #<n>` closes the linked issue once the commit lands
+   on `main`; no PR merge is needed.
 
 ## Release flow
 
@@ -451,8 +593,10 @@ End with:
 ```text
 Shipped: agent-quorum
   - flow: change-set|release
+  - delivery: new branch | follow-up | direct-to-main | n/a (release)
   - commit: <sha or none>
   - push: <remote/branch or skipped>
+  - pr: updated #<n> <url> | opened #<n> <url> | none | skipped (--no-pr) | n/a
   - tag: <tag or none>
   - worktree: marked done <branch> | active (--no-done|push skipped|primary checkout) | n/a
 
