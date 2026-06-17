@@ -185,6 +185,46 @@ describe('agent-quorum init', () => {
     }
   });
 
+  it('preserves operator-tuned config keys on re-run and updates only the chat id', async () => {
+    const stub = await startTelegramStub('99');
+    try {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        path.join(home, 'config.json'),
+        `${JSON.stringify({
+          settings: { iters: 7 },
+          telegram: { chatId: 'OLD', clarify: '1' },
+          experimentalUnknownKey: { keep: true },
+        })}\n`,
+      );
+
+      await withEnvAsync(
+        { AGENT_QUORUM_HOME: home, AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl },
+        async () => {
+          const { input, output } = ttyStreams();
+          const pending = runInitCli([], {
+            streams: { input, output },
+            discoveryTimeoutSeconds: 3,
+            pollIntervalMs: 10,
+            onReady: (code) => {
+              stub.queueReply(1, code, { chatId: '99' });
+            },
+          });
+          input.write('BOTTOKEN-rotated\n');
+          expect(await pending).toBe(0);
+        },
+      );
+
+      expect(JSON.parse(readFileSync(path.join(home, 'config.json'), 'utf8'))).toEqual({
+        settings: { iters: 7 },
+        telegram: { chatId: '99', clarify: '1' },
+        experimentalUnknownKey: { keep: true },
+      });
+    } finally {
+      await stub.close();
+    }
+  });
+
   it('errors on a non-TTY stdin instead of hanging', async () => {
     const input: PassThrough & { isTTY?: boolean } = new PassThrough();
     const output: PassThrough & { isTTY?: boolean } = new PassThrough();

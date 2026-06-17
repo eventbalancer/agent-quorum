@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -15,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { HaltError } from '../runtime/halt.js';
 import { packageRoot, projectRoot } from '../runtime/env.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
-import { ensureStoreHome, handoffDir, writeSecretFile } from '../core/store.js';
+import { ensureHandoffDir, sweepHandoffDir, writeSecretFile } from '../core/store.js';
 import { resolveResumeWorkdir } from '../core/resume.js';
 import {
   deriveRunName,
@@ -231,6 +230,10 @@ export async function runLaunchCli(
     env.AGENT_QUORUM_RUN_NAME = name;
   }
 
+  // GC orphaned handoffs from prior launches whose child died before reading,
+  // independent of whether this launch forwards a token of its own.
+  sweepHandoffDir(home);
+
   // Split the override by sensitivity: the non-secret config rides the child env
   // as JSON, but no bot token ever enters it. The effective token (structured
   // override, else the parent's ambient one) goes to an owner-only 0600 file
@@ -245,10 +248,7 @@ export async function runLaunchCli(
     overrides.secrets?.telegramBotToken ?? process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
   let handoffFile: string | undefined;
   if (effectiveToken !== undefined && effectiveToken !== '') {
-    ensureStoreHome(home);
-    const dir = handoffDir(home);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    chmodSync(dir, 0o700);
+    const dir = ensureHandoffDir(home);
     handoffFile = path.join(dir, `secrets-${rotationStamp()}-${process.pid}.json`);
     writeSecretFile(handoffFile, `${JSON.stringify({ telegramBotToken: effectiveToken })}\n`);
     env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE = handoffFile;

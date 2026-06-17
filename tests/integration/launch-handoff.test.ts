@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -116,6 +125,29 @@ describe('launch secret handoff (P5)', () => {
     const { env } = lastSpawn();
     expect(env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE).toBeUndefined();
     expect(existsSync(path.join(env.AGENT_QUORUM_HOME ?? '', 'handoff'))).toBe(false);
+  });
+
+  it('sweeps an orphaned handoff older than the TTL while leaving a fresh sibling in place', async () => {
+    const dir = path.join(home, 'handoff');
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stale = path.join(dir, 'secrets-stale.json');
+    const fresh = path.join(dir, 'secrets-fresh.json');
+    writeFileSync(stale, '{"telegramBotToken":"ORPHAN"}\n', { mode: 0o600 });
+    writeFileSync(fresh, '{"telegramBotToken":"LIVE"}\n', { mode: 0o600 });
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(stale, tenMinutesAgo, tenMinutesAgo);
+
+    await withEnvAsync(
+      {
+        AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0',
+        AGENT_QUORUM_HOME: home,
+        AGENT_QUORUM_TELEGRAM_BOT_TOKEN: undefined,
+      },
+      () => runLaunchCli([input], () => undefined, { home, workDir: work }),
+    );
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
   });
 
   it('forwards a top-level scalar ahead of structured config across the launch boundary', async () => {

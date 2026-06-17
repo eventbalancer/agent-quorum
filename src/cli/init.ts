@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { HaltError } from '../runtime/halt.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfig, type DeepPartial, type OperatorConfig } from '../core/config.js';
-import { writeConfigStore, writeSecretsStore } from '../core/store.js';
+import { mergeConfigStore, writeSecretsStore } from '../core/store.js';
 import { INIT_USAGE } from './help.js';
 import {
   telegramDiscoverChatId,
@@ -87,11 +87,11 @@ export async function runInitCli(args: readonly string[], deps: InitDeps = {}): 
     });
 
     const config: DeepPartial<OperatorConfig> = { telegram: { chatId } };
-    writeConfigStore(home, config);
+    mergeConfigStore(home, config);
     writeSecretsStore(home, { telegramBotToken: token });
 
     write(`\nDiscovered chat id: ${chatId}\n`);
-    write(`Saved ${home}/config.json and ${home}/secrets.json (owner-only 0600).\n`);
+    write(`Saved ${home}/config.json (owner-only home, 0700) and ${home}/secrets.json (0600).\n`);
     return 0;
   } finally {
     rl.close();

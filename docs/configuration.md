@@ -15,12 +15,20 @@ Two files live under the agent-quorum home (`AGENT_QUORUM_HOME`, default
 | `<home>/secrets.json` | credentials (`telegramBotToken`) | file `0600`, home `0700` |
 
 Both the home (`0700`) and `secrets.json` (`0600`) are hardened on **read and
-write**: a pre-existing looser mode is repaired before the file is parsed, so a
-hand-created `0644` secrets file is tightened rather than trusted. A malformed
-`config.json`/`secrets.json` halts the run with a controlled error that names the
-path only — file contents (and the token) are never echoed. `config.json` is a
-partial document; any unset key resolves from the default. Unknown keys are
-tolerated.
+write**: a pre-existing mode looser than the target is repaired before the file
+is parsed, so a hand-created `0644` secrets file is tightened rather than
+trusted. The home re-harden is conditional and scoped: it runs on a write and on
+a genuine secret read (when `secrets.json` exists), only when the directory is
+looser than `0700`, so a read-only command (e.g. `agent-quorum config`) pointed
+at an `AGENT_QUORUM_HOME` that holds no `secrets.json` leaves the directory's
+permissions unchanged, and an already owner-only home is never re-chmodded.
+A malformed `config.json`/`secrets.json` halts the run with a controlled error
+that names the path only — file contents (and the token) are never echoed.
+`config.json` is a partial document; any unset key resolves from the default.
+Unknown keys are tolerated. Re-running `agent-quorum init` deep-merges into the
+existing `config.json` rather than replacing it, so operator-tuned and unknown
+keys survive a token rotation or re-discovery; only the keys init writes
+(`telegram.chatId`) are updated.
 
 ## Precedence
 
@@ -189,7 +197,14 @@ parent's ambient `AGENT_QUORUM_TELEGRAM_BOT_TOKEN`) through an owner-only `0600`
 handoff file under `<home>/handoff/` — only the file path is passed, the ambient
 token is stripped from the child env, and the child reads the file once and
 unlinks it before any provider subprocess starts. The bot token never enters the
-child or provider-subprocess environment. Store/discovery helpers
+child or provider-subprocess environment. The forwarded path must resolve to a
+regular file strictly inside `<home>/handoff/`; anything else (an out-of-dir
+path, the handoff directory itself, a sub-directory) fails as a controlled error
+before any read or unlink. The handoff is normally consumed within ~1s; should a
+child die after the parent's liveness check but before reading, the stale file
+is garbage-collected lazily — each detached launch sweeps `<home>/handoff/`
+entries older than a few minutes, so an orphaned token cannot linger.
+Store/discovery helpers
 (`readConfigStore`/`writeConfigStore`/`readSecretsStore`/`writeSecretsStore`,
 `telegramDiscoverChatId`) are exported for embedded onboarding. See
 [`api.md`](api.md).

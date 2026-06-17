@@ -44,6 +44,7 @@ import {
   type ResolveOverrides,
   type Secrets,
 } from '../../core/config.js';
+import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { handoffDir } from '../../core/store.js';
 import { runCreatorCreate } from './creator.js';
 import { effortMatrix } from '../../core/effort.js';
@@ -426,13 +427,13 @@ function readForwardedOverrides(env: NodeJS.ProcessEnv, home: string): ResolveOv
   const overrides: ResolveOverrides = {};
   const configJson = env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON;
   if (configJson !== undefined && configJson !== '') {
-    let parsed: unknown;
+    let parsed: JsonValue;
     try {
-      parsed = JSON.parse(configJson);
+      parsed = JSON.parse(configJson) as JsonValue;
     } catch {
       throw new HaltError('AGENT_QUORUM_CONFIG_OVERRIDE_JSON is not valid JSON', 1);
     }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (!isJsonObject(parsed)) {
       throw new HaltError('AGENT_QUORUM_CONFIG_OVERRIDE_JSON must be a JSON object', 1);
     }
     overrides.config = parsed;
@@ -445,9 +446,11 @@ function readForwardedOverrides(env: NodeJS.ProcessEnv, home: string): ResolveOv
 }
 
 // The forwarded path is a location, not a credential. Canonicalize it and confirm
-// containment in <home>/handoff/ BEFORE any unlink so a hostile env var cannot
-// turn the reader into an arbitrary-file delete; then read once and unlink before
-// any provider subprocess can inherit the secret.
+// it resolves to a regular file strictly inside <home>/handoff/ BEFORE any unlink,
+// so a hostile env var cannot turn the reader into an arbitrary-file delete and a
+// path resolving to the handoff directory (or a sub-directory) within it fails as
+// a clean HaltError rather than an uncaught EISDIR; then read once and unlink
+// before any provider subprocess can inherit the secret.
 function readSecretHandoff(filePath: string, home: string): Secrets {
   let dir: string;
   try {
@@ -467,24 +470,27 @@ function readSecretHandoff(filePath: string, home: string): Secrets {
       1,
     );
   }
-  if (resolved !== dir && !resolved.startsWith(dir + path.sep)) {
+  if (!resolved.startsWith(dir + path.sep)) {
     throw new HaltError(
       'AGENT_QUORUM_SECRETS_OVERRIDE_FILE must resolve inside the store handoff directory',
       1,
     );
   }
+  if (!statSync(resolved).isFile()) {
+    throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE must resolve to a regular file', 1);
+  }
   const raw = readFileSync(resolved, 'utf8');
   unlinkSync(resolved);
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw) as JsonValue;
   } catch {
     throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE is not valid JSON', 1);
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE must contain a JSON object', 1);
   }
-  const token = (parsed as { telegramBotToken?: unknown }).telegramBotToken;
+  const token = parsed.telegramBotToken;
   if (token !== undefined && typeof token !== 'string') {
     throw new HaltError('AGENT_QUORUM_SECRETS_OVERRIDE_FILE telegramBotToken must be a string', 1);
   }

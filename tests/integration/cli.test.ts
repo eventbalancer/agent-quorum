@@ -648,4 +648,25 @@ describe('detached-launch forwarding channel', () => {
     expect(result.status).not.toBe(0);
     expect(existsSync(outside)).toBe(true);
   });
+
+  it('rejects a path resolving to the handoff directory itself without deleting it', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    mkdirSync(handoff, { recursive: true });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: handoff }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).not.toContain('EISDIR');
+    expect(existsSync(handoff)).toBe(true);
+  });
+
+  it('rejects a contained sub-directory as a non-regular file without deleting it', () => {
+    const handoff = path.join(tmp, 'home', 'handoff');
+    const sub = path.join(handoff, 'secrets-sub');
+    mkdirSync(sub, { recursive: true });
+    const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: sub }));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).not.toContain('EISDIR');
+    expect(existsSync(sub)).toBe(true);
+  });
 });

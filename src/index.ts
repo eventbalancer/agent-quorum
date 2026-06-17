@@ -30,6 +30,7 @@ export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/r
 export {
   configStorePath,
   ensureStoreHome,
+  mergeConfigStore,
   readConfigStore,
   readSecretsStore,
   secretsStorePath,
