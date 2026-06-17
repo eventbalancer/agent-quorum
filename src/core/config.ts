@@ -61,6 +61,16 @@ function halt(message: string): never {
   throw new HaltError(message, 1, true);
 }
 
+function orList(values: readonly string[]): string {
+  if (values.length <= 1) {
+    return values.join('');
+  }
+  if (values.length === 2) {
+    return `${values[0]} or ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(', ')}, or ${values[values.length - 1]}`;
+}
+
 function parseBooleanSetting(raw: string, key: string): 0 | 1 {
   if (raw === 'true' || raw === '1' || raw === 'on' || raw === 'yes') {
     return 1;
@@ -597,7 +607,7 @@ function resolveMatrix(
     );
     if (!isRunner(runner)) {
       halt(
-        `agent-quorum config: role '${role}' has invalid runner '${runner}' (expected codex, claude, or cursor)`,
+        `agent-quorum config: role '${role}' has invalid runner '${runner}' (expected ${orList(RUNNERS)})`,
       );
     }
     const model = resolveStr(
