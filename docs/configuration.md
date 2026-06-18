@@ -25,10 +25,11 @@ permissions unchanged, and an already owner-only home is never re-chmodded.
 A malformed `config.json`/`secrets.json` halts the run with a controlled error
 that names the path only — file contents (and the token) are never echoed.
 `config.json` is a partial document; any unset key resolves from the default.
-Unknown keys are tolerated. Re-running `agent-quorum init` deep-merges into the
-existing `config.json` rather than replacing it, so operator-tuned and unknown
-keys survive a token rotation or re-discovery; only the keys init writes
-(`telegram.chatId`) are updated.
+Unknown keys are tolerated. Re-running `agent-quorum setup` deep-merges a minimal
+patch into the existing `config.json` rather than replacing it, so operator-tuned
+and unknown keys (including hand-edited advanced keys) survive; only the keys
+`setup` writes — changed essentials, reassigned role runners, and
+`telegram.chatId` — are updated.
 
 ## Precedence
 
@@ -39,12 +40,12 @@ per-invocation override  >  ambient AGENT_QUORUM_* env  >  <home>/config.json  >
 ```
 
 The **override** tier is the per-invocation input: CLI scalar flags
-(`--iters`/`--effort`/`--fix`/`--no-fix`/`--translate`/`--no-translate`/`--locale`)
+(`--iters`/`--quality`/`--fix`/`--no-fix`/`--translate`/`--no-translate`/`--locale`)
 and, for the library API, the structured `config`/`secrets` options. When a
 top-level scalar option and the same path in structured `config` are both set,
 the **top-level scalar wins** (the intra-override tie-break), identically
 in-process and across a detached launch. A few settings have no env layer by
-design: `settings.effort` and `settings.fix` come only from the override or the
+design: `settings.quality` and `settings.fix` come only from the override or the
 store, and all tool-permission fields are store-only.
 
 `agent-quorum config` prints the fully resolved configuration and each value's
@@ -52,10 +53,30 @@ winning layer (`override`/`env`/`store`/`default`); the bot token is masked.
 
 ## Setup
 
-`agent-quorum init` (interactive, TTY only) captures the Telegram bot token,
-discovers the chat id via a one-time code handshake with your bot, and writes
-`config.json` + `secrets.json` at owner-only permissions. In a non-interactive
-context it errors instead of hanging; write the store files directly there.
+`agent-quorum setup` is the guided way to write the store. It only ever touches
+the essentials and the per-role runners; advanced keys (knobs, retention, tool
+permissions, …) stay hand-edited and are never discarded.
+
+In an interactive terminal it prompts, each defaulting to the current resolved
+value, for `iters`, `quality`, `locale`, and `translate`; then auto-detects the
+installed runner CLIs and, per role, keeps the current resolved runner when it is
+installed (so a built-in default stays on defaults and a hand-set override is
+preserved) or falls back to the first installed runner with its
+`RUNNER_META.defaultModel`, letting you confirm or override each; then offers an
+optional Telegram step that captures the bot token and discovers the chat id.
+When no supported runner is installed it warns with install/login guidance and
+leaves the role runners unchanged.
+
+In a non-interactive context it does not block: it applies the same essentials
+from `--iters`/`--quality`/`--locale`/`--translate`/`--no-translate`,
+auto-assigns role runners by the same preserve-then-fallback rule, and skips
+Telegram.
+
+Writes are minimal: a setting is persisted only when it differs from the current
+resolved value, and `translate` is written whenever the chosen value contradicts
+what the selected `locale` implies — so an explicit `translate: false` under a
+non-English locale survives the next resolve. A captured token goes to
+`secrets.json` at `0600`.
 
 ## Settings reference
 
@@ -65,34 +86,34 @@ default is the built-in fallback.
 
 ### Loop settings (`settings`)
 
-| Store key                    | Env var                             | Default | Meaning                                                              |
-| ---------------------------- | ----------------------------------- | ------- | -------------------------------------------------------------------- |
-| `settings.iters`             | `AGENT_QUORUM_MAX_ITERS`            | `5`     | iteration cap (positive integer)                                     |
-| `settings.effort`            | _(override/store only; `--effort`)_ | `high`  | `low` \| `high` \| `max`                                             |
-| `settings.fix`               | _(override/store only; `--fix`)_    | `true`  | reference fix pass                                                   |
-| `settings.translate`         | `AGENT_QUORUM_TRANSLATE`            | `false` | localized companion plan pass                                        |
-| `settings.locale`            | `AGENT_QUORUM_LOCALE`               | `en`    | interaction/companion locale (non-`en` enables translate unless off) |
-| `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`       | `5`     | stable-diff convergence threshold                                    |
-| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`          | `3`     | provider retry attempts                                              |
-| `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`  | `10`    | delay between retries                                                |
+| Store key                    | Env var                              | Default    | Meaning                                                              |
+| ---------------------------- | ------------------------------------ | ---------- | -------------------------------------------------------------------- |
+| `settings.iters`             | `AGENT_QUORUM_MAX_ITERS`             | `5`        | iteration cap (positive integer)                                     |
+| `settings.quality`           | _(override/store only; `--quality`)_ | `balanced` | `quick` \| `balanced` \| `thorough`                                  |
+| `settings.fix`               | _(override/store only; `--fix`)_     | `true`     | reference fix pass                                                   |
+| `settings.translate`         | `AGENT_QUORUM_TRANSLATE`             | `false`    | localized companion plan pass                                        |
+| `settings.locale`            | `AGENT_QUORUM_LOCALE`                | `en`       | interaction/companion locale (non-`en` enables translate unless off) |
+| `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`        | `5`        | stable-diff convergence threshold                                    |
+| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | provider retry attempts                                              |
+| `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`   | `10`       | delay between retries                                                |
 
 ### Role matrix (`roles.<role>`)
 
-Roles: `critic`, `creator`, `fixer`, `reviewer`, `translator`. Each carries
-`runner` (`codex` \| `claude` \| `cursor`), `model`, and `reasoning`, plus
-tool-permission fields. `runner`/`model`/`reasoning` accept an env override
-`AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL` / `_REASONING`; tool fields are
-store-only and accept a non-empty string or string array (joined with commas).
+Roles: `creator`, `critic`, `fixer`, `reviewer`, `translator`. Each carries
+`runner` (`codex` \| `claude` \| `cursor`) and `model`, plus tool-permission
+fields; the per-role reasoning level is derived from `settings.quality` at
+runtime rather than stored per role. `runner`/`model` accept an env override
+`AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL`; tool fields are store-only and accept a
+non-empty string or string array (joined with commas).
 
 | Tool field (per role)                                                          | Applies to                       |
 | ------------------------------------------------------------------------------ | -------------------------------- |
 | `tools`, `disallowedTools`                                                     | critic/fixer/reviewer/translator |
 | `createTools`, `createDisallowedTools`, `updateTools`, `updateDisallowedTools` | creator                          |
 
-Defaults: `critic` = `codex`/`gpt-5.5`/`xhigh`; `creator` =
-`claude`/`claude-opus-4-8`/`xhigh`; `fixer`/`reviewer`/`translator` =
-`codex`/`gpt-5.5`/`high`. Read-only roles default to `Read,Grep,Glob` tools with
-write/exec/agent tools disallowed.
+Defaults: `creator` = `claude`/`claude-opus-4-8`; `critic` = `codex`/`gpt-5.5`;
+`fixer`/`reviewer`/`translator` = `codex`/`gpt-5.5`. Read-only roles default to
+`Read,Grep,Glob` tools with write/exec/agent tools disallowed.
 
 The creator must return a complete plan in one capture. Reliable minimum creator
 tiers: claude opus class (`claude-opus-4-8`; weaker claude needs `default`

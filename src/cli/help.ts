@@ -12,10 +12,10 @@ export interface StageSummary {
 }
 
 export const LAUNCH_USAGE =
-  'usage: agent-quorum launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n';
+  'usage: agent-quorum launch [--resume] [--iters N] [--quality {quick,balanced,thorough}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>\n';
 
 export const INTERVENE_USAGE =
-  'usage: agent-quorum intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>\n' +
+  'usage: agent-quorum intervene --work <workdir> [--target all|creator|critic|fixer|reviewer] <message...>\n' +
   '       agent-quorum intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>\n' +
   '       agent-quorum intervene (--work <workdir> | <selector>) [--target ...] --stdin\n';
 
@@ -51,16 +51,23 @@ export const LOGS_USAGE =
   '  agent-quorum logs --last [-f]        — the most recent run\n' +
   '  agent-quorum logs --work <dir> [-f]  — an explicit workdir\n';
 
-export const INIT_USAGE =
-  'agent-quorum init — interactive first-run setup (TTY only).\n' +
-  'Captures the Telegram bot token, discovers the chat id, and writes\n' +
-  'config.json + secrets.json (0600) under the agent-quorum home.\n';
+export const SETUP_USAGE =
+  'agent-quorum setup — guided configuration.\n' +
+  '\n' +
+  'Usage:\n' +
+  '  agent-quorum setup                              interactive (TTY): prompts iters, quality,\n' +
+  '                                                  locale, translate, role runners, optional Telegram\n' +
+  '  agent-quorum setup [--iters N] [--quality Q] [--locale L] [--translate|--no-translate]   non-TTY\n' +
+  '\n' +
+  'Writes a minimal patch to config.json under the agent-quorum home (essential\n' +
+  'settings + auto-detected role runners); a captured Telegram token goes to\n' +
+  'secrets.json (0600). Advanced keys stay hand-edited and are never discarded.\n';
 
 export const CONFIG_USAGE =
   "agent-quorum config — print the resolved configuration and each value's winning layer.\n" +
   '\n' +
   'Usage:\n' +
-  '  agent-quorum config [--iters N] [--effort E] [--locale L] [--fix|--no-fix] [--translate|--no-translate]\n' +
+  '  agent-quorum config [--iters N] [--quality Q] [--locale L] [--fix|--no-fix] [--translate|--no-translate]\n' +
   '\n' +
   'Scalar flags resolve in the override layer, so they show how a per-invocation\n' +
   'flag would win over env, store, and default. The bot token is never printed.\n';
@@ -97,7 +104,7 @@ function defaultsLine(): string {
     return '';
   }
   const parts: string[] = [];
-  for (const key of ['iters', 'effort', 'fix', 'locale', 'translate']) {
+  for (const key of ['iters', 'quality', 'fix', 'locale', 'translate']) {
     const text = settingText(settings[key]);
     if (text !== undefined && text !== '') {
       parts.push(`${key}=${text}`);
@@ -128,7 +135,7 @@ export function globalHelp(stages: readonly StageSummary[]): string {
     '  intervene   append an operator intervention to a run’s ledger\n' +
     '\n' +
     'configuration:\n' +
-    '  init        interactive first-run setup: capture the bot token, discover the chat id, write the store\n' +
+    '  setup       guided configuration: essentials, auto-detected role runners, optional Telegram\n' +
     '  config      print the resolved configuration and each value’s winning layer (token masked)\n' +
     '\n' +
     'in a TTY, run agent-quorum with no command to open the interactive shell.\n' +

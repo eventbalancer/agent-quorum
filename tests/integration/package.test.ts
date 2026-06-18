@@ -80,7 +80,7 @@ describe('package emission through runPlanLoop', () => {
       runPlanLoop({
         input: path.join(tmp, 'input.md'),
         iters: 1,
-        effort: 'low',
+        quality: 'quick',
         fix: false,
         translate: false,
       }),
@@ -124,7 +124,7 @@ describe('package emission through runPlanLoop', () => {
       runPlanLoop({
         input: path.join(tmp, 'input.md'),
         iters: 1,
-        effort: 'low',
+        quality: 'quick',
         fix: false,
         translate: false,
       }),
@@ -147,7 +147,7 @@ describe('package emission through runPlanLoop', () => {
     writeFileSync(input, readFileSync(input, 'utf8').replace('1. Fixture step.', ''));
 
     const result = await withEnvAsync(baseEnv({ AGENT_QUORUM_SPLIT: 'always' }), () =>
-      runPlanLoop({ input, iters: 1, effort: 'low', fix: false, translate: false }),
+      runPlanLoop({ input, iters: 1, quality: 'quick', fix: false, translate: false }),
     );
 
     expect(result.exitCode).toBe(ExitCode.Blocked);

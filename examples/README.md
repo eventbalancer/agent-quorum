@@ -31,13 +31,13 @@ spells `agent-quorum <command>`.
 
 ```sh
 # 1. Plan from a task prompt (creates plan.v0, then loops to convergence).
-pnpm run plan:self -- --prompt examples/task.example.md --effort high --iters 3
+pnpm run plan:self -- --prompt examples/task.example.md --quality balanced --iters 3
 
 # 1b. Or refine an existing plan file instead of a prompt.
 pnpm run plan:self -- my-plan.md
 
 # 2. Detach a long run into its own process group with run.log redirection.
-pnpm run dev -- launch --effort high --prompt examples/task.example.md
+pnpm run dev -- launch --quality balanced --prompt examples/task.example.md
 
 # 3. Inspect runs.
 pnpm run dev -- status            # list runs (interactive picker in a TTY)

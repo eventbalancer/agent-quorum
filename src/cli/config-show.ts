@@ -27,17 +27,17 @@ function parseConfigArgs(args: readonly string[]): CliSettings {
         cli.maxIters = arg.slice(arg.indexOf('=') + 1);
         i += 1;
         break;
-      case arg === '--effort': {
+      case arg === '--quality': {
         const value = args[i + 1] ?? '';
         if (value === '') {
-          usageError('--effort needs a value');
+          usageError('--quality needs a value');
         }
-        cli.effort = value;
+        cli.quality = value;
         i += 2;
         break;
       }
-      case arg.startsWith('--effort='):
-        cli.effort = arg.slice('--effort='.length);
+      case arg.startsWith('--quality='):
+        cli.quality = arg.slice('--quality='.length);
         i += 1;
         break;
       case arg === '--locale': {

@@ -4,7 +4,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveConfig, runnersInUse, type RunSettings } from '../../src/core/config.js';
 import type { JsonObject } from '../../src/core/json.js';
-import { effortMatrix } from '../../src/core/effort.js';
 import { captureStderr } from '../helpers/harness.js';
 
 let tmp: string;
@@ -46,8 +45,20 @@ describe('resolveConfig validation', () => {
     }
   });
 
+  it('halts on an invalid quality', () => {
+    writeStore({ settings: { quality: 'medium' } });
+    const capture = captureStderr();
+    try {
+      expect(() => resolvedSettings()).toThrow(
+        /settings\.quality must be quick, balanced, or thorough/,
+      );
+    } finally {
+      capture.restore();
+    }
+  });
+
   it('halts on an invalid runner', () => {
-    writeStore({ roles: { critic: { runner: 'gemini', model: 'm', reasoning: 'high' } } });
+    writeStore({ roles: { critic: { runner: 'gemini', model: 'm' } } });
     const capture = captureStderr();
     try {
       expect(() => resolveConfig({ env: {}, home: tmp })).toThrow(/invalid runner 'gemini'/);
@@ -69,7 +80,7 @@ describe('resolveConfig validation', () => {
 
 describe('resolveConfig role matrix', () => {
   it('an env runner override beats the store and preserves the store model', () => {
-    writeStore({ roles: { critic: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' } } });
+    writeStore({ roles: { critic: { runner: 'codex', model: 'gpt-5.5' } } });
     const capture = captureStderr();
     try {
       const { config, provenance } = resolveConfig({
@@ -87,7 +98,7 @@ describe('resolveConfig role matrix', () => {
 
   it('falls through to DEFAULT_CONFIG roles when the store is silent', () => {
     const { config } = resolveConfig({ env: {}, home: tmp });
-    expect(config.matrix.critic).toEqual({ runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' });
+    expect(config.matrix.critic).toEqual({ runner: 'codex', model: 'gpt-5.5', reasoning: 'high' });
     expect(config.matrix.creator.runner).toBe('claude');
     expect(runnersInUse(config.matrix, 0, 0)).toEqual(['codex', 'claude']);
   });
@@ -100,7 +111,6 @@ describe('resolveConfig role permissions', () => {
         creator: {
           runner: 'claude',
           model: 'claude-opus-4-8',
-          reasoning: 'xhigh',
           createTools: ['Read', 'Grep', 'Glob', 'Bash'],
           createDisallowedTools: 'Write,Edit',
           updateTools: 'Read',
@@ -116,35 +126,11 @@ describe('resolveConfig role permissions', () => {
 
   it('an empty store tool field falls through to the default', () => {
     writeStore({
-      roles: { reviewer: { runner: 'codex', model: 'm', reasoning: 'high', disallowedTools: [] } },
+      roles: { reviewer: { runner: 'codex', model: 'm', disallowedTools: [] } },
     });
     const { config, provenance } = resolveConfig({ env: {}, home: tmp });
     expect(config.permissions.reviewer.disallowedTools).toContain('Write');
     expect(provenance.get('roles.reviewer.disallowedTools')).toBe('default');
-  });
-});
-
-describe('effort matrix', () => {
-  it('maps low/high/max and rejects anything else', () => {
-    expect(effortMatrix('low')).toEqual({
-      sessionMode: 1,
-      creatorOneShot: 1,
-      previousCritiques: 'compact',
-      topology: 'compact',
-    });
-    expect(effortMatrix('high')).toEqual({
-      sessionMode: 1,
-      creatorOneShot: 0,
-      previousCritiques: 'full',
-      topology: 'full',
-    });
-    expect(effortMatrix('max')).toEqual({
-      sessionMode: 0,
-      creatorOneShot: 0,
-      previousCritiques: 'full',
-      topology: 'full',
-    });
-    expect(() => effortMatrix('medium')).toThrow('--effort expects low, high, or max');
   });
 });
 
@@ -159,7 +145,7 @@ describe('resolveConfig precedence and provenance', () => {
   it('falls through to DEFAULT_CONFIG when no layer supplies a value', () => {
     const { config, provenance } = resolveConfig({ env: {}, home: tmp });
     expect(config.settings.maxIters).toBe(5);
-    expect(config.settings.effort).toBe('high');
+    expect(config.settings.quality).toBe('balanced');
     expect(provenance.get('settings.iters')).toBe('default');
     expect(config.providers.claudePermissionMode).toBe('default');
     expect(provenance.get('claudePermissionMode')).toBe('default');

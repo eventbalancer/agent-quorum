@@ -152,16 +152,16 @@ describe('resume workdir resolution', () => {
     }
   });
 
-  it('prefers the effort-suffixed dir among ambiguous candidates', () => {
+  it('prefers the quality-suffixed dir among ambiguous candidates', () => {
     makeRun('loop-feature');
-    const high = makeRun('loop-feature-high');
-    const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature', 'high');
-    expect(result).toEqual({ kind: 'resolved', dir: high });
+    const balanced = makeRun('loop-feature-balanced');
+    const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature', 'balanced');
+    expect(result).toEqual({ kind: 'resolved', dir: balanced });
   });
 
-  it('reports ambiguity when no effort disambiguates', () => {
+  it('reports ambiguity when no quality disambiguates', () => {
     makeRun('loop-feature');
-    makeRun('loop-feature-max');
+    makeRun('loop-feature-thorough');
     const capture = captureStderr();
     try {
       const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature');

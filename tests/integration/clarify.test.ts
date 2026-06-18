@@ -570,7 +570,7 @@ describe('run-level clarify transport mapping', () => {
           input: path.join(runTmp, 'prompt.md'),
           prompt: true,
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),

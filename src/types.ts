@@ -2,9 +2,9 @@ import type { DeepPartial, OperatorConfig } from './core/config.js';
 
 export type { Runner } from './providers/registry.js';
 
-export type Role = 'critic' | 'creator' | 'fixer' | 'reviewer' | 'translator';
+export type Role = 'creator' | 'critic' | 'fixer' | 'reviewer' | 'translator';
 
-export type Effort = 'low' | 'high' | 'max';
+export type Quality = 'quick' | 'balanced' | 'thorough';
 
 export type RunMode = 'plan' | 'prompt';
 

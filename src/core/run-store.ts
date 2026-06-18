@@ -27,7 +27,7 @@ export interface RunRecord {
   readonly logPath: string;
   readonly plansDir: string;
   readonly startedAt: string;
-  readonly effort: string;
+  readonly quality: string;
   readonly state: RunState;
   readonly endedAt?: string;
   readonly exitCode?: number;

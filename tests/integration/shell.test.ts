@@ -69,7 +69,7 @@ function liveDraft(overrides: Partial<RunRecordDraft> = {}): RunRecordDraft {
     logPath: path.join(work, 'run.log'),
     plansDir: '/tmp/plans',
     startedAt: '2026-06-13T00:00:00Z',
-    effort: 'high',
+    quality: 'balanced',
     state: 'running',
     ...overrides,
   };
@@ -299,7 +299,7 @@ function launchForm(overrides: Partial<LaunchForm> = {}): LaunchForm {
     promptMode: false,
     resume: false,
     iters: '',
-    effort: 'default',
+    quality: 'default',
     fix: 'default',
     locale: '',
     translate: 'default',
@@ -373,7 +373,7 @@ describe('launchFromShell', () => {
       launchForm({
         input: file,
         iters: '3',
-        effort: 'max',
+        quality: 'thorough',
         fix: 'on',
         locale: 'ru',
         translate: 'off',
@@ -385,8 +385,8 @@ describe('launchFromShell', () => {
       file,
       '--iters',
       '3',
-      '--effort',
-      'max',
+      '--quality',
+      'thorough',
       '--fix',
       '--locale',
       'ru',
@@ -458,7 +458,7 @@ describe('stopRun', () => {
       logPath: '/w/run.log',
       plansDir: '/p',
       startedAt: '2026-06-13T00:00:00Z',
-      effort: 'high',
+      quality: 'balanced',
       state: 'running',
     };
   }

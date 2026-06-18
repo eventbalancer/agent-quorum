@@ -99,18 +99,18 @@ to its console (no `run.log`) shows a `no run.log` marker rather than an error.
 
 Fields, navigated with `Tab`/`↑`/`↓`:
 
-| Field       | Type          | Notes                                                          |
-| ----------- | ------------- | -------------------------------------------------------------- |
-| `input`     | text          | Required: a readable plan or prompt file.                      |
-| `mode`      | toggle        | `plan` (positional) vs `prompt` (`--prompt`).                  |
-| `resume`    | toggle        | `--resume`; the input is still required.                       |
-| `iters`     | text (digits) | `--iters N`; blank keeps the engine/config default.            |
-| `effort`    | cycle         | `default`→`low`→`high`→`max`; `default` omits `--effort`.      |
-| `fix`       | tri-state     | `default` (omit) / `on` (`--fix`) / `off` (`--no-fix`).        |
-| `locale`    | text          | `--locale <tag>`; blank omits it (engine resolves the locale). |
-| `translate` | tri-state     | `default` (omit) / `on` / `off`.                               |
+| Field       | Type          | Notes                                                                 |
+| ----------- | ------------- | --------------------------------------------------------------------- |
+| `input`     | text          | Required: a readable plan or prompt file.                             |
+| `mode`      | toggle        | `plan` (positional) vs `prompt` (`--prompt`).                         |
+| `resume`    | toggle        | `--resume`; the input is still required.                              |
+| `iters`     | text (digits) | `--iters N`; blank keeps the engine/config default.                   |
+| `quality`   | cycle         | `default`→`quick`→`balanced`→`thorough`; `default` omits `--quality`. |
+| `fix`       | tri-state     | `default` (omit) / `on` (`--fix`) / `off` (`--no-fix`).               |
+| `locale`    | text          | `--locale <tag>`; blank omits it (engine resolves the locale).        |
+| `translate` | tri-state     | `default` (omit) / `on` / `off`.                                      |
 
-`Space` toggles a boolean/tri-state field; `←`/`→` (or `Space`) cycles `effort`.
+`Space` toggles a boolean/tri-state field; `←`/`→` (or `Space`) cycles `quality`.
 `Enter` submits. The form prevalidates the input (present, a real file) and
 `iters` before invoking the engine; an invalid field keeps the form open with a
 status message. On success the new (or resumed) run's identity is shown and the
@@ -119,7 +119,7 @@ dashboard reloads so the run appears.
 ### Intervention form (`i`)
 
 `Tab` moves between the `target` (cycled through
-`all`/`critic`/`creator`/`fixer`/`reviewer` with `Space`/`←`/`→`) and the
+`all`/`creator`/`critic`/`fixer`/`reviewer` with `Space`/`←`/`→`) and the
 `message` text field. `Enter` appends a `{id, ts, target, message}` line to the
 run's `operator-interventions.jsonl`, identical to `agent-quorum intervene`.
 

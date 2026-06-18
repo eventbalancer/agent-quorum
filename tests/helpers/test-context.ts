@@ -7,7 +7,7 @@ import {
   type RolePermissions,
   type RunSettings,
 } from '../../src/core/config.js';
-import { effortMatrix } from '../../src/core/effort.js';
+import { qualityMatrix } from '../../src/core/quality.js';
 import { DEFAULT_SPLIT_MIN_PHASES } from '../../src/stages/plan/plan-package.js';
 import type { SplitMode } from '../../src/core/split-policy.js';
 import { skillPaths, type RunContext } from '../../src/core/run-context.js';
@@ -28,23 +28,23 @@ export const BASE_STREAM_KNOBS: StreamKnobs = {
 export function fixturePermissions(): RolePermissions {
   const disallowed = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
   return {
-    critic: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
-    reviewer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
-    fixer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
     creator: {
       createTools: 'Read,Grep,Glob',
       createDisallowedTools: 'Write,Edit,NotebookEdit,Agent,Task,ToolSearch,AskUserQuestion',
       updateTools: 'Read',
       updateDisallowedTools: disallowed,
     },
+    critic: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
+    fixer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
+    reviewer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
     translator: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
   };
 }
 
 export function fixtureMatrix(): RoleMatrix {
   return {
-    critic: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' },
     creator: { runner: 'claude', model: 'claude-opus-4-8', reasoning: 'xhigh' },
+    critic: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' },
     fixer: { runner: 'claude', model: 'claude-opus-4-8', reasoning: 'xhigh' },
     reviewer: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' },
     translator: { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'high' },
@@ -52,7 +52,7 @@ export function fixtureMatrix(): RoleMatrix {
 }
 
 export interface TestContextOptions {
-  effort?: 'low' | 'high' | 'max';
+  quality?: 'quick' | 'balanced' | 'thorough';
   maxIters?: number;
   diffThreshold?: number;
   projectRoot?: string;
@@ -74,10 +74,10 @@ export function makeTestRunContext(
   scratch: Scratch,
   options: TestContextOptions = {},
 ): RunContext {
-  const effort = options.effort ?? 'low';
+  const quality = options.quality ?? 'quick';
   const settings: RunSettings = {
     maxIters: options.maxIters ?? 1,
-    effort,
+    quality,
     fixPass: options.fixPass ?? 0,
     translatePass: options.translatePass ?? 0,
     locale: options.locale ?? 'en',
@@ -102,7 +102,7 @@ export function makeTestRunContext(
     plansDir: path.join(tmp, 'plans'),
     config,
     settings,
-    effort: effortMatrix(effort),
+    quality: qualityMatrix(quality),
     permissions,
     skills: skillPaths(REPO_ROOT),
     provider: {
@@ -115,7 +115,7 @@ export function makeTestRunContext(
         cursor: BASE_STREAM_KNOBS,
       },
       matrix,
-      sessionMode: effortMatrix(effort).sessionMode,
+      sessionMode: qualityMatrix(quality).sessionMode,
       creatorSessionFile: path.join(work, 'creator.session-id'),
       markdownSchemaPath: path.join(REPO_ROOT, 'skills', '_shared', 'markdown.schema.json'),
       binaries: { codex: 'codex', claude: 'claude', cursor: 'cursor-agent' },

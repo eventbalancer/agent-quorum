@@ -246,7 +246,7 @@ export function defaultPlanLoopConfig(): JsonObject {
     version: 1,
     settings: {
       iters: 4,
-      effort: 'high',
+      quality: 'balanced',
       fix: true,
       translate: false,
       diffThreshold: 5,
@@ -254,26 +254,9 @@ export function defaultPlanLoopConfig(): JsonObject {
       retryDelaySeconds: 10,
     },
     roles: {
-      critic: {
-        runner: 'codex',
-        model: 'gpt-5.5',
-        reasoning: 'xhigh',
-        tools: ['Read', 'Grep', 'Glob'],
-        disallowedTools: [
-          'Write',
-          'Edit',
-          'NotebookEdit',
-          'Bash',
-          'Agent',
-          'Task',
-          'ToolSearch',
-          'AskUserQuestion',
-        ],
-      },
       creator: {
         runner: 'claude',
         model: 'claude-opus-4-8',
-        reasoning: 'xhigh',
         createTools: ['Read', 'Grep', 'Glob'],
         createDisallowedTools: [
           'Write',
@@ -296,10 +279,24 @@ export function defaultPlanLoopConfig(): JsonObject {
           'AskUserQuestion',
         ],
       },
+      critic: {
+        runner: 'codex',
+        model: 'gpt-5.5',
+        tools: ['Read', 'Grep', 'Glob'],
+        disallowedTools: [
+          'Write',
+          'Edit',
+          'NotebookEdit',
+          'Bash',
+          'Agent',
+          'Task',
+          'ToolSearch',
+          'AskUserQuestion',
+        ],
+      },
       fixer: {
         runner: 'claude',
         model: 'claude-opus-4-8',
-        reasoning: 'xhigh',
         tools: ['Read', 'Grep', 'Glob'],
         disallowedTools: [
           'Edit',
@@ -315,7 +312,6 @@ export function defaultPlanLoopConfig(): JsonObject {
       reviewer: {
         runner: 'codex',
         model: 'gpt-5.5',
-        reasoning: 'xhigh',
         tools: ['Read', 'Grep', 'Glob'],
         disallowedTools: [
           'Write',
@@ -331,7 +327,6 @@ export function defaultPlanLoopConfig(): JsonObject {
       translator: {
         runner: 'claude',
         model: 'claude-sonnet-4-6',
-        reasoning: 'high',
         tools: ['Read', 'Grep', 'Glob'],
         disallowedTools: [
           'Write',
@@ -348,12 +343,12 @@ export function defaultPlanLoopConfig(): JsonObject {
   };
 }
 
-// Role specs use the harness form "role:runner[:model[:reasoning]]".
+// Role specs use the harness form "role:runner[:model]".
 function planLoopConfigWithRoles(...specs: string[]): JsonObject {
   const config = defaultPlanLoopConfig();
   const roles = config.roles as Record<string, JsonObject>;
   for (const spec of specs) {
-    const [role, runner, model, reasoning] = spec.split(':');
+    const [role, runner, model] = spec.split(':');
     if (!role) {
       continue;
     }
@@ -366,9 +361,6 @@ function planLoopConfigWithRoles(...specs: string[]): JsonObject {
     }
     if (model) {
       target.model = model;
-    }
-    if (reasoning) {
-      target.reasoning = reasoning;
     }
   }
   return config;

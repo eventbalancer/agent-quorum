@@ -27,7 +27,7 @@ export interface RunMetadata {
   workDir: string;
   plansDir: string;
   startedAt: string;
-  effort: string;
+  quality: string;
   sessionMode: string;
   creatorOneShot: string;
   previousCritiques: string;
@@ -35,17 +35,16 @@ export interface RunMetadata {
   maxIters: number;
   fixPass: string;
   diffThreshold: number;
-  critic: RunMetadataSingleToolsRole;
   creator: RunMetadataCreatorRole;
+  critic: RunMetadataSingleToolsRole;
   fixer: RunMetadataSingleToolsRole;
   reviewer: RunMetadataSingleToolsRole;
   runId: string;
   name: string;
 }
 
-// The reference run.meta.tsv key sequence (four roles, no translator) is kept
-// as an unchanged prefix; run_id and name are appended as trailing rows so
-// existing key-position consumers stay valid.
+// Role rows follow the execution sequence (creator, critic, fixer, reviewer;
+// translator is omitted here); run_id and name are appended as trailing rows.
 export function renderRunMetadata(meta: RunMetadata): string {
   const rows: [string, string][] = [
     ['pid', String(meta.pid)],
@@ -57,7 +56,7 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['log_path', path.join(meta.workDir, 'run.log')],
     ['interventions_path', path.join(meta.workDir, 'operator-interventions.jsonl')],
     ['started_at', meta.startedAt],
-    ['effort', meta.effort],
+    ['quality', meta.quality],
     ['session_mode', meta.sessionMode],
     ['creator_one_shot', meta.creatorOneShot],
     ['previous_critiques', meta.previousCritiques],
@@ -65,11 +64,6 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['max_iters', String(meta.maxIters)],
     ['fix_pass', meta.fixPass],
     ['diff_threshold', String(meta.diffThreshold)],
-    ['critic_runner', meta.critic.runner],
-    ['critic_model', meta.critic.model],
-    ['critic_reasoning', meta.critic.reasoning],
-    ['critic_tools', meta.critic.tools],
-    ['critic_disallowed_tools', meta.critic.disallowedTools],
     ['creator_runner', meta.creator.runner],
     ['creator_model', meta.creator.model],
     ['creator_reasoning', meta.creator.reasoning],
@@ -77,6 +71,11 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['creator_create_disallowed_tools', meta.creator.createDisallowedTools],
     ['creator_update_tools', meta.creator.updateTools],
     ['creator_update_disallowed_tools', meta.creator.updateDisallowedTools],
+    ['critic_runner', meta.critic.runner],
+    ['critic_model', meta.critic.model],
+    ['critic_reasoning', meta.critic.reasoning],
+    ['critic_tools', meta.critic.tools],
+    ['critic_disallowed_tools', meta.critic.disallowedTools],
     ['fixer_runner', meta.fixer.runner],
     ['fixer_model', meta.fixer.model],
     ['fixer_reasoning', meta.fixer.reasoning],

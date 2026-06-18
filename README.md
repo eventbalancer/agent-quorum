@@ -32,8 +32,8 @@ converged plan is large or has many phases, agent-quorum performs a **split**:
 it emits a self-contained `plan.package/` directory so a weaker model can
 execute one phase at a time.
 
-Five roles drive that loop: the **critic** finds issues, the **creator** drafts
-and revises, the **fixer** proposes reference fixes after convergence, the
+Five roles drive that loop: the **creator** drafts and revises, the **critic**
+finds issues, the **fixer** proposes reference fixes after convergence, the
 **reviewer** checks the fixer's proposal, and the **translator** renders a
 localized companion plan when you ask for one.
 
@@ -66,11 +66,12 @@ process group under a byte-idle / semantic-idle / wall-clock watchdog.
 
 ## Glossary
 
-- **role** — one job in the loop (critic, creator, fixer, reviewer, translator),
+- **role** — one job in the loop (creator, critic, fixer, reviewer, translator),
   each bound to a provider and a prompt skill.
 - **runner** — the provider CLI a role calls: `codex`, `claude`, or `cursor`.
-- **effort** — a preset (`low`, `high`, `max`) that selects the role-call
-  topology and how aggressively provider sessions are reused.
+- **quality** — a preset (`quick`, `balanced`, `thorough`) that selects the
+  role-call topology, per-role reasoning, and how aggressively provider sessions
+  are reused.
 - **convergence** — the point where the critic finds no remaining blocking
   issues, so the loop stops and finalizes the plan.
 - **split** — emitting the converged plan as a multi-file `plan.package/` when it
@@ -113,7 +114,7 @@ A single `agent-quorum` bin fronts these entry points:
 ```sh
 agent-quorum plan my-plan.md                 # core loop over an existing plan
 agent-quorum plan --prompt my-prompt.md      # create plan.v0 from a prompt first
-agent-quorum launch --effort high task.md    # detached background run + run.log
+agent-quorum launch --quality balanced task.md  # detached background run + run.log
 agent-quorum status                          # pick a run (TTY) or scriptable listing
 agent-quorum show <name|id|PID|--last>       # a run's artifact paths and state
 agent-quorum logs <selector> [-f]            # print or follow a run's run.log
@@ -135,7 +136,7 @@ completion notifications for core runs.
 ```ts
 import { runPlanLoop, getRunStatus, addIntervention, ExitCode } from 'agent-quorum';
 
-const result = await runPlanLoop({ input: 'my-plan.md', iters: 3, effort: 'high' });
+const result = await runPlanLoop({ input: 'my-plan.md', iters: 3, quality: 'balanced' });
 if (result.exitCode === ExitCode.Ok) {
   console.log(`converged in ${result.iterations} iterations: ${result.finalPlanPath}`);
 }
@@ -153,14 +154,15 @@ identically: `<home>/config.json` for non-secret settings and an owner-only
 `<home>/secrets.json` for the bot token, both under `AGENT_QUORUM_HOME` (default
 `~/.agent-quorum`). Configuration is optional — with no store and no environment,
 every setting falls back to a built-in default. `config.json` has two main
-sections: `settings` (iteration cap, effort, fix pass, locale, translation,
-retries) and `roles` (per-role runner, model, reasoning level, and tool
-permissions). Supported runners are `codex`, `claude`, and `cursor`.
+sections: `settings` (iteration cap, quality, fix pass, locale, translation,
+retries) and `roles` (per-role runner, model, and tool permissions). Supported
+runners are `codex`, `claude`, and `cursor`.
 
-Run `agent-quorum init` for interactive first-run setup (capture the bot token,
-discover the chat id, write the store at owner-only permissions) and
-`agent-quorum config` to print the resolved configuration with each value's
-winning layer. Telegram credentials enable final completion notifications
+Run `agent-quorum setup` for guided configuration — essentials (`iters`,
+`quality`, `locale`, `translate`), auto-detected per-role runners, and an
+optional Telegram step that captures the bot token, discovers the chat id, and
+writes the store at owner-only permissions — and `agent-quorum config` to print
+the resolved configuration with each value's winning layer. Telegram credentials enable final completion notifications
 automatically; set `AGENT_QUORUM_CLARIFY=0` for notifications without the
 prompt-mode question gate.
 
@@ -241,7 +243,7 @@ pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 ```
 
 `plan:self` runs `src/cli/main.ts` via `tsx` (no build), points run artifacts at
-`.agents/plans/`, and accepts the usual `--effort`, `--iters`, `--locale`,
+`.agents/plans/`, and accepts the usual `--quality`, `--iters`, `--locale`,
 `--translate`, and `--fix` / `--no-fix` flags; set `AGENT_QUORUM_WORK_DIR` to pin a
 workdir name.
 

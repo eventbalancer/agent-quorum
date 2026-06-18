@@ -161,7 +161,7 @@ describe('launch secret handoff (P5)', () => {
         launchPlanLoop({
           input,
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
           config: { settings: { iters: 9 } },

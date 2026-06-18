@@ -2,7 +2,7 @@
   "version": 1,
   "settings": {
     "iters": 5,
-    "effort": "high",
+    "quality": "balanced",
     "fix": true,
     "translate": false,
     "locale": "",
@@ -11,26 +11,9 @@
     "retryDelaySeconds": 10
   },
   "roles": {
-    "critic": {
-      "runner": "codex",
-      "model": "gpt-5.5",
-      "reasoning": "xhigh",
-      "tools": ["Read", "Grep", "Glob"],
-      "disallowedTools": [
-        "Write",
-        "Edit",
-        "NotebookEdit",
-        "Bash",
-        "Agent",
-        "Task",
-        "ToolSearch",
-        "AskUserQuestion"
-      ]
-    },
     "creator": {
       "runner": "claude",
       "model": "claude-opus-4-8",
-      "reasoning": "xhigh",
       "createTools": ["Read", "Grep", "Glob"],
       "createDisallowedTools": [
         "Write",
@@ -54,10 +37,24 @@
         "AskUserQuestion"
       ]
     },
+    "critic": {
+      "runner": "codex",
+      "model": "gpt-5.5",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
     "fixer": {
       "runner": "codex",
       "model": "gpt-5.5",
-      "reasoning": "high",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -73,7 +70,6 @@
     "reviewer": {
       "runner": "codex",
       "model": "gpt-5.5",
-      "reasoning": "high",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -89,7 +85,6 @@
     "translator": {
       "runner": "codex",
       "model": "gpt-5.5",
-      "reasoning": "high",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",

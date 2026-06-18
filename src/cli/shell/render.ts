@@ -248,7 +248,7 @@ function launchBody(state: ShellState, cols: number, color: boolean): string[] {
     ['mode', form.promptMode ? 'prompt' : 'plan'],
     ['resume', form.resume ? 'on' : 'off'],
     ['iters', form.iters === '' ? '(default)' : form.iters],
-    ['effort', form.effort],
+    ['quality', form.quality],
     ['fix', form.fix],
     ['locale', form.locale === '' ? '(default)' : form.locale],
     ['translate', form.translate],

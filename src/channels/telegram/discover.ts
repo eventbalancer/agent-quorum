@@ -58,7 +58,7 @@ async function getUpdates(
   if (!result.ok) {
     if (result.failure.kind === 'conflict') {
       throw new HaltError(
-        'telegram discovery: getUpdates returned 409 — a webhook is set; delete it (deleteWebhook) before running init',
+        'telegram discovery: getUpdates returned 409 — a webhook is set; delete it (deleteWebhook) before running setup',
         1,
       );
     }
@@ -106,7 +106,7 @@ export async function telegramDiscoverChatId(
     await sleep(pollIntervalMs);
   }
   throw new HaltError(
-    'telegram discovery: timed out waiting for the code message — resend the code to your bot and retry init',
+    'telegram discovery: timed out waiting for the code message — resend the code to your bot and retry setup',
     1,
   );
 }

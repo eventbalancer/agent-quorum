@@ -47,7 +47,7 @@ import {
 import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { handoffDir } from '../../core/store.js';
 import { runCreatorCreate } from './creator.js';
-import { effortMatrix } from '../../core/effort.js';
+import { qualityMatrix } from '../../core/quality.js';
 import { runFixPass } from './fix-pass.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { resolveWatchdogKnobs } from '../../core/knobs.js';
@@ -86,8 +86,8 @@ import {
 import type { RunMode, RunOverrides } from '../../types.js';
 
 export const RUN_USAGE =
-  'usage: agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
-  '       agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>\n';
+  'usage: agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
+  '       agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>\n';
 
 function usage(): never {
   process.stderr.write(RUN_USAGE);
@@ -173,17 +173,17 @@ export function parseRunArgs(args: readonly string[]): ParsedRunArgs {
         }
         i += 1;
         break;
-      case arg === '--effort': {
+      case arg === '--quality': {
         const value = args[i + 1] ?? '';
         if (value === '') {
-          usageError('--effort expects low, high, or max');
+          usageError('--quality expects quick, balanced, or thorough');
         }
-        cli.effort = value;
+        cli.quality = value;
         i += 2;
         break;
       }
-      case arg.startsWith('--effort='):
-        cli.effort = arg.slice('--effort='.length);
+      case arg.startsWith('--quality='):
+        cli.quality = arg.slice('--quality='.length);
         i += 1;
         break;
       case arg === '-h' || arg === '--help':
@@ -514,7 +514,7 @@ export async function runPlanLoopCli(
   });
   const settings = resolveRunSettings(resolved);
   const knobs = resolveWatchdogKnobs(resolved);
-  const effort = effortMatrix(settings.effort);
+  const qualityKnobs = qualityMatrix(settings.quality);
 
   const plansDir = runsDir;
   const inputPath = absolutePath(parsed.inputPath);
@@ -582,7 +582,7 @@ export async function runPlanLoopCli(
         logPath,
         plansDir,
         startedAt,
-        effort: settings.effort,
+        quality: settings.quality,
         state: 'running',
       },
       forwardedRunId !== undefined && forwardedRunId !== '' ? { fixedRunId: forwardedRunId } : {},
@@ -605,21 +605,14 @@ export async function runPlanLoopCli(
       workDir: work,
       plansDir,
       startedAt,
-      effort: settings.effort,
-      sessionMode: String(effort.sessionMode),
-      creatorOneShot: String(effort.creatorOneShot),
-      previousCritiques: effort.previousCritiques,
-      topology: effort.topology,
+      quality: settings.quality,
+      sessionMode: String(qualityKnobs.sessionMode),
+      creatorOneShot: String(qualityKnobs.creatorOneShot),
+      previousCritiques: qualityKnobs.previousCritiques,
+      topology: qualityKnobs.topology,
       maxIters: settings.maxIters,
       fixPass: String(settings.fixPass),
       diffThreshold: settings.diffThreshold,
-      critic: {
-        runner: matrix.critic.runner,
-        model: matrix.critic.model,
-        reasoning: matrix.critic.reasoning,
-        tools: permissions.critic.tools,
-        disallowedTools: permissions.critic.disallowedTools,
-      },
       creator: {
         runner: matrix.creator.runner,
         model: matrix.creator.model,
@@ -628,6 +621,13 @@ export async function runPlanLoopCli(
         createDisallowedTools: permissions.creator.createDisallowedTools,
         updateTools: permissions.creator.updateTools,
         updateDisallowedTools: permissions.creator.updateDisallowedTools,
+      },
+      critic: {
+        runner: matrix.critic.runner,
+        model: matrix.critic.model,
+        reasoning: matrix.critic.reasoning,
+        tools: permissions.critic.tools,
+        disallowedTools: permissions.critic.disallowedTools,
       },
       fixer: {
         runner: matrix.fixer.runner,
@@ -650,12 +650,12 @@ export async function runPlanLoopCli(
 
     const skills = skillPaths(packageRoot());
     for (const skillFile of [
-      skills.criticSkill,
-      skills.criticSchema,
       skills.creatorSkill,
       skills.creatorSchema,
       skills.creatorMetaSchema,
       skills.clarifySchema,
+      skills.criticSkill,
+      skills.criticSchema,
       skills.fixerSkill,
       skills.reviewerSkill,
       skills.reviewerSchema,
@@ -692,7 +692,7 @@ export async function runPlanLoopCli(
       plansDir,
       config: resolved,
       settings,
-      effort,
+      quality: qualityKnobs,
       permissions,
       skills,
       provider: {
@@ -701,7 +701,7 @@ export async function runPlanLoopCli(
         retry: { retryCount: settings.retryCount, retryDelaySeconds: settings.retryDelaySeconds },
         streamKnobs: knobs.stream,
         matrix,
-        sessionMode: effort.sessionMode,
+        sessionMode: qualityKnobs.sessionMode,
         creatorSessionFile,
         markdownSchemaPath: skills.markdownSchema,
         binaries,
@@ -729,7 +729,7 @@ export async function runPlanLoopCli(
     installSignalTeardown(cleanup);
 
     try {
-      if (effort.sessionMode === 1) {
+      if (qualityKnobs.sessionMode === 1) {
         rmSync(creatorSessionFile, { force: true });
       }
       const rejectedLog = path.join(work, 'rejected-log.jsonl');

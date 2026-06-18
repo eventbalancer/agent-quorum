@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ProviderRuntime } from '../providers/runtime.js';
 import type { ResolvedConfig, RolePermissions, RunSettings } from './config.js';
-import type { EffortMatrix } from './effort.js';
+import type { QualityMatrix } from './quality.js';
 import type { PassKnobs } from './knobs.js';
 import type { SplitPolicy } from './split-policy.js';
 import type { RunMode } from '../types.js';
@@ -56,7 +56,7 @@ export interface RunContext {
   plansDir: string;
   config: ResolvedConfig;
   settings: RunSettings;
-  effort: EffortMatrix;
+  quality: QualityMatrix;
   permissions: RolePermissions;
   skills: SkillPaths;
   provider: ProviderRuntime;

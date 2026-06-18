@@ -4,11 +4,11 @@ import type { KeyEvent } from './keys.js';
 
 export type ShellView = 'dashboard' | 'detail' | 'log' | 'launch' | 'intervene' | 'stop';
 
-export const INTERVENE_TARGETS = ['all', 'critic', 'creator', 'fixer', 'reviewer'] as const;
+export const INTERVENE_TARGETS = ['all', 'creator', 'critic', 'fixer', 'reviewer'] as const;
 export type InterveneTarget = (typeof INTERVENE_TARGETS)[number];
 
-export const EFFORT_CYCLE = ['default', 'low', 'high', 'max'] as const;
-export type EffortChoice = (typeof EFFORT_CYCLE)[number];
+export const QUALITY_CYCLE = ['default', 'quick', 'balanced', 'thorough'] as const;
+export type QualityChoice = (typeof QUALITY_CYCLE)[number];
 
 const TRI_CYCLE = ['default', 'on', 'off'] as const;
 export type TriState = (typeof TRI_CYCLE)[number];
@@ -18,7 +18,7 @@ const LAUNCH_FIELD = {
   mode: 1,
   resume: 2,
   iters: 3,
-  effort: 4,
+  quality: 4,
   fix: 5,
   locale: 6,
   translate: 7,
@@ -36,7 +36,7 @@ export interface LaunchForm {
   readonly promptMode: boolean;
   readonly resume: boolean;
   readonly iters: string;
-  readonly effort: EffortChoice;
+  readonly quality: QualityChoice;
   readonly fix: TriState;
   readonly locale: string;
   readonly translate: TriState;
@@ -118,7 +118,7 @@ export const DEFAULT_LAUNCH_FORM: LaunchForm = {
   promptMode: false,
   resume: false,
   iters: '',
-  effort: 'default',
+  quality: 'default',
   fix: 'default',
   locale: '',
   translate: 'default',
@@ -359,9 +359,9 @@ function reduceLaunch(state: ShellState, key: KeyEvent): ReduceResult {
       return { state: { ...state, launch: { ...form, promptMode: !form.promptMode } } };
     case LAUNCH_FIELD.resume:
       return { state: { ...state, launch: { ...form, resume: !form.resume } } };
-    case LAUNCH_FIELD.effort:
+    case LAUNCH_FIELD.quality:
       return {
-        state: { ...state, launch: { ...form, effort: cycle(EFFORT_CYCLE, form.effort, dir) } },
+        state: { ...state, launch: { ...form, quality: cycle(QUALITY_CYCLE, form.quality, dir) } },
       };
     case LAUNCH_FIELD.fix:
       return { state: { ...state, launch: { ...form, fix: cycle(TRI_CYCLE, form.fix, dir) } } };

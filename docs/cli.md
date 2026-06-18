@@ -2,12 +2,15 @@
 
 `agent-quorum` is one bin with an umbrella dispatcher. The first argument selects
 an entry point: a reserved run-lifecycle command (`launch`, `status`, `show`,
-`logs`, `prune`, `intervene`), a configuration command (`init`, `config`), or a
+`logs`, `prune`, `intervene`), a configuration command (`setup`, `config`), or a
 **stage** from the stage registry (`plan` is the only stage today). There is no
 default fallthrough — an unrecognized first token prints the global help to stderr
-and exits non-zero. `init` runs interactive first-run setup (TTY only: capture the
-bot token, discover the chat id, write `config.json`+`secrets.json`); `config`
-prints the resolved configuration with each value's winning layer (token masked).
+and exits non-zero. `setup` runs guided configuration (interactive TTY: prompts
+`iters`/`quality`/`locale`/`translate`, auto-detects per-role runners, and an
+optional Telegram handshake; non-TTY: the same essentials via
+`--iters`/`--quality`/`--locale`/`--translate` flags) and writes a minimal patch
+to `config.json` (plus `secrets.json` when a token is captured); `config` prints
+the resolved configuration with each value's winning layer (token masked).
 After the subcommand
 token a single leading `--` is dropped, so a `pnpm run <script> -- <flags>`
 forwarding case reaches the stage parser with its flags intact.
@@ -54,21 +57,21 @@ when color is off. Every other no-argument path (piped or redirected stdio,
 ## Plan stage — `agent-quorum plan [flags] <plan.md>`
 
 ```text
-agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>
-agent-quorum plan [--iters N] [--effort {low,high,max}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
+agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>
+agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
 ```
 
-| Flag                             | Purpose                                                 |
-| -------------------------------- | ------------------------------------------------------- |
-| `--iters N` / `--max-iters N`    | Set the iteration cap.                                  |
-| `--effort {low,high,max}`        | Select the role-call topology and session behavior.     |
-| `--fix` / `--no-fix`             | Enable or skip the post-convergence reference fix pass. |
-| `--locale <tag>`                 | Set the human-interaction locale; defaults to `en`.     |
-| `--translate` / `--no-translate` | Enable or skip the companion final-plan localization.   |
-| `--prompt <file>`                | Create `plan.v0` from a prompt before the loop starts.  |
+| Flag                                  | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `--iters N` / `--max-iters N`         | Set the iteration cap.                                  |
+| `--quality {quick,balanced,thorough}` | Select the role-call topology and session behavior.     |
+| `--fix` / `--no-fix`                  | Enable or skip the post-convergence reference fix pass. |
+| `--locale <tag>`                      | Set the human-interaction locale; defaults to `en`.     |
+| `--translate` / `--no-translate`      | Enable or skip the companion final-plan localization.   |
+| `--prompt <file>`                     | Create `plan.v0` from a prompt before the loop starts.  |
 
 Flags accept both `--flag value` and `--flag=value` forms for `--iters` /
-`--max-iters`, `--effort`, and `--locale`. `--locale <tag>` selects the
+`--max-iters`, `--quality`, and `--locale`. `--locale <tag>` selects the
 human-interaction locale; when omitted, the locale is `en`. Clarification
 questions sent through Telegram use that locale. Non-English locales also run
 the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
@@ -117,7 +120,7 @@ Exit codes:
 ## `agent-quorum launch`
 
 ```text
-agent-quorum launch [--resume] [--iters N] [--effort {low,high,max}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>
+agent-quorum launch [--resume] [--iters N] [--quality {quick,balanced,thorough}] [--prompt] [--no-fix] [--locale LOCALE] [--no-translate] <input.md>
 ```
 
 Backgrounds the run in its own process group, rotates `run.log`, exports
@@ -206,7 +209,7 @@ also self-prune at start, so the store stays bounded without manual upkeep.
 ## `agent-quorum intervene`
 
 ```text
-agent-quorum intervene --work <workdir> [--target all|critic|creator|fixer|reviewer] <message...>
+agent-quorum intervene --work <workdir> [--target all|creator|critic|fixer|reviewer] <message...>
 agent-quorum intervene <name|id|PID|--last|--id ID|--name NAME> [--target ...] <message...>
 agent-quorum intervene (--work <workdir> | <selector>) [--target ...] --stdin
 ```

@@ -42,7 +42,7 @@ CLI — foreground core run, or a detached background run:
 ```sh
 agent-quorum plan my-plan.md               # run in the foreground; logs to stderr
 agent-quorum plan --prompt my-task.md      # create plan.v0 from a prompt first
-agent-quorum launch --effort high task.md  # detach into its own process group
+agent-quorum launch --quality balanced task.md  # detach into its own process group
 ```
 
 A foreground run logs `run <id> (<name>)` at start and writes `run.log` in its
@@ -52,7 +52,7 @@ and `work` paths, then returns immediately.
 API — the same two entry points; both report `runId`/`name`:
 
 ```ts
-const result = await runPlanLoop({ input: 'my-plan.md', effort: 'high' });
+const result = await runPlanLoop({ input: 'my-plan.md', quality: 'balanced' });
 // result.runId, result.name, result.workDir, result.finalPlanPath, …
 
 const launched = await launchPlanLoop({ input: 'task.md' });

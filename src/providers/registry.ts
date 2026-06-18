@@ -9,6 +9,7 @@ import type { StreamKnobs } from './watchdog.js';
 
 export interface RunnerMeta {
   readonly binary: { readonly default: string; readonly envOverride?: string };
+  readonly defaultModel: string;
   readonly install: { readonly message: string };
   readonly auth: { readonly args: readonly string[]; readonly remedy: (bin: string) => string };
   readonly stream?: {
@@ -21,12 +22,14 @@ export interface RunnerMeta {
 export const RUNNER_META = {
   codex: {
     binary: { default: 'codex' },
+    defaultModel: 'gpt-5.5',
     install: { message: 'codex is required' },
     auth: { args: ['login', 'status'], remedy: () => 'codex login' },
     usesSession: false,
   },
   claude: {
     binary: { default: 'claude' },
+    defaultModel: 'claude-opus-4-8',
     install: { message: 'claude is required' },
     auth: { args: ['auth', 'status'], remedy: () => 'claude auth login' },
     stream: { envPrefix: 'CLAUDE', requirePositivePoll: true },
@@ -34,6 +37,7 @@ export const RUNNER_META = {
   },
   cursor: {
     binary: { default: 'cursor-agent', envOverride: 'AGENT_QUORUM_CURSOR_BIN' },
+    defaultModel: 'composer-2.5',
     install: { message: 'cursor-agent is required' },
     auth: { args: ['status'], remedy: (bin) => `${bin} login` },
     stream: { envPrefix: 'CURSOR', requirePositivePoll: false },

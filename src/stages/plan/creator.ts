@@ -254,7 +254,7 @@ export async function runCreatorUpdate(
   const metaFile = path.join(ctx.work, `update-meta.v${iter}.json`);
   const planVersion = iter + 1;
 
-  if (ctx.effort.creatorOneShot === 1) {
+  if (ctx.quality.creatorOneShot === 1) {
     const status = await runCreatorUpdateOneShot(
       ctx,
       iter,

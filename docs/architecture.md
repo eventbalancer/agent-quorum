@@ -54,9 +54,10 @@ disallowed tools.
 Per iteration: critic → sanitize → schema-validate (exit 3) → health metrics →
 converge on zero issues; otherwise creator update → converge on zero accepted
 blockers/majors, on a `diff` below `diffThreshold`, or at `iters` (the last
-revision becomes final). Effort shapes the topology: `low` runs the creator
-one-shot (plan + metadata in one JSON call, with a split-call fallback), `high`
-splits markdown and metadata, `max` additionally disables provider sessions.
+revision becomes final). Quality shapes the topology: `quick` runs the creator
+one-shot (plan + metadata in one JSON call, with a split-call fallback),
+`balanced` splits markdown and metadata, `thorough` additionally disables
+provider sessions.
 
 Post-convergence: the reference validator mines `file:line` tokens out of code
 spans, resolves them against an in-process workspace snapshot, and writes
@@ -130,5 +131,5 @@ the runner exits 143 on signal.
 `AGENT_QUORUM_RESUME=1` finds the last stable plan (highest `plan.vN.md` whose
 `update.v(N-1).json` validates), archives stale artifacts to
 `stale.<timestamp>/`, and continues. Operator interventions append to a JSONL
-ledger; active entries are injected into critic/creator/fixer/reviewer prompts
+ledger; active entries are injected into creator/critic/fixer/reviewer prompts
 and marked migrated once a revision lands.
