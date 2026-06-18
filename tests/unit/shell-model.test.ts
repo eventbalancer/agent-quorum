@@ -242,3 +242,48 @@ describe('reduce — refresh tick', () => {
     expect(ticked.effect).toEqual({ kind: 'reload' });
   });
 });
+
+describe('reduce — refreshing flag transitions', () => {
+  it('sets refreshing on an operator-triggered dashboard reload', () => {
+    const result = reduce(withDashboard([row(record())]), key({ kind: 'char', value: 'r' }));
+    expect(result.state.refreshing).toBe(true);
+    expect(result.effect).toEqual({ kind: 'reload' });
+  });
+
+  it('sets refreshing on an operator-triggered detail reload', () => {
+    const rec = record();
+    const result = reduce(withDetail(rec), key({ kind: 'char', value: 'r' }));
+    expect(result.state.refreshing).toBe(true);
+    expect(result.effect).toEqual({ kind: 'load-detail', record: rec });
+  });
+
+  it('sets refreshing on a successful action reload', () => {
+    const state: ShellState = { ...initialState, view: 'launch' };
+    const result = reduce(state, {
+      type: 'action-result',
+      result: { kind: 'launch', ok: true, message: 'started demo' },
+    });
+    expect(result.state.refreshing).toBe(true);
+    expect(result.effect).toEqual({ kind: 'reload' });
+  });
+
+  it('clears refreshing when dashboard data arrives', () => {
+    const state: ShellState = { ...withDashboard([row(record())]), refreshing: true };
+    const result = reduce(state, { type: 'data', groups: state.groups });
+    expect(result.state.refreshing).toBe(false);
+  });
+
+  it('clears refreshing when detail arrives', () => {
+    const rec = record();
+    const state: ShellState = { ...initialState, refreshing: true };
+    const result = reduce(state, { type: 'detail', detail: detailView(rec) });
+    expect(result.state.view).toBe('detail');
+    expect(result.state.refreshing).toBe(false);
+  });
+
+  it('leaves refreshing untouched on the periodic tick', () => {
+    const ticked = reduce(withDetail(record()), { type: 'tick' });
+    expect(ticked.state.refreshing).toBe(false);
+    expect(ticked.effect).toEqual({ kind: 'reload' });
+  });
+});

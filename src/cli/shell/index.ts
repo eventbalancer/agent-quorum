@@ -226,7 +226,7 @@ export function runShell(
     }
 
     function renderFrame(): void {
-      output.write(`${CLEAR}${render(state, viewport(), { color })}`);
+      output.write(`${CLEAR}${render(state, viewport(), { color, now: Date.now() })}`);
     }
 
     function stopFollow(): void {

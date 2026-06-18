@@ -181,7 +181,8 @@ describe('runShell driver', () => {
 
     input.write('\r');
     await flush();
-    expect(output.text).toContain('Run detail');
+    expect(output.text).toContain('Dashboard › alpha');
+    expect(output.text).toContain('i intervene');
 
     input.write('l');
     await flush(20);
