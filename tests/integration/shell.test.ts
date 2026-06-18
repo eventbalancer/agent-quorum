@@ -199,6 +199,18 @@ describe('runShell driver', () => {
     expect(snapshot(stateDir)).toEqual(before);
   });
 
+  it('releases stdin on quit so the process can exit without a second interrupt', async () => {
+    seedRun('alpha', '[agent-quorum] booting\n');
+    const input = ttyInput();
+    const output = new Collector();
+    const pauseSpy = vi.spyOn(input, 'pause');
+    const done = runShell(streams(input, output), deps());
+    await flush();
+    input.write('q');
+    expect(await done).toBe(0);
+    expect(pauseSpy).toHaveBeenCalled();
+  });
+
   it('contains the dead-pid status stderr during detail load (no terminal leak)', async () => {
     seedRun('racing', '[agent-quorum] hi\n');
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
