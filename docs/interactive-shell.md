@@ -30,14 +30,26 @@ Global, outside text editing: `↑`/`↓` or `j`/`k` move · `Enter` select/subm
 `b` back · `r` refresh · `q` quit · `?` help. Always: `Ctrl-C` quits in any
 context; `Esc` is back/cancel.
 
+Every view shares one frame: a header breadcrumb (`agent-quorum › Dashboard ›
+…`) that names the current view and shows a `⟳` indicator while a refresh is in
+flight, the view body, a single normalized status row, and a dim footer of the
+view's keys. The status row always occupies exactly one physical line — launch,
+intervene, and stop outcomes and validation errors are collapsed onto it (even
+when the underlying message spans several lines), and when a refresh is in flight
+with no message it reads `⟳ refreshing…`. An empty dashboard shows a `Press n to
+launch your first run.` hint instead of a blank body.
+
 ### Dashboard
 
 Runs are grouped by their canonical run store (project-local
 `.agents/plans/.runs`, `<home>/state`, and ambient/legacy stores), deduping
 alias/symlinked stores and applying the same global retention cap the run listing
 uses, so the dashboard never grows past what retention keeps. Live runs sort
-first within each group. Each row shows the run name, state, short run id,
-start/end time, and workdir.
+first within each group. Each row is laid out in aligned columns: a selection
+cursor (`❯`), a color-coded status glyph and label
+(running/finished/failed/blocked), the run name, the short run id, and a relative
+time (`just now`, `Nm`/`Nh`/`Nd ago`, then a `YYYY-MM-DD` date past a week). The
+work path is **not** shown in the list — it lives in the run detail.
 
 | Key              | Action                          |
 | ---------------- | ------------------------------- |
@@ -49,13 +61,18 @@ start/end time, and workdir.
 
 ### Run detail
 
-`Enter` on a run opens its detail: record header, artifact presence
-(`plan.final.md`, `summary.md`), iteration count, operator-intervention status,
-and the latest `run.log` event. For a live run the process tree and iteration
-table are captured from the detailed status engine; when the pid is gone (a
-dead-pid race) or `ps`/`lsof` are unavailable, process info is shown as
-unavailable and any stray engine stderr is contained — it never reaches the
-screen.
+`Enter` on a run opens its detail: a status badge (glyph + colored label), the
+record header with absolute ISO timestamps, work/log paths (a color terminal
+shows the basename as a clickable OSC 8 link to the full path; mono/`NO_COLOR`
+falls back to the full path, middle-shortened to fit),
+artifact presence (`plan.final.md`, `summary.md`), iteration count,
+operator-intervention status, and the latest `run.log` event — painted in the
+status color for a `failed`/`blocked` run. While the detail is still loading it
+shows `loading…`. For a live run the process tree and iteration table are
+captured from the detailed status engine into a labeled `Process` block; when the
+pid is gone (a dead-pid race) or `ps`/`lsof` are unavailable, that block reads
+`process info unavailable …` and any stray engine stderr is contained — it never
+reaches the screen.
 
 | Key       | Action                     |
 | --------- | -------------------------- |
@@ -118,13 +135,19 @@ failed `kill` surfaces as a status and leaves the shell open. `Esc` cancels.
 ## Refresh, color, and size
 
 - A read-only refresh tick reloads the dashboard periodically without leaving the
-  current view; `r` refreshes on demand.
+  current view; `r` refreshes on demand and shows a `⟳` indicator while the
+  reload is in flight.
 - Color follows the active output stream: it is emitted only when stdout is a TTY
-  and `NO_COLOR` is unset or empty ([no-color.org](https://no-color.org)). With
-  color off, the rendered frame — including any captured engine block — is
-  ANSI-stripped, so the shell's color flag is authoritative.
+  and `NO_COLOR` is unset or empty ([no-color.org](https://no-color.org)). Status
+  is color-coded from the 16-color palette — running (cyan), finished (green),
+  failed (red), blocked (yellow) — but a glyph and a text label carry the same
+  meaning, so the state stays legible with color off. With color off, the
+  rendered frame — including any captured engine block — is ANSI-stripped, so the
+  shell's color flag is authoritative.
+- Timestamps are relative in the dashboard list (`just now`, `Nm`/`Nh`/`Nd ago`,
+  then `YYYY-MM-DD` past a week) and absolute (full ISO) in the run detail.
 - The layout targets an 80×24 viewport and adapts to the terminal's reported
-  columns/rows, re-rendering on resize.
+  columns/rows, re-rendering on resize; every row is fit to the reported width.
 
 ## Quit
 

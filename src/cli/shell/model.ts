@@ -71,6 +71,7 @@ export interface ShellState {
   readonly intervene: InterveneForm;
   readonly stop: StopForm;
   readonly statusMessage: string;
+  readonly refreshing: boolean;
 }
 
 export type ActionResult =
@@ -133,6 +134,7 @@ export const initialState: ShellState = {
   intervene: { target: 'all', message: '', field: 0 },
   stop: { typed: '' },
   statusMessage: '',
+  refreshing: false,
 };
 
 export function visibleRows(state: ShellState): RunRow[] {
@@ -232,7 +234,7 @@ function reduceDashboard(state: ShellState, key: KeyEvent): ReduceResult {
     return { state: { ...state, view: 'launch', launch: DEFAULT_LAUNCH_FORM, statusMessage: '' } };
   }
   if (key.kind === 'char' && key.value === 'r') {
-    return { state, effect: { kind: 'reload' } };
+    return { state: { ...state, refreshing: true }, effect: { kind: 'reload' } };
   }
   if (key.kind === 'char' && key.value === '?') {
     return {
@@ -278,7 +280,7 @@ function reduceDetail(state: ShellState, key: KeyEvent): ReduceResult {
     return { state: { ...state, view: 'stop', stop: { typed: '' } } };
   }
   if (key.kind === 'char' && key.value === 'r') {
-    return { state, effect: { kind: 'load-detail', record } };
+    return { state: { ...state, refreshing: true }, effect: { kind: 'load-detail', record } };
   }
   return { state };
 }
@@ -451,7 +453,7 @@ function reduceKey(state: ShellState, key: KeyEvent): ReduceResult {
 function applyData(state: ShellState, groups: readonly DashboardGroup[]): ShellState {
   const total = groups.flatMap((group) => group.runs).length;
   const lastIndex = Math.max(0, total - 1);
-  return { ...state, groups, cursor: clamp(state.cursor, 0, lastIndex) };
+  return { ...state, groups, cursor: clamp(state.cursor, 0, lastIndex), refreshing: false };
 }
 
 function splitAppended(appended: string): string[] {
@@ -469,7 +471,10 @@ function applyActionResult(
 ): ReduceResult {
   const statusMessage = composeStatus(result.message, captured);
   if (result.ok) {
-    return { state: { ...state, view: 'dashboard', statusMessage }, effect: { kind: 'reload' } };
+    return {
+      state: { ...state, view: 'dashboard', statusMessage, refreshing: true },
+      effect: { kind: 'reload' },
+    };
   }
   return { state: { ...state, statusMessage } };
 }
@@ -485,7 +490,7 @@ export function reduce(state: ShellState, event: ShellEvent): ReduceResult {
     case 'data':
       return { state: applyData(state, event.groups) };
     case 'detail':
-      return { state: { ...state, view: 'detail', detail: event.detail } };
+      return { state: { ...state, view: 'detail', detail: event.detail, refreshing: false } };
     case 'log-open':
       return {
         state: {

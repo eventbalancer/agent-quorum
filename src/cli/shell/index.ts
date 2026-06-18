@@ -76,6 +76,7 @@ export interface ShellInput {
   removeListener(event: string, listener: (...args: unknown[]) => void): unknown;
   isTTY?: boolean;
   setRawMode?: (mode: boolean) => void;
+  pause?: () => void;
 }
 
 export interface ShellOutput {
@@ -226,7 +227,7 @@ export function runShell(
     }
 
     function renderFrame(): void {
-      output.write(`${CLEAR}${render(state, viewport(), { color })}`);
+      output.write(`${CLEAR}${render(state, viewport(), { color, now: Date.now() })}`);
     }
 
     function stopFollow(): void {
@@ -247,6 +248,10 @@ export function runShell(
       input.removeListener('error', onEnd);
       process.removeListener('SIGWINCH', onResize);
       input.setRawMode?.(false);
+      // Release stdin so the event loop can drain and the process exits on its
+      // own after the run promise resolves; without this a raw/resumed TTY keeps
+      // Node alive and the operator has to press Ctrl-C a second time.
+      input.pause?.();
       output.write(`${SHOW_CURSOR}${EXIT_ALT}`);
     }
 

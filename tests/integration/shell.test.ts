@@ -181,7 +181,8 @@ describe('runShell driver', () => {
 
     input.write('\r');
     await flush();
-    expect(output.text).toContain('Run detail');
+    expect(output.text).toContain('Dashboard › alpha');
+    expect(output.text).toContain('i intervene');
 
     input.write('l');
     await flush(20);
@@ -196,6 +197,18 @@ describe('runShell driver', () => {
     expect(code).toBe(0);
     expect(output.text).toContain(EXIT_ALT);
     expect(snapshot(stateDir)).toEqual(before);
+  });
+
+  it('releases stdin on quit so the process can exit without a second interrupt', async () => {
+    seedRun('alpha', '[agent-quorum] booting\n');
+    const input = ttyInput();
+    const output = new Collector();
+    const pauseSpy = vi.spyOn(input, 'pause');
+    const done = runShell(streams(input, output), deps());
+    await flush();
+    input.write('q');
+    expect(await done).toBe(0);
+    expect(pauseSpy).toHaveBeenCalled();
   });
 
   it('contains the dead-pid status stderr during detail load (no terminal leak)', async () => {

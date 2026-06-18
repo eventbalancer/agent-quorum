@@ -43,11 +43,13 @@ store, inspect detail, follow `run.log`, launch, intervene, and stop, all from
 one control surface. It is built only on `node:readline` raw-mode keypresses and
 raw ANSI, with no new dependency. Opening the shell performs no mutation: it
 reads ledger and artifact metadata and starts a read-only refresh; launch,
-intervene, and a typed-name-confirmed stop are the only write paths. Every other
-no-argument path (piped or redirected stdio, `--help`/`-h`) is unchanged and
-still prints the global help. See the [interactive shell
-runbook](interactive-shell.md) for keys, views, and the `NO_COLOR`/80×24
-behavior.
+intervene, and a typed-name-confirmed stop are the only write paths. Runs are
+status-color-coded (running/finished/failed/blocked) from the 16-color palette,
+with a full `NO_COLOR` text fallback — a glyph and a label carry the same state
+when color is off. Every other no-argument path (piped or redirected stdio,
+`--help`/`-h`) is unchanged and still prints the global help. See the
+[interactive shell runbook](interactive-shell.md) for keys, views, and the
+`NO_COLOR`/80×24 behavior.
 
 ## Plan stage — `agent-quorum plan [flags] <plan.md>`
 
