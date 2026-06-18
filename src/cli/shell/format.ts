@@ -1,4 +1,9 @@
-const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, 'g');
+// OSC 8 hyperlink wrapper, terminated by BEL or ST (ESC \). Stripped so width
+// math counts only the visible link text, never the URI bytes.
+const OSC8_PATTERN = new RegExp(`${ESC}\\]8;[^${ESC}${BEL}]*(?:${BEL}|${ESC}\\\\)`, 'g');
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -7,7 +12,7 @@ const RELATIVE_DAYS = 7;
 const ISO_DATE_LENGTH = 10;
 
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, '');
+  return text.replace(ANSI_PATTERN, '').replace(OSC8_PATTERN, '');
 }
 
 // Width in terminal cells, assuming each post-strip code unit is a single BMP

@@ -14,6 +14,7 @@ import {
   BOLD,
   DIM,
   GLYPH,
+  link,
   paint,
   RESET,
   REVERSE,
@@ -177,5 +178,29 @@ describe('theme — palette parameters (AC-15)', () => {
       expect(glyph.length).toBe(1);
       expect(glyph.codePointAt(0) ?? 0).toBeLessThanOrEqual(0xffff);
     }
+  });
+});
+
+describe('format/theme — OSC 8 hyperlinks', () => {
+  const OSC = `${ESC}]8;;`;
+  const ST = `${ESC}\\`;
+
+  it('wraps text in an OSC 8 link when color is on and leaves it bare when off', () => {
+    expect(link('run.log', 'file:///x/run.log', false)).toBe('run.log');
+    expect(link('run.log', 'file:///x/run.log', true)).toBe(
+      `${OSC}file:///x/run.log${ST}run.log${OSC}${ST}`,
+    );
+  });
+
+  it('strips OSC 8 sequences so only the visible text and its width remain', () => {
+    const linked = link('run.log', 'file:///very/long/path/run.log', true);
+    expect(stripAnsi(linked)).toBe('run.log');
+    expect(visibleWidth(linked)).toBe('run.log'.length);
+  });
+
+  it('strips a link nested inside an SGR span', () => {
+    const nested = `${ESC}[2m${link('name', 'file:///a/b/name', true)}${ESC}[0m`;
+    expect(stripAnsi(nested)).toBe('name');
+    expect(visibleWidth(nested)).toBe('name'.length);
   });
 });

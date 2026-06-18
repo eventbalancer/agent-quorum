@@ -2,18 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { DashboardGroup, RunDetailView, RunRow } from '../../src/cli/shell/data.js';
 import type { RunRecord, RunState } from '../../src/core/run-store.js';
 import { initialState, type ShellState } from '../../src/cli/shell/model.js';
+import { stripAnsi } from '../../src/cli/shell/format.js';
 import { DEFAULT_VIEWPORT, render, type Viewport } from '../../src/cli/shell/render.js';
 import { ACCENT, GLYPH, STATUS_STYLES } from '../../src/cli/shell/theme.js';
 
 const ESC = String.fromCharCode(27);
-const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-9;]*m`, 'g');
 const VP60: Viewport = { cols: 60, rows: 20 };
 const NOW = Date.parse('2026-06-18T12:00:00Z');
 const DAY = 24 * 60 * 60 * 1000;
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, '');
-}
 
 function agoIso(ms: number): string {
   return new Date(NOW - ms).toISOString();
@@ -223,6 +219,52 @@ describe('render — detail path shortening and failure surfacing (AC-6, AC-9)',
     const unavailableIdx = lines.findIndex((line) => line.includes('process info unavailable'));
     expect(processIdx).toBeGreaterThanOrEqual(0);
     expect(unavailableIdx).toBeGreaterThan(processIdx);
+  });
+});
+
+describe('render — clickable detail paths (OSC 8)', () => {
+  const rec = record({ workDir: '/a/b/c/myrun', logPath: '/a/b/c/myrun/run.log' });
+
+  it('shows the basename as an OSC 8 link to the full path when color is on', () => {
+    const frame = render(detailState(detailView({ record: rec })), DEFAULT_VIEWPORT, {
+      color: true,
+      now: NOW,
+    });
+    expect(frame).toContain(`${ESC}]8;;file:///a/b/c/myrun${ESC}\\`);
+    expect(frame).toContain(`${ESC}]8;;file:///a/b/c/myrun/run.log${ESC}\\`);
+    const visible = stripAnsi(frame);
+    expect(visible).toContain('work: myrun');
+    expect(visible).toContain('log:  run.log');
+    expect(visible).not.toContain('/a/b/c');
+  });
+
+  it('shows the full path with no link when color is off', () => {
+    const frame = render(detailState(detailView({ record: rec })), DEFAULT_VIEWPORT, {
+      color: false,
+      now: NOW,
+    });
+    expect(frame).not.toContain(`${ESC}]8;;`);
+    expect(frame).toContain('work: /a/b/c/myrun');
+  });
+
+  it('keeps the colored detail frame within the viewport', () => {
+    const frame = render(detailState(detailView({ record: rec })), DEFAULT_VIEWPORT, {
+      color: true,
+      now: NOW,
+    });
+    fits(frame, DEFAULT_VIEWPORT);
+  });
+
+  it('linkifies an absolute path embedded in the last event', () => {
+    const detail = detailView({ lastEvent: 'done. summary: /a/b/c/myrun/summary.md' });
+    const colored = render(detailState(detail), DEFAULT_VIEWPORT, { color: true, now: NOW });
+    expect(colored).toContain(`${ESC}]8;;file:///a/b/c/myrun/summary.md${ESC}\\`);
+    const visible = stripAnsi(colored);
+    expect(visible).toContain('Last event: done. summary: summary.md');
+    expect(visible).not.toContain('/a/b/c/myrun/summary.md');
+
+    const mono = render(detailState(detail), DEFAULT_VIEWPORT, { color: false, now: NOW });
+    expect(mono).toContain('/a/b/c/myrun/summary.md');
   });
 });
 

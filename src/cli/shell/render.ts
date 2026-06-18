@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { RunState } from '../../core/run-store.js';
 import type { RunDetailView, RunRow } from './data.js';
 import type { ShellState } from './model.js';
@@ -11,7 +13,7 @@ import {
   truncateName,
   visibleWidth,
 } from './format.js';
-import { ACCENT, bold, dim, GLYPH, paint, reverse, STATUS_STYLES } from './theme.js';
+import { ACCENT, bold, dim, GLYPH, link, paint, reverse, STATUS_STYLES } from './theme.js';
 
 export interface Viewport {
   readonly cols: number;
@@ -142,6 +144,28 @@ function dashboardBody(state: ShellState, cols: number, color: boolean, now: num
   return lines;
 }
 
+function fileUrl(absPath: string): string {
+  return pathToFileURL(absPath).href;
+}
+
+function linkedPathBasename(absPath: string): string {
+  return link(basename(absPath), fileUrl(absPath), true);
+}
+
+function detailPathLine(prefix: string, absPath: string, room: number, color: boolean): string {
+  const pathText = color ? linkedPathBasename(absPath) : middleEllipsis(absPath, room);
+  return dim(`${prefix}${pathText}`, color);
+}
+
+const ABSOLUTE_PATH_TOKEN_PATTERN = /\/\S+/g;
+
+function linkifyAbsolutePaths(text: string, color: boolean): string {
+  if (!color) {
+    return text;
+  }
+  return text.replace(ABSOLUTE_PATH_TOKEN_PATTERN, linkedPathBasename);
+}
+
 function detailBody(detail: RunDetailView, cols: number, color: boolean): string[] {
   const { record } = detail;
   const style = STATUS_STYLES[detail.state];
@@ -154,13 +178,17 @@ function detailBody(detail: RunDetailView, cols: number, color: boolean): string
     record.endedAt !== undefined
       ? `started ${record.startedAt}  ended ${record.endedAt}`
       : `started ${record.startedAt}`;
-  const eventText = `Last event: ${detail.lastEvent === '' ? GLYPH.absent : detail.lastEvent}`;
+  const eventBody = linkifyAbsolutePaths(
+    detail.lastEvent === '' ? GLYPH.absent : detail.lastEvent,
+    color,
+  );
+  const eventText = `Last event: ${eventBody}`;
   const isFailureState = detail.state === 'failed' || detail.state === 'blocked';
   const lines: string[] = [
     `${bold(record.name, color)}  ${badge}`,
     dim(`runId: ${record.runId}`, color),
-    dim(`${workPrefix}${middleEllipsis(record.workDir, workRoom)}`, color),
-    dim(`${logPrefix}${middleEllipsis(record.logPath, logRoom)}`, color),
+    detailPathLine(workPrefix, record.workDir, workRoom, color),
+    detailPathLine(logPrefix, record.logPath, logRoom, color),
     dim(timing, color),
     `artifacts: plan.final=${detail.artifacts.planFinal ? GLYPH.present : GLYPH.absent}  summary=${detail.artifacts.summary ? GLYPH.present : GLYPH.absent}  iterations=${detail.iterations}`,
     `interventions: total=${detail.interventions.total} active=${detail.interventions.active} migrated=${detail.interventions.migrated}`,

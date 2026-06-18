@@ -49,8 +49,7 @@ first within each group. Each row is laid out in aligned columns: a selection
 cursor (`❯`), a color-coded status glyph and label
 (running/finished/failed/blocked), the run name, the short run id, and a relative
 time (`just now`, `Nm`/`Nh`/`Nd ago`, then a `YYYY-MM-DD` date past a week). The
-work path is **not** shown in the list — it lives in the run detail,
-middle-shortened when it is too long for the available width.
+work path is **not** shown in the list — it lives in the run detail.
 
 | Key              | Action                          |
 | ---------------- | ------------------------------- |
@@ -63,7 +62,9 @@ middle-shortened when it is too long for the available width.
 ### Run detail
 
 `Enter` on a run opens its detail: a status badge (glyph + colored label), the
-record header with absolute ISO timestamps, middle-shortened work/log paths,
+record header with absolute ISO timestamps, work/log paths (a color terminal
+shows the basename as a clickable OSC 8 link to the full path; mono/`NO_COLOR`
+falls back to the full path, middle-shortened to fit),
 artifact presence (`plan.final.md`, `summary.md`), iteration count,
 operator-intervention status, and the latest `run.log` event — painted in the
 status color for a `failed`/`blocked` run. While the detail is still loading it

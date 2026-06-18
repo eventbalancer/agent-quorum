@@ -54,3 +54,14 @@ export function dim(text: string, color: boolean): string {
 export function reverse(text: string, color: boolean): string {
   return paint(text, REVERSE, color);
 }
+
+const OSC8 = '\x1b]8;;';
+const OSC8_ST = '\x1b\\';
+const OSC8_CLOSE = `${OSC8}${OSC8_ST}`;
+
+export function link(text: string, target: string, color: boolean): string {
+  if (!color) {
+    return text;
+  }
+  return `${OSC8}${target}${OSC8_ST}${text}${OSC8_CLOSE}`;
+}
