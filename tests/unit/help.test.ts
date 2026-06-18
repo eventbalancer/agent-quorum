@@ -50,11 +50,11 @@ describe('help text', () => {
   it('globalHelp embeds defaults from a readable config', () => {
     writeFileSync(
       path.join(tmp, 'config.json'),
-      JSON.stringify({ settings: { iters: 9, effort: 'max', fix: false, translate: true } }),
+      JSON.stringify({ settings: { iters: 9, quality: 'thorough', fix: false, translate: true } }),
     );
     const help = withEnv({ AGENT_QUORUM_HOME: tmp }, () => globalHelp(STAGE_SUMMARIES));
     expect(help).toContain('usage: agent-quorum');
-    expect(help).toContain('defaults: iters=9 effort=max fix=off translate=on');
+    expect(help).toContain('defaults: iters=9 quality=thorough fix=off translate=on');
     expect(help).toContain('(from agent-quorum config store)');
   });
 
@@ -68,6 +68,6 @@ describe('help text', () => {
   it('globalHelp shows built-in defaults when the store has no settings', () => {
     writeFileSync(path.join(tmp, 'config.json'), '{}');
     const help = withEnv({ AGENT_QUORUM_HOME: tmp }, () => globalHelp(STAGE_SUMMARIES));
-    expect(help).toContain('defaults: iters=5 effort=high fix=on');
+    expect(help).toContain('defaults: iters=5 quality=balanced fix=on');
   });
 });

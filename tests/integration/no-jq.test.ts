@@ -78,8 +78,8 @@ describe('no jq/ajv/rg prerequisites (AC-9)', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),

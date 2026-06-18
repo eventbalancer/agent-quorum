@@ -61,7 +61,7 @@ async function launchHangingRun(
   writeStructuredPlanFile(input, `Run ${name}`);
   const pidBase = path.join(tmp, `${name}.codex.pid`);
   const result = runCli(
-    ['launch', '--effort', 'low', '--iters', '1', input, '--no-fix', '--no-translate'],
+    ['launch', '--quality', 'quick', '--iters', '1', input, '--no-fix', '--no-translate'],
     {
       PATH: `${fake}:${process.env.PATH ?? ''}`,
       AGENT_QUORUM_HOME: path.join(tmp, 'home'),
@@ -188,7 +188,7 @@ describe('launch + status', () => {
         logPath: path.join(tmp, 'plans', 'loop-tokendecoy', 'run.log'),
         plansDir: path.join(tmp, 'plans'),
         startedAt: '2026-01-01T00:00:00Z',
-        effort: 'low',
+        quality: 'quick',
         state: 'running',
       })}\n`,
     );

@@ -26,7 +26,7 @@ async function main(): Promise<number> {
   const result = await runPlanLoop({
     input,
     prompt: true, // treat the input as a task prompt, not an existing plan
-    effort: 'high',
+    quality: 'balanced',
     iters: 3,
   });
 

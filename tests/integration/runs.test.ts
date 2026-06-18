@@ -24,7 +24,7 @@ function draft(name: string, workDir: string, startedAt: string): RunRecordDraft
     logPath: path.join(workDir, 'run.log'),
     plansDir: path.join(tmp, 'plans'),
     startedAt,
-    effort: 'low',
+    quality: 'quick',
     state: 'running',
   };
 }

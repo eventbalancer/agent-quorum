@@ -47,7 +47,7 @@ The prompt describes the problem, not the solution. It loads the downstream
 agent with verified context — symptoms, prior attempts, constraints, relevant
 docs — and specifies the result contract. It avoids step-by-step reasoning
 scaffolding, verbosity controls, and self-critique boilerplate; reasoning depth
-is controlled by the `agent-quorum` effort setting.
+is controlled by the `agent-quorum` quality setting.
 
 ## Modes
 
@@ -203,7 +203,7 @@ Extract:
 - known facts, prior attempts, hypotheses;
 - unknowns the responder must resolve;
 - closest Pattern Registry match;
-- useful iteration budget for Low/High/Max profiles.
+- useful iteration budget for Quick/Balanced/Thorough profiles.
 
 If too vague to determine a domain, return to catalog mode.
 
@@ -312,32 +312,32 @@ After saving, output in the operator's conversation language:
 1. `Saved to <absolute path>`.
 2. `Run profiles (quality -> speed):`.
 3. A Markdown table: `Profile | Speed | Quality | Iters | Use when`.
-4. One labeled `sh` fenced block per profile, ordered Max, High, Low. Each block
-   contains exactly one single-line command.
+4. One labeled `sh` fenced block per profile, ordered Thorough, Balanced, Quick.
+   Each block contains exactly one single-line command.
 5. A structured confirmation question when available, otherwise a plain question
-   in the operator's conversation language, with choices: launch Max, launch
-   High, launch Low, or do not launch.
+   in the operator's conversation language, with choices: launch Thorough, launch
+   Balanced, launch Quick, or do not launch.
 
 Resolve paths for conversation output:
 
 - prompt path: absolute under `<repo>/.agents/prompts/`;
 - repo path: absolute path to this repository;
-- workdirs: absolute paths under `<repo>/.agents/plans/loop-<slug>-<effort>`.
+- workdirs: absolute paths under `<repo>/.agents/plans/loop-<slug>-<quality>`.
 
 Before commands, choose iteration caps:
 
-- narrow, well-bounded tasks: Low 2, High 3, Max 5;
-- standard repo-local design/debug/review tasks: Low 3, High 5, Max 8;
+- narrow, well-bounded tasks: Quick 2, Balanced 3, Thorough 5;
+- standard repo-local design/debug/review tasks: Quick 3, Balanced 5, Thorough 8;
 - public API, schema, provider/runtime, security, packaging, or high-risk
-  architecture tasks: Low 5, High 8, Max 12.
+  architecture tasks: Quick 5, Balanced 8, Thorough 12.
 
 Command template:
 
 ```sh
-cd <repo-absolute-path> && AGENT_QUORUM_WORK_DIR=<workdir-absolute-path> pnpm run plan:self -- --effort <effort> --iters <n> --prompt <prompt-absolute-path>
+cd <repo-absolute-path> && AGENT_QUORUM_WORK_DIR=<workdir-absolute-path> pnpm run plan:self -- --quality <quality> --iters <n> --prompt <prompt-absolute-path>
 ```
 
-Keep commands identical except `--effort`, `--iters`, and workdir suffix.
+Keep commands identical except `--quality`, `--iters`, and workdir suffix.
 
 Do not print the generated XML to the user. The saved prompt plus confirmation
 offer is the deliverable. Start the selected command only after explicit
@@ -366,20 +366,20 @@ Run profiles (quality -> speed):
 
 | Profile | Speed | Quality | Iters | Use when |
 |---|---:|---:|---:|---|
-| Max | Slowest | Highest | 8 | Final planning run when completeness matters more than speed. |
-| High | Medium | Highest | 5 | High-quality everyday planning run. |
-| Low | Fastest practical | Medium | 3 | Quick idea check. |
+| Thorough | Slowest | Highest | 8 | Final planning run when completeness matters more than speed. |
+| Balanced | Medium | Highest | 5 | High-quality everyday planning run. |
+| Quick | Fastest practical | Medium | 3 | Quick idea check. |
 
-Max:
+Thorough:
 
 ```sh
-cd /Users/<you>/agent-quorum && AGENT_QUORUM_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-max pnpm run plan:self -- --effort max --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
+cd /Users/<you>/agent-quorum && AGENT_QUORUM_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-thorough pnpm run plan:self -- --quality thorough --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
 ```
 
 Launch `agent-quorum` now?
 
-- Max: most complete run.
-- High: high-quality everyday run.
-- Low: fast run.
+- Thorough: most complete run.
+- Balanced: high-quality everyday run.
+- Quick: fast run.
 - Do not launch: save the prompt without launching.
 ````

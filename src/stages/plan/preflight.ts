@@ -1,27 +1,8 @@
-import { accessSync, constants, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import path from 'node:path';
 import { log } from '../../runtime/log.js';
 import { RUNNER_META } from '../../providers/registry.js';
+import { commandExists } from '../../core/runner-detect.js';
 import type { Runner } from '../../types.js';
-
-export function commandExists(name: string): boolean {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    if (dir === '') {
-      continue;
-    }
-    const candidate = path.join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) {
-        return true;
-      }
-    } catch {
-      /* keep scanning */
-    }
-  }
-  return false;
-}
 
 const PROBE_TIMEOUT_MS = 3000;
 

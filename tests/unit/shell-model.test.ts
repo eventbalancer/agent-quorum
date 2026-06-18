@@ -22,7 +22,7 @@ function record(overrides: Partial<RunRecord> = {}): RunRecord {
     logPath: '/tmp/work/run.log',
     plansDir: '/tmp/plans',
     startedAt: '2026-06-13T00:00:00Z',
-    effort: 'high',
+    quality: 'balanced',
     state: 'running',
     ...overrides,
   };
@@ -170,7 +170,7 @@ describe('reduce — launch form and key precedence', () => {
     expect(reduce(launching.state, key({ kind: 'ctrl-c' })).effect).toEqual({ kind: 'quit' });
   });
 
-  it('moves focus, toggles, cycles effort, and submits a launch effect', () => {
+  it('moves focus, toggles, cycles quality, and submits a launch effect', () => {
     let state: ShellState = { ...initialState, view: 'launch' };
     state = reduce(state, key({ kind: 'char', value: 'p' })).state; // input = 'p'
     state = reduce(state, key({ kind: 'tab' })).state; // field 1 = mode
@@ -178,8 +178,8 @@ describe('reduce — launch form and key precedence', () => {
     expect(state.launch.promptMode).toBe(true);
 
     state = { ...state, launch: { ...state.launch, field: 4 } };
-    state = reduce(state, key({ kind: 'space' })).state; // effort default → low
-    expect(state.launch.effort).toBe('low');
+    state = reduce(state, key({ kind: 'space' })).state; // quality default → quick
+    expect(state.launch.quality).toBe('quick');
 
     const submit = reduce(state, key({ kind: 'enter' }));
     expect(submit.effect).toEqual({ kind: 'launch', form: state.launch });

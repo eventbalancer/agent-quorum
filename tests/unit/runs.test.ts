@@ -32,7 +32,7 @@ function seed(name: string, withLog: boolean): string {
     logPath: path.join(workDir, 'run.log'),
     plansDir: path.join(tmp, 'plans'),
     startedAt: '2026-06-13T00:00:00Z',
-    effort: 'low',
+    quality: 'quick',
     state: 'running',
   };
   const record = writeRunRecord(stateDir, draft);

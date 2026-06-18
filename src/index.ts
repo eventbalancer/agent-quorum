@@ -21,10 +21,10 @@ import {
   type RetentionPolicy,
   type RunRecord,
 } from './core/run-store.js';
-import type { Effort, RunOverrides } from './types.js';
+import type { Quality, RunOverrides } from './types.js';
 
 export { ExitCode } from './exit-codes.js';
-export type { Effort, Role, RunMode, RunOverrides, Runner } from './types.js';
+export type { Quality, Role, RunMode, RunOverrides, Runner } from './types.js';
 export type { DeepPartial, OperatorConfig, ResolvedConfig, Secrets } from './core/config.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
 export {
@@ -57,7 +57,7 @@ export interface RunPlanLoopOptions {
   input: string;
   prompt?: boolean;
   iters?: number;
-  effort?: Effort;
+  quality?: Quality;
   fix?: boolean;
   translate?: boolean;
   locale?: string;
@@ -108,15 +108,15 @@ export interface LaunchResult extends CommandResult {
   logPath?: string;
 }
 
-export type InterventionTarget = 'all' | 'critic' | 'creator' | 'fixer' | 'reviewer';
+export type InterventionTarget = 'all' | 'creator' | 'critic' | 'fixer' | 'reviewer';
 
 function commonArgs(options: RunPlanLoopOptions): string[] {
   const args: string[] = [];
   if (options.iters !== undefined) {
     args.push('--iters', String(options.iters));
   }
-  if (options.effort !== undefined) {
-    args.push('--effort', options.effort);
+  if (options.quality !== undefined) {
+    args.push('--quality', options.quality);
   }
   if (options.fix === true) {
     args.push('--fix');
@@ -242,7 +242,9 @@ export async function launchPlanLoop(options: LaunchPlanLoopOptions): Promise<La
 // Status snapshot: a pid (any process in the run's tree) or no query to list
 // every currently running agent-quorum run.
 export function getRunStatus(query?: number): CommandResult {
-  return captureCommand((write) => runStatusCli(query === undefined ? [] : [String(query)], write));
+  return captureCommand((write) => {
+    return runStatusCli(query === undefined ? [] : [String(query)], write);
+  });
 }
 
 // Append an operator intervention to a run's ledger.
@@ -251,9 +253,9 @@ export function addIntervention(
   message: string,
   target: InterventionTarget = 'all',
 ): CommandResult {
-  return captureCommand((write) =>
-    runInterveneCli(['--work', workDir, '--target', target, '--', message], write),
-  );
+  return captureCommand((write) => {
+    return runInterveneCli(['--work', workDir, '--target', target, '--', message], write);
+  });
 }
 
 function lookupStateDir(options?: RunLookupOptions): string {

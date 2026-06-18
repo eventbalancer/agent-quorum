@@ -72,7 +72,7 @@ function previousCritiquesBlock(ctx: RunContext, iter: number): string {
       log(`WARNING: skipping invalid previous critique: ${path.basename(file)}`);
       continue;
     }
-    if (ctx.effort.previousCritiques === 'compact') {
+    if (ctx.quality.previousCritiques === 'compact') {
       block += `### ${path.basename(file)} compact\n${compactCritiqueFile(file)}\n\n`;
     } else {
       block += `### ${path.basename(file)}\n${readStripped(file)}\n\n`;
@@ -83,7 +83,7 @@ function previousCritiquesBlock(ctx: RunContext, iter: number): string {
 
 export function criticPrompt(ctx: RunContext, iter: number, planFile: string): string {
   const prevCritiques = previousCritiquesBlock(ctx, iter);
-  const topology = topologyContext(ctx.provider.projectRoot, ctx.effort.topology);
+  const topology = topologyContext(ctx.provider.projectRoot, ctx.quality.topology);
   const interventions = operatorInterventionsContext(ctx.work, 'critic');
 
   const interventionsBlock = interventions !== '' ? `\n${interventions}` : '';

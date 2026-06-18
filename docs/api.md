@@ -27,7 +27,7 @@ import {
   type PruneResult,
   type Role,
   type Runner,
-  type Effort,
+  type Quality,
 } from 'agent-quorum';
 ```
 
@@ -65,7 +65,7 @@ const result = await runPlanLoop({
   input: 'my-plan.md', // plan file, or prompt file with prompt: true
   prompt: false,
   iters: 3,
-  effort: 'high', // 'low' | 'high' | 'max'
+  quality: 'balanced', // 'quick' | 'balanced' | 'thorough'
   fix: true,
   locale: 'ru', // optional; localizes Telegram interaction + final companion plan
   translate: false, // optional compatibility toggle
@@ -100,7 +100,7 @@ start surfaces report); they are additive on `RunResult`/`LaunchResult`.
 Artifacts land in the resolved workdir; for `home`/`workDir` the precedence is
 option > environment variable > default (`~/.agent-quorum` / `<home>/runs/loop-<name>`).
 Structured `config`/`secrets` resolve in the override tier (override > env >
-`<home>/config.json` > default); when a top-level scalar (`iters`/`effort`/`fix`/
+`<home>/config.json` > default); when a top-level scalar (`iters`/`quality`/`fix`/
 `translate`/`locale`) and the same path in `config` are both set, the top-level
 scalar wins. `home` relocates the whole artifact root (`runs/` + `state/`) without
 mutating `process.env`.
@@ -161,7 +161,7 @@ const result = addIntervention('/path/to/loop-task', 'prefer the staged rollout'
 // result.output: "recorded intervention: …/operator-interventions.jsonl id=op-… target=creator"
 ```
 
-`target` defaults to `'all'`; valid targets are `all | critic | creator |
+`target` defaults to `'all'`; valid targets are `all | creator | critic |
 fixer | reviewer` (the translator is deliberately exempt). `addIntervention`
 keeps its `(workDir, message, target?)` signature.
 

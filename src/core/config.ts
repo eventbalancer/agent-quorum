@@ -3,12 +3,13 @@ import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
 import { RUNNER_META, RUNNERS, STREAM_RUNNERS, isRunner } from '../providers/registry.js';
 import type { StreamingRunner } from '../providers/registry.js';
-import type { Role, Runner } from '../types.js';
+import type { Quality, Role, Runner } from '../types.js';
 import { DEFAULT_CONFIG } from './defaults.js';
+import { isQuality, reasoningFor } from './quality.js';
 import type { SplitMode } from './split-policy.js';
 import { readConfigStore, readSecretsStore } from './store.js';
 
-const PLAN_ROLES: readonly Role[] = ['critic', 'creator', 'fixer', 'reviewer', 'translator'];
+export const PLAN_ROLES: readonly Role[] = ['creator', 'critic', 'fixer', 'reviewer', 'translator'];
 
 export interface RoleMatrixEntry {
   runner: Runner;
@@ -31,16 +32,16 @@ export interface CreatorTools {
 }
 
 export interface RolePermissions {
-  critic: RoleTools;
-  reviewer: RoleTools;
-  fixer: RoleTools;
   creator: CreatorTools;
+  critic: RoleTools;
+  fixer: RoleTools;
+  reviewer: RoleTools;
   translator: RoleTools;
 }
 
 export interface CliSettings {
   maxIters?: string;
-  effort?: string;
+  quality?: string;
   fix?: string;
   translate?: string;
   locale?: string;
@@ -48,7 +49,7 @@ export interface CliSettings {
 
 export interface RunSettings {
   maxIters: number;
-  effort: string;
+  quality: Quality;
   fixPass: 0 | 1;
   translatePass: 0 | 1;
   locale: string;
@@ -89,7 +90,7 @@ const DEFAULT_LOCALE = 'en';
 // still produces the Russian companion plan the tool historically emitted.
 const LEGACY_TRANSLATE_LOCALE = 'ru';
 
-function normalizeLocale(raw: string): string {
+export function normalizeLocale(raw: string): string {
   const locale = raw.trim();
   if (locale === '') {
     return '';
@@ -100,7 +101,7 @@ function normalizeLocale(raw: string): string {
   return locale;
 }
 
-function localeNeedsTranslation(locale: string): boolean {
+export function localeNeedsTranslation(locale: string): boolean {
   return !/^en([._-]|$)/i.test(locale);
 }
 
@@ -122,13 +123,13 @@ export function resolveRolePermissions(resolved: ResolvedConfig): RolePermission
   const permissions = resolved.permissions;
   log('config: effective tool permissions:');
   log(
-    `  → critic: tools=${permissions.critic.tools} disallowed=${permissions.critic.disallowedTools}`,
-  );
-  log(
     `  → creator.create: tools=${permissions.creator.createTools} disallowed=${permissions.creator.createDisallowedTools}`,
   );
   log(
     `  → creator.update: tools=${permissions.creator.updateTools} disallowed=${permissions.creator.updateDisallowedTools}`,
+  );
+  log(
+    `  → critic: tools=${permissions.critic.tools} disallowed=${permissions.critic.disallowedTools}`,
   );
   log(
     `  → fixer: tools=${permissions.fixer.tools} disallowed=${permissions.fixer.disallowedTools}`,
@@ -143,7 +144,7 @@ export function resolveRolePermissions(resolved: ResolvedConfig): RolePermission
 }
 
 export function runnersInUse(matrix: RoleMatrix, fixPass: 0 | 1, translatePass: 0 | 1): Runner[] {
-  const roles: Role[] = ['critic', 'creator'];
+  const roles: Role[] = ['creator', 'critic'];
   if (fixPass === 1) {
     roles.push('fixer', 'reviewer');
   }
@@ -164,7 +165,7 @@ export type ToolField = string | readonly string[];
 
 export interface OperatorSettings {
   iters: number;
-  effort: string;
+  quality: string;
   fix: boolean;
   translate: boolean;
   locale: string;
@@ -176,7 +177,6 @@ export interface OperatorSettings {
 export interface OperatorRole {
   runner: Runner;
   model: string;
-  reasoning: string;
   tools?: ToolField;
   disallowedTools?: ToolField;
   createTools?: ToolField;
@@ -427,16 +427,22 @@ function resolveSettings(
     halt(`agent-quorum config: iters must be a positive integer (got '${maxItersRaw}')`);
   }
 
-  const effort = resolveStr(
+  const qualityRaw = resolveStr(
     prov,
-    'settings.effort',
+    'settings.quality',
     overrideThenStore(
-      overrideRaw(cli.effort, rawScalar(ov?.effort)),
+      overrideRaw(cli.quality, rawScalar(ov?.quality)),
       undefined,
-      rawScalar(store?.effort),
-      rawScalar(def.effort),
+      rawScalar(store?.quality),
+      rawScalar(def.quality),
     ),
   );
+  if (!isQuality(qualityRaw)) {
+    halt(
+      `agent-quorum config: settings.quality must be quick, balanced, or thorough (got '${qualityRaw}')`,
+    );
+  }
+  const quality = qualityRaw;
 
   const fixPass = parseBooleanSetting(
     selectRaw(
@@ -518,7 +524,7 @@ function resolveSettings(
 
   return {
     maxIters: Number(maxItersRaw),
-    effort,
+    quality,
     fixPass,
     translatePass: translate,
     locale,
@@ -569,6 +575,7 @@ function resolveLayeredTranslate(prov: Map<string, ConfigLayer>, layers: Layered
 
 function resolveMatrix(
   prov: Map<string, ConfigLayer>,
+  quality: Quality,
   ov: DeepPartial<OperatorRoles> | undefined,
   store: DeepPartial<OperatorRoles> | undefined,
   env: NodeJS.ProcessEnv,
@@ -605,17 +612,12 @@ function resolveMatrix(
         rawScalar(defRole.model),
       ),
     );
-    const reasoning = resolveStr(
-      prov,
-      `roles.${role}.reasoning`,
-      overrideThenStore(
-        rawScalar(ovRole?.reasoning),
-        env[`AGENT_QUORUM_${upper}_REASONING`],
-        rawScalar(storeRole?.reasoning),
-        rawScalar(defRole.reasoning),
-      ),
-    );
-    matrix[role] = { runner, model, reasoning };
+    const reasoning = reasoningFor(quality, runner, role);
+    matrix[role] = {
+      runner,
+      model,
+      reasoning,
+    };
   }
   return matrix as RoleMatrix;
 }
@@ -645,15 +647,13 @@ function resolvePermissions(
   store: DeepPartial<OperatorRoles> | undefined,
   def: OperatorRoles,
 ): RolePermissions {
-  const tools = (role: Role): RoleTools => ({
-    tools: resolveToolField(prov, role, 'tools', ov, store, def),
-    disallowedTools: resolveToolField(prov, role, 'disallowedTools', ov, store, def),
-  });
+  const tools = (role: Role): RoleTools => {
+    return {
+      tools: resolveToolField(prov, role, 'tools', ov, store, def),
+      disallowedTools: resolveToolField(prov, role, 'disallowedTools', ov, store, def),
+    };
+  };
   return {
-    critic: tools('critic'),
-    reviewer: tools('reviewer'),
-    fixer: tools('fixer'),
-    translator: tools('translator'),
     creator: {
       createTools: resolveToolField(prov, 'creator', 'createTools', ov, store, def),
       createDisallowedTools: resolveToolField(
@@ -674,6 +674,10 @@ function resolvePermissions(
         def,
       ),
     },
+    critic: tools('critic'),
+    fixer: tools('fixer'),
+    reviewer: tools('reviewer'),
+    translator: tools('translator'),
   };
 }
 
@@ -779,7 +783,7 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfigResult {
   const prov = new Map<string, ConfigLayer>();
 
   const settings = resolveSettings(prov, cli, ov.settings, store.settings, env, def.settings);
-  const matrix = resolveMatrix(prov, ov.roles, store.roles, env, def.roles);
+  const matrix = resolveMatrix(prov, settings.quality, ov.roles, store.roles, env, def.roles);
   const permissions = resolvePermissions(prov, ov.roles, store.roles, def.roles);
 
   const streamEntries = STREAM_RUNNERS.map((runner) => {
@@ -884,7 +888,17 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfigResult {
   };
 
   return {
-    config: { settings, matrix, permissions, knobs, split, retention, telegram, providers, status },
+    config: {
+      settings,
+      matrix,
+      permissions,
+      knobs,
+      split,
+      retention,
+      telegram,
+      providers,
+      status,
+    },
     provenance: prov,
   };
 }

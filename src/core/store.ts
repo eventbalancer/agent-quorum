@@ -134,7 +134,7 @@ function deepMergeJson(base: JsonObject, patch: JsonObject): JsonObject {
   return out;
 }
 
-// Additive so re-running init never discards operator-tuned or unknown keys.
+// Additive so re-running setup never discards operator-tuned or unknown keys.
 export function mergeConfigStore(home: string, patch: DeepPartial<OperatorConfig>): void {
   const existing = readConfigStore(home) as JsonObject;
   const merged = deepMergeJson(existing, patch as JsonObject);

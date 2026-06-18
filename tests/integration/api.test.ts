@@ -76,7 +76,7 @@ function liveDraft(name: string, store: string): RunRecordDraft {
     logPath: path.join(store, 'work', 'run.log'),
     plansDir: path.join(tmp, 'plans'),
     startedAt: '2026-06-15T00:00:00Z',
-    effort: 'low',
+    quality: 'quick',
     state: 'running',
   };
 }
@@ -134,7 +134,7 @@ describe('runPlanLoop (in-process)', () => {
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),
@@ -179,7 +179,7 @@ describe('runPlanLoop (in-process)', () => {
     const options = {
       input: path.join(tmp, 'input.md'),
       iters: 1,
-      effort: 'low' as const,
+      quality: 'quick' as const,
       fix: false,
       translate: false,
     };
@@ -207,7 +207,7 @@ describe('runPlanLoop (in-process)', () => {
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),
@@ -241,7 +241,7 @@ describe('runPlanLoop (in-process)', () => {
         runPlanLoop({
           input,
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: true,
           locale: 'pt-BR',
         }),
@@ -268,7 +268,7 @@ describe('runPlanLoop (in-process)', () => {
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),
@@ -286,7 +286,7 @@ describe('runPlanLoop (in-process)', () => {
       runPlanLoop({
         input: path.join(tmp, 'input.md'),
         iters: 1,
-        effort: 'low',
+        quality: 'quick',
         fix: false,
         translate: false,
       }),
@@ -307,7 +307,8 @@ describe('runPlanLoop (in-process)', () => {
     writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
     const result = await withEnvAsync(
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
-      () => runPlanLoop({ input: broken, iters: 1, effort: 'low', fix: false, translate: false }),
+      () =>
+        runPlanLoop({ input: broken, iters: 1, quality: 'quick', fix: false, translate: false }),
     );
     expect(result.exitCode).toBe(ExitCode.Blocked);
   });
@@ -372,7 +373,7 @@ describe('launchPlanLoop (in-process)', () => {
         launchPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),
@@ -426,7 +427,7 @@ describe('launchPlanLoop (in-process)', () => {
           input: prompt,
           prompt: true,
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
         }),
@@ -464,7 +465,7 @@ describe('typed workDir option (config via store)', () => {
         const run = await runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
           workDir: optWork,
@@ -501,7 +502,7 @@ describe('typed workDir option (config via store)', () => {
         const run = await launchPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
           workDir: optWork,
@@ -550,7 +551,7 @@ describe('library selector API', () => {
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
           home,
@@ -669,7 +670,7 @@ describe('structured config and secrets (P5)', () => {
           const run = await runPlanLoop({
             input: path.join(tmp, 'input.md'),
             iters: 1,
-            effort: 'low',
+            quality: 'quick',
             fix: false,
             translate: false,
             config: {
@@ -698,7 +699,7 @@ describe('structured config and secrets (P5)', () => {
         runPlanLoop({
           input: path.join(tmp, 'input.md'),
           iters: 1,
-          effort: 'low',
+          quality: 'quick',
           fix: false,
           translate: false,
           config: { settings: { iters: 9 } },
@@ -728,7 +729,7 @@ describe('launchPlanLoop secret handoff round-trip (P5)', () => {
           launchPlanLoop({
             input: path.join(tmp, 'input.md'),
             iters: 1,
-            effort: 'low',
+            quality: 'quick',
             fix: false,
             translate: false,
             config: { telegram: { chatId: '42' } },
@@ -773,7 +774,7 @@ describe('launchPlanLoop secret handoff round-trip (P5)', () => {
           launchPlanLoop({
             input: path.join(tmp, 'input.md'),
             iters: 1,
-            effort: 'low',
+            quality: 'quick',
             fix: false,
             translate: false,
           }),

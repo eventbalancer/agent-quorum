@@ -327,8 +327,8 @@ describe('network guard regression self-test', () => {
       const before = target.requestCount();
       const planCliArgs = [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -358,7 +358,7 @@ describe('network guard regression self-test', () => {
       const launchOptions = {
         input: path.join(tmp, 'input.md'),
         iters: 1,
-        effort: 'low',
+        quality: 'quick',
         fix: false,
         translate: false,
       } satisfies LaunchPlanLoopOptions;

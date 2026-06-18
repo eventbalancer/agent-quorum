@@ -40,7 +40,7 @@ describe('core run flag parsing', () => {
     expect(parseRunArgs(['--max-iters', '4', input]).cli.maxIters).toBe('4');
     expect(parseRunArgs(['--iters=2', input]).cli.maxIters).toBe('2');
     expect(parseRunArgs(['--max-iters=9', input]).cli.maxIters).toBe('9');
-    expect(parseRunArgs(['--effort=max', input]).cli.effort).toBe('max');
+    expect(parseRunArgs(['--quality=thorough', input]).cli.quality).toBe('thorough');
     expect(parseRunArgs(['--fix', input]).cli.fix).toBe('1');
     expect(parseRunArgs(['--translate', input]).cli.translate).toBe('1');
     expect(parseRunArgs(['--locale', 'ru', input]).cli.locale).toBe('ru');
@@ -55,7 +55,7 @@ describe('core run flag parsing', () => {
     expect(haltCode(() => parseRunArgs(['--iters', 'x', input]))).toBe(1);
     expect(capture.text()).toContain('--iters expects a positive integer');
     expect(haltCode(() => parseRunArgs(['--iters=x', input]))).toBe(1);
-    expect(haltCode(() => parseRunArgs(['--effort']))).toBe(1);
+    expect(haltCode(() => parseRunArgs(['--quality']))).toBe(1);
     expect(haltCode(() => parseRunArgs(['--locale']))).toBe(1);
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     expect(haltCode(() => parseRunArgs(['-h']))).toBe(0);
@@ -86,7 +86,7 @@ describe('intervene flag parsing', () => {
 describe('launch flag parsing', () => {
   it('rejects missing values with exit 2 and accepts pass-through flags', async () => {
     const codes: number[] = [];
-    for (const args of [['--iters'], ['--prompt'], ['--effort'], ['--locale'], ['x', 'y']]) {
+    for (const args of [['--iters'], ['--prompt'], ['--quality'], ['--locale'], ['x', 'y']]) {
       try {
         await runLaunchCli(args, () => undefined);
         codes.push(0);

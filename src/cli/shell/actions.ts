@@ -44,7 +44,7 @@ export interface StopDeps {
 }
 
 // Mirrors `commonArgs` (`src/index.ts:95-124`) plus the `--resume` prefix: one
-// input token (positional plan or `--prompt`), `--iters`/`--effort`/`--locale`
+// input token (positional plan or `--prompt`), `--iters`/`--quality`/`--locale`
 // only when set, and the tri-state `--fix`/`--translate` only when toggled off
 // the default.
 function buildLaunchArgs(form: LaunchForm, input: string): string[] {
@@ -60,8 +60,8 @@ function buildLaunchArgs(form: LaunchForm, input: string): string[] {
   if (form.iters !== '') {
     args.push('--iters', form.iters);
   }
-  if (form.effort !== 'default') {
-    args.push('--effort', form.effort);
+  if (form.quality !== 'default') {
+    args.push('--quality', form.quality);
   }
   if (form.fix === 'on') {
     args.push('--fix');

@@ -3,7 +3,7 @@ import { HaltError } from '../runtime/halt.js';
 import { findStage, stages } from '../stages/registry.js';
 import { globalHelp, packageVersion, type StageSummary } from './help.js';
 import { runConfigShowCli } from './config-show.js';
-import { runInitCli } from './init.js';
+import { runSetupCli } from './setup.js';
 import { runInterveneCli } from './intervene.js';
 import { runLaunchCli } from './launch.js';
 import { runLogsCli, runPruneCli, runShowCli } from './runs.js';
@@ -59,8 +59,8 @@ async function main(): Promise<number> {
       return runPruneCli(rest);
     case 'intervene':
       return runInterveneCli(rest);
-    case 'init':
-      return await runInitCli(rest);
+    case 'setup':
+      return await runSetupCli(rest);
     case 'config':
       return runConfigShowCli(rest);
     default: {

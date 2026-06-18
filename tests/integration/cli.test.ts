@@ -75,8 +75,8 @@ describe('exit-code matrix', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -106,8 +106,8 @@ describe('exit-code matrix', () => {
       const result = await runCliAsync(
         [
           'plan',
-          '--effort',
-          'low',
+          '--quality',
+          'quick',
           '--iters',
           '1',
           path.join(tmp, 'input.md'),
@@ -150,8 +150,8 @@ describe('exit-code matrix', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -172,8 +172,8 @@ describe('exit-code matrix', () => {
       const result = await runCliAsync(
         [
           'plan',
-          '--effort',
-          'low',
+          '--quality',
+          'quick',
           '--iters',
           '1',
           path.join(tmp, 'input.md'),
@@ -204,7 +204,17 @@ describe('exit-code matrix', () => {
     const empty = path.join(tmp, 'empty.md');
     writeFileSync(empty, '');
     const result = runCli(
-      ['plan', '--effort', 'low', '--iters', '1', '--prompt', prompt, '--no-fix', '--no-translate'],
+      [
+        'plan',
+        '--quality',
+        'quick',
+        '--iters',
+        '1',
+        '--prompt',
+        prompt,
+        '--no-fix',
+        '--no-translate',
+      ],
       baseEnv({ FAKE_CLAUDE_MARKDOWN_RESULT: empty }),
     );
     expect(result.status).toBe(4);
@@ -218,7 +228,7 @@ describe('exit-code matrix', () => {
       `${readFileSync(violating, 'utf8')}\n\`\`\`sh\npnpm -r test\n\`\`\`\n`,
     );
     const result = runCli(
-      ['plan', '--effort', 'low', '--iters', '1', violating, '--no-fix', '--no-translate'],
+      ['plan', '--quality', 'quick', '--iters', '1', violating, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(5);
@@ -229,7 +239,7 @@ describe('exit-code matrix', () => {
     const broken = path.join(tmp, 'broken.md');
     writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
     const result = runCli(
-      ['plan', '--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
+      ['plan', '--quality', 'quick', '--iters', '1', broken, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
     expect(result.status).toBe(6);
@@ -242,7 +252,7 @@ describe('exit-code matrix', () => {
       const broken = path.join(tmp, 'broken.md');
       writeFileSync(broken, '# Just a summary\n\n## Context\nNothing else.\n');
       const result = await runCliAsync(
-        ['plan', '--effort', 'low', '--iters', '1', broken, '--no-fix', '--no-translate'],
+        ['plan', '--quality', 'quick', '--iters', '1', broken, '--no-fix', '--no-translate'],
         telegramEnv(stub, {
           FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
         }),
@@ -279,8 +289,8 @@ describe('exit-code matrix', () => {
       const result = await runCliAsync(
         [
           'plan',
-          '--effort',
-          'low',
+          '--quality',
+          'quick',
           '--iters',
           '1',
           '--prompt',
@@ -388,8 +398,8 @@ describe('entry-point dispatch', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -420,8 +430,8 @@ describe('entry-point dispatch', () => {
       [
         'plan',
         '--',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -439,8 +449,8 @@ describe('runner auth preflight', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -462,8 +472,8 @@ describe('runner auth preflight', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -493,8 +503,8 @@ describe('default artifact root', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -530,8 +540,8 @@ describe('default artifact root', () => {
     const result = runCli(
       [
         'plan',
-        '--effort',
-        'low',
+        '--quality',
+        'quick',
         '--iters',
         '1',
         path.join(tmp, 'input.md'),
@@ -571,7 +581,7 @@ describe('--help / --version', () => {
     }
     const core = runCli(['--help'], baseEnv());
     expect(core.stdout).toContain('usage: agent-quorum');
-    expect(core.stdout).toContain('defaults: iters=4 effort=high fix=on translate=off');
+    expect(core.stdout).toContain('defaults: iters=4 quality=balanced fix=on translate=off');
   });
 
   it('--help inside plan args prints the run usage to stdout and exits 0', () => {
@@ -599,8 +609,8 @@ describe('--help / --version', () => {
 describe('detached-launch forwarding channel', () => {
   const planArgs = () => [
     'plan',
-    '--effort',
-    'low',
+    '--quality',
+    'quick',
     '--iters',
     '1',
     path.join(tmp, 'input.md'),

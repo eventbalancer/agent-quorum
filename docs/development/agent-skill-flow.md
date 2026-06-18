@@ -169,16 +169,16 @@ Use to compose the actual downstream planning prompt.
 Outputs:
 
 - `.agents/prompts/<slug>.md`;
-- Max/High/Low run profiles;
+- Thorough/Balanced/Quick run profiles;
 - an explicit launch confirmation question;
-- on approval, a run under `.agents/plans/loop-<slug>-<effort>/`.
+- on approval, a run under `.agents/plans/loop-<slug>-<quality>/`.
 
 Rules:
 
 - write a problem-first XML prompt;
 - keep requirements and plan bodies out of the prompt; reference their paths and
   tell the downstream agent to read them;
-- keep commands identical except for effort, iteration cap, and workdir suffix;
+- keep commands identical except for quality, iteration cap, and workdir suffix;
 - launch only after explicit confirmation.
 
 ### execute
@@ -255,8 +255,8 @@ pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 Useful options:
 
 ```sh
-pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
-AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-high pnpm run plan:self -- --effort high --iters 5 --prompt .agents/prompts/<slug>.md
+pnpm run plan:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
+AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-balanced pnpm run plan:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
 ```
 
 `plan:self` runs `src/cli/main.ts` via `tsx` — no build step — and writes run
@@ -277,17 +277,18 @@ pnpm run smoke:claude    # all roles on claude sonnet
 pnpm run smoke:cursor    # all roles on cursor composer-2.5
 ```
 
-Each is a single low-effort iteration with no fix or translate pass. A pass ends
-with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving `plan.final.md`
-and `summary.md` in the workdir. `smoke:claude` runs on `sonnet`: in `default`
+Each is a single quick-quality iteration with no fix or translate pass. A pass
+ends with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving
+`plan.final.md` and `summary.md` in the workdir. `smoke:claude` runs on
+`sonnet`: in `default`
 permission mode a cheap claude creator returns a complete plan, but the `haiku`
 critic still emits schema-invalid critique JSON, so `sonnet` is the smallest
 claude tier that turns the whole loop green (see the recommended creator-tier
-table in [`configuration.md`](../configuration.md)). Override the model,
-reasoning, or input:
+table in [`configuration.md`](../configuration.md)). Override the model or
+input:
 
 ```sh
-SMOKE_MODEL=sonnet SMOKE_REASONING=high pnpm run smoke:claude
+SMOKE_MODEL=sonnet pnpm run smoke:claude
 SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run smoke:codex
 ```
 

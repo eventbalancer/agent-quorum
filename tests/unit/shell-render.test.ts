@@ -28,7 +28,7 @@ function record(overrides: Partial<RunRecord> = {}): RunRecord {
     logPath: '/tmp/work/loop-demo/run.log',
     plansDir: '/tmp/plans',
     startedAt: '2026-06-13T00:00:00Z',
-    effort: 'high',
+    quality: 'balanced',
     state: 'running',
     ...overrides,
   };

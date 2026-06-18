@@ -15,12 +15,12 @@ const TOOL_DISALLOWED = [
 const READ_TOOLS = ['Read', 'Grep', 'Glob'];
 
 // Canonical non-secret defaults so the store is optional and resolution never
-// touches the package root. A mirror test keeps these in sync with agent-quorum.example.json.
+// touches the package root. A mirror test keeps these in sync with config.example.json.
 export const DEFAULT_CONFIG: OperatorConfig = {
   version: 1,
   settings: {
     iters: 5,
-    effort: 'high',
+    quality: 'balanced',
     fix: true,
     translate: false,
     locale: '',
@@ -29,40 +29,35 @@ export const DEFAULT_CONFIG: OperatorConfig = {
     retryDelaySeconds: 10,
   },
   roles: {
-    critic: {
-      runner: 'codex',
-      model: 'gpt-5.5',
-      reasoning: 'xhigh',
-      tools: READ_TOOLS,
-      disallowedTools: TOOL_DISALLOWED,
-    },
     creator: {
       runner: 'claude',
       model: 'claude-opus-4-8',
-      reasoning: 'xhigh',
       createTools: READ_TOOLS,
       createDisallowedTools: TOOL_DISALLOWED,
       updateTools: ['Read'],
       updateDisallowedTools: TOOL_DISALLOWED,
     },
+    critic: {
+      runner: 'codex',
+      model: 'gpt-5.5',
+      tools: READ_TOOLS,
+      disallowedTools: TOOL_DISALLOWED,
+    },
     fixer: {
       runner: 'codex',
       model: 'gpt-5.5',
-      reasoning: 'high',
       tools: READ_TOOLS,
       disallowedTools: TOOL_DISALLOWED,
     },
     reviewer: {
       runner: 'codex',
       model: 'gpt-5.5',
-      reasoning: 'high',
       tools: READ_TOOLS,
       disallowedTools: TOOL_DISALLOWED,
     },
     translator: {
       runner: 'codex',
       model: 'gpt-5.5',
-      reasoning: 'high',
       tools: READ_TOOLS,
       disallowedTools: TOOL_DISALLOWED,
     },
@@ -82,8 +77,16 @@ export const DEFAULT_CONFIG: OperatorConfig = {
       callTimeoutSeconds: 1800,
       semanticIdleTimeoutSeconds: 900,
     },
-    fixPass: { timeoutSeconds: 900, semanticIdleTimeoutSeconds: 900, retryCount: 1 },
-    translatePass: { timeoutSeconds: 900, semanticIdleTimeoutSeconds: 900, retryCount: 1 },
+    fixPass: {
+      timeoutSeconds: 900,
+      semanticIdleTimeoutSeconds: 900,
+      retryCount: 1,
+    },
+    translatePass: {
+      timeoutSeconds: 900,
+      semanticIdleTimeoutSeconds: 900,
+      retryCount: 1,
+    },
   },
   split: { mode: 'auto', minPhases: 5 },
   retention: { keepCount: 50, maxAgeDays: 30 },

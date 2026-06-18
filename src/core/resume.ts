@@ -11,11 +11,11 @@ export type ResumeWorkdirResult =
 export function resolveResumeWorkdir(
   plansDir: string,
   base: string,
-  effort = '',
+  quality = '',
 ): ResumeWorkdirResult {
   const candidates: string[] = [];
-  if (effort !== '') {
-    candidates.push(path.join(plansDir, `loop-${base}-${effort}`));
+  if (quality !== '') {
+    candidates.push(path.join(plansDir, `loop-${base}-${quality}`));
   }
   candidates.push(path.join(plansDir, `loop-${base}`));
   try {
@@ -45,13 +45,13 @@ export function resolveResumeWorkdir(
   if (existing.length === 0) {
     process.stderr.write(`resume: no existing workdir with state for ${base} under ${plansDir}\n`);
     process.stderr.write(
-      `  looked for loop-${base} and loop-${base}-<effort>; set AGENT_QUORUM_WORK_DIR to override\n`,
+      `  looked for loop-${base} and loop-${base}-<quality>; set AGENT_QUORUM_WORK_DIR to override\n`,
     );
     return { kind: 'none' };
   }
   if (existing.length > 1) {
-    if (effort !== '') {
-      const exact = path.join(plansDir, `loop-${base}-${effort}`);
+    if (quality !== '') {
+      const exact = path.join(plansDir, `loop-${base}-${quality}`);
       if (existing.includes(exact)) {
         return { kind: 'resolved', dir: exact };
       }

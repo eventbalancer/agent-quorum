@@ -54,7 +54,7 @@ function draft(overrides: Partial<RunRecordDraft> = {}): RunRecordDraft {
     logPath: path.join(stateDir, 'work', 'run.log'),
     plansDir: '/tmp/plans',
     startedAt: '2026-06-13T00:00:00Z',
-    effort: 'high',
+    quality: 'balanced',
     state: 'running',
     ...overrides,
   };

@@ -138,7 +138,7 @@ describe('iteration loop', () => {
     const empty = path.join(tmp, 'empty.json');
     emptyCritique(empty);
     const promptCapture = path.join(tmp, 'codex.prompt');
-    const ctx = makeContext({ effort: 'max', maxIters: 1 });
+    const ctx = makeContext({ quality: 'thorough', maxIters: 1 });
 
     await withEnvAsync(
       {
@@ -163,7 +163,7 @@ describe('iteration loop', () => {
     const empty = path.join(tmp, 'empty.json');
     emptyCritique(empty);
     const promptCapture = path.join(tmp, 'codex.prompt');
-    const ctx = makeContext({ effort: 'low', maxIters: 1 });
+    const ctx = makeContext({ quality: 'quick', maxIters: 1 });
 
     await withEnvAsync(
       {
@@ -213,7 +213,7 @@ describe('iteration loop', () => {
     expect(prompt).toContain('critic must check identity-aware convergence');
   });
 
-  it('split update produces revision, metadata, and combined update (effort high)', async () => {
+  it('split update produces revision, metadata, and combined update (quality balanced)', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, SINGLE_ISSUE);
@@ -241,7 +241,7 @@ describe('iteration loop', () => {
         2,
       )}\n`,
     );
-    const ctx = makeContext({ effort: 'high', maxIters: 2 });
+    const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
 
     await withEnvAsync(
       {
@@ -298,7 +298,7 @@ describe('iteration loop', () => {
         2,
       )}\n`,
     );
-    const ctx = makeContext({ effort: 'low', maxIters: 2 });
+    const ctx = makeContext({ quality: 'quick', maxIters: 2 });
 
     await withEnvAsync(
       {

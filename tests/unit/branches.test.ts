@@ -290,7 +290,7 @@ describe('critic prompt helpers', () => {
     ]);
     writeFileSync(path.join(work, 'critique.v1.json'), '{"not": "a critique"}\n');
     const scratch = Scratch.create('critic-branch');
-    const ctx = makeTestRunContext(tmp, work, scratch, { effort: 'low' });
+    const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'quick' });
     const capture = captureStderr();
     try {
       const prompt = criticPrompt(ctx, 2, plan);

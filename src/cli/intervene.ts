@@ -140,7 +140,7 @@ export function runInterveneCli(
     }
     work = resolved.workDir;
   }
-  if (!['all', 'critic', 'creator', 'fixer', 'reviewer'].includes(target)) {
+  if (!['all', 'creator', 'critic', 'fixer', 'reviewer'].includes(target)) {
     process.stderr.write(`invalid target: ${target}\n`);
     usage();
   }

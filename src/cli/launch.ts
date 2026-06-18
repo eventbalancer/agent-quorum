@@ -85,7 +85,7 @@ export async function runLaunchCli(
   let resume = false;
   const passArgs: string[] = [];
   let input = '';
-  let effortVal = '';
+  let qualityVal = '';
 
   let i = 0;
   while (i < args.length) {
@@ -114,18 +114,18 @@ export async function runLaunchCli(
         i += 2;
         break;
       }
-      case arg === '--effort': {
+      case arg === '--quality': {
         const value = args[i + 1];
         if (value === undefined || value === '') {
-          fail('--effort needs a value', 2);
+          fail('--quality needs a value', 2);
         }
-        effortVal = value;
-        passArgs.push('--effort', value);
+        qualityVal = value;
+        passArgs.push('--quality', value);
         i += 2;
         break;
       }
-      case arg.startsWith('--effort='):
-        effortVal = arg.slice('--effort='.length);
+      case arg.startsWith('--quality='):
+        qualityVal = arg.slice('--quality='.length);
         passArgs.push(arg);
         i += 1;
         break;
@@ -188,7 +188,7 @@ export async function runLaunchCli(
 
   let workOverride = overrides.workDir ?? process.env.AGENT_QUORUM_WORK_DIR;
   if (resume && (workOverride === undefined || workOverride === '')) {
-    const resolved = resolveResumeWorkdir(plansDir, base, effortVal);
+    const resolved = resolveResumeWorkdir(plansDir, base, qualityVal);
     if (resolved.kind === 'none') {
       throw new HaltError('resume: no workdir', 3, true);
     }
