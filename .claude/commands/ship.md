@@ -200,7 +200,7 @@ repository-local skill changes that do not publish a new npm version. A
    - **Code/config/scripts/tests**: `src/`, `tests/`, `scripts/`, configs,
      package metadata, CI.
    - **Public or runtime contract**: `src/index.ts`, `package.json` exports,
-     `agent-quorum` bin, CLI flags, config keys, `agent-quorum.json`,
+     `agent-quorum` bin, CLI flags, config keys, `config.example.json`,
      `skills/**/*.schema.json`, role prompts in `skills/`, or artifact shape.
 
 3. Reconcile documentation before verification when public names, paths, flags,

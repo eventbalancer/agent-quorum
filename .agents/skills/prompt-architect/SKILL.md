@@ -136,7 +136,7 @@ compact context only when it helps the matched pattern:
 2. `CLAUDE.md`: operating rules, especially public API and self-planning.
 3. `docs/architecture.md`, `docs/api.md`, `docs/cli.md`,
    `docs/configuration.md`: only the relevant sections.
-4. `agent-quorum.json`: default runner/model/role matrix if orchestration behavior
+4. `config.example.json`: default runner/model/role matrix if orchestration behavior
    is in scope.
 5. `skills/**/SKILL.md` and `skills/**/*.schema.json`: when role I/O or prompt
    contracts are in scope.
@@ -276,7 +276,7 @@ Conditional defaults:
 - **Plan fidelity** in plan mode: read the plan in full before work; surface
   divergences from live code instead of improvising replacements.
 - **Public contract care** when touching `src/index.ts`, `package.json`
-  `exports`, CLI flags, config keys, `agent-quorum.json`, or `skills/**/*.schema.json`.
+  `exports`, CLI flags, config keys, `config.example.json`, or `skills/**/*.schema.json`.
 
 Constraint budget: at most 6 bullets total.
 

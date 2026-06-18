@@ -87,7 +87,7 @@ Check the relevant surfaces:
 
 - CLI behavior: `src/cli/*`, `docs/cli.md`, `package.json` `bin` and scripts.
 - Public API: `src/index.ts`, `docs/api.md`, `package.json` `exports`.
-- Configuration: `agent-quorum.json`, `src/core/config.ts`,
+- Configuration: `config.example.json`, `src/core/config.ts`,
   `docs/configuration.md`.
 - Orchestration: `src/core/*`, `docs/architecture.md`.
 - Providers and watchdogs: `src/providers/*`, `src/runtime/*`.

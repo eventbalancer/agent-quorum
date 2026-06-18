@@ -207,7 +207,7 @@ Do not report success until this gate is complete.
 3. **Triage every hit.** For each match, update the documentation or record why
    it is unaffected. Relevant locations include `README.md`, `docs/`,
    `AGENTS.md`, `CLAUDE.md`, `.agents/skills/`, `.claude/commands/`, `skills/`,
-   `agent-quorum.json`, and schema files. Do not add new documentation just to
+   `config.example.json`, and schema files. Do not add new documentation just to
    document the tidy; only keep existing docs accurate.
 
 4. **Gate completion.** If the corpus is non-empty and any term was not searched
