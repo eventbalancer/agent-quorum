@@ -13,6 +13,11 @@ function writeFilterLines(filter: StreamLogFilter, line: string): void {
   }
 }
 
+// Codex accepts reasoning up to 'xhigh'; 'max' is a claude-only tier.
+function clampCodexReasoning(reasoning: string): string {
+  return reasoning === 'max' ? 'xhigh' : reasoning;
+}
+
 function codexArgs(
   model: string,
   reasoning: string,
@@ -30,7 +35,7 @@ function codexArgs(
     '-m',
     model,
     '-c',
-    `model_reasoning_effort="${reasoning}"`,
+    `model_reasoning_effort="${clampCodexReasoning(reasoning)}"`,
     '--output-schema',
     schemaPath,
     '-o',

@@ -133,7 +133,7 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   );
   const shape = planDocumentShapeHealth(finalPlan);
   lines.push(
-    `- final_plan_shape: missing_required_sections=${shape.missing}, impact_graph_mermaid=${shape.graph}`,
+    `- final_plan_shape: missing_required_sections=${shape.missing}, impact_graph_mermaid=${shape.graph}, frontmatter=${shape.frontmatter}`,
   );
   lines.push(
     `- final_references: stale=${input.finalStale}, ambiguous=${input.finalAmbiguous}, unresolved=${input.finalUnresolved}`,

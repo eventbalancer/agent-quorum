@@ -47,9 +47,9 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
 
 // Reasoning is derived from quality at runtime, never stored. The high tier
 // (critic) sits one rung above the base tier on a shared codex/claude ladder;
-// the creator tracks the high tier except at thorough, where it reaches max.
-// cursor ignores reasoning and warns on a non-empty value, so it always
-// resolves to ''.
+// at thorough both the critic (high) and creator (top) reach max — below
+// thorough the creator tracks the high tier. cursor ignores reasoning and
+// warns on a non-empty value, so it always resolves to ''.
 const TOP_TIER_ROLES: ReadonlySet<Role> = new Set<Role>(['creator']);
 const HIGH_TIER_ROLES: ReadonlySet<Role> = new Set<Role>(['critic']);
 
@@ -72,7 +72,7 @@ const REASONING_LADDER: Record<Quality, ReasoningLadderRung> = {
   },
   thorough: {
     base: 'high',
-    high: 'xhigh',
+    high: 'max',
     top: 'max',
   },
 };

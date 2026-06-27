@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   normalizePlanDocument,
   planDocumentShapeHealth,
+  planDocumentShapeOk,
   planFirstTitleLine,
+  planHasFrontmatter,
   planHasImpactGraphMermaid,
   planHasTitleHeading,
   requirePlanDocumentShape,
@@ -55,7 +57,7 @@ describe('plan shape gates', () => {
   it('plan_document_shape_health accepts structured plans', () => {
     const target = file('shape.md');
     writeStructuredPlanFile(target, 'Shape');
-    expect(planDocumentShapeHealth(target)).toEqual({ missing: 0, graph: 1 });
+    expect(planDocumentShapeHealth(target)).toEqual({ missing: 0, graph: 1, frontmatter: 1 });
   });
 
   it('exported plan_has_impact_graph_mermaid detects the mermaid block', () => {
@@ -104,7 +106,7 @@ describe('plan shape gates', () => {
   it('normalize_plan_document splits an inline title glued to line 1 preamble', () => {
     const target = file('inline-title.md');
     const body = file('inline-body.md');
-    writeStructuredPlanFile(body, 'Inline Title');
+    writeStructuredPlanFile(body, 'Inline Title', { frontmatter: false });
     writeFileSync(
       target,
       `Reviewing repository structure before creating the plan.${readFileSync(body, 'utf8')}`,
@@ -116,7 +118,7 @@ describe('plan shape gates', () => {
     expect(planHasTitleHeading(target)).toBe(true);
     expect(readFileSync(target, 'utf8')).not.toContain('Reviewing repository structure');
     expect(readFileSync(`${target}.raw`, 'utf8')).toContain('Reviewing repository structure');
-    expect(requireShapeStatus(target)).toBe(0);
+    expect(planDocumentShapeHealth(target).frontmatter).toBe(0);
   });
 
   it('normalize_plan_document is a no-op on a clean plan', () => {
@@ -128,6 +130,108 @@ describe('plan shape gates', () => {
 
     expect(existsSync(`${target}.raw`)).toBe(false);
     expect(readFileSync(target, 'utf8')).toBe(before);
+  });
+
+  it('frontmatter-first structured plan passes the gate', () => {
+    const target = file('fm-pass.md');
+    writeStructuredPlanFile(target, 'FM Pass');
+
+    expect(planHasTitleHeading(target)).toBe(true);
+    expect(planHasFrontmatter(target)).toBe(true);
+    expect(planDocumentShapeHealth(target)).toEqual({ missing: 0, graph: 1, frontmatter: 1 });
+    normalizeQuiet(target);
+    expect(existsSync(`${target}.raw`)).toBe(false);
+    expect(requireShapeStatus(target)).toBe(0);
+  });
+
+  it('plan with frontmatter removed fails the gate', () => {
+    const target = file('fm-removed.md');
+    writeStructuredPlanFile(target, 'FM Removed');
+    const content = readFileSync(target, 'utf8');
+    const withoutFrontmatter = content.replace(/^---\n[\s\S]*?\n---\n\n/, '');
+    writeFileSync(target, withoutFrontmatter);
+
+    expect(planHasFrontmatter(target)).toBe(false);
+    expect(planDocumentShapeHealth(target).frontmatter).toBe(0);
+    expect(requireShapeStatus(target)).toBe(4);
+  });
+
+  it('preamble + clean frontmatter + title: normalize preserves frontmatter and passes gate', () => {
+    const target = file('fm-preamble.md');
+    const body = file('fm-preamble-body.md');
+    writeStructuredPlanFile(body, 'Preamble FM');
+    writeFileSync(target, `Agent preamble text.\n\n${readFileSync(body, 'utf8')}`);
+
+    normalizeQuiet(target);
+
+    expect(existsSync(`${target}.raw`)).toBe(true);
+    expect(planHasTitleHeading(target)).toBe(true);
+    expect(planHasFrontmatter(target)).toBe(true);
+    expect(requireShapeStatus(target)).toBe(0);
+  });
+
+  it('frontmatter with out-of-enum status fails the gate', () => {
+    const target = file('fm-bad-status.md');
+    writeStructuredPlanFile(target, 'Bad Status');
+    const content = readFileSync(target, 'utf8');
+    writeFileSync(target, content.replace('status: clean', 'status: done'));
+
+    expect(planHasFrontmatter(target)).toBe(false);
+    expect(planDocumentShapeHealth(target).frontmatter).toBe(0);
+    expect(requireShapeStatus(target)).toBe(4);
+  });
+
+  it('frontmatter with non-integer phase_count fails the gate', () => {
+    const target = file('fm-bad-count.md');
+    writeStructuredPlanFile(target, 'Bad Count');
+    const content = readFileSync(target, 'utf8');
+    writeFileSync(target, content.replace('phase_count: 1', 'phase_count: many'));
+
+    expect(planHasFrontmatter(target)).toBe(false);
+    expect(planDocumentShapeHealth(target).frontmatter).toBe(0);
+    expect(requireShapeStatus(target)).toBe(4);
+  });
+
+  it('CRLF frontmatter-first plan passes the gate (CRLF tolerance)', () => {
+    const target = file('fm-crlf.md');
+    const sections = [
+      'At a Glance',
+      'Context',
+      'Verified Facts',
+      'Target State',
+      'Scope',
+      'Work Plan',
+      'Files and Interfaces',
+      'Verification',
+      'STOP Triggers',
+    ];
+    const sectionLines = sections.flatMap((s) => [`## ${s}`, '- Fixture.', '']);
+    const lines = [
+      '---',
+      'phase_count: 1',
+      'effort_total: "~1h"',
+      'phases:',
+      '  - name: "P1 — CRLF Phase"',
+      '    effort: "~1h"',
+      'status: clean',
+      '---',
+      '',
+      '# CRLF Plan',
+      '',
+      ...sectionLines,
+      '## Impact Graph',
+      '',
+      '```mermaid',
+      'flowchart TD',
+      '  A["crlf"] -->|"direct: crlf"| B["plan"]',
+      '```',
+      '',
+    ];
+    writeFileSync(target, lines.join('\r\n'));
+
+    expect(planHasFrontmatter(target)).toBe(true);
+    expect(planHasTitleHeading(target)).toBe(true);
+    expect(requireShapeStatus(target)).toBe(0);
   });
 });
 
@@ -180,6 +284,26 @@ describe('title and fence detection', () => {
     expect(planHasTitleHeading(target)).toBe(true);
     expect(readFileSync(`${target}.raw`, 'utf8')).not.toContain('STALE RAW');
     expect(readFileSync(`${target}.raw`, 'utf8')).toContain('Leaked preamble');
+  });
+  it('normalize_plan_document strips outer code fence wrapping the entire plan', () => {
+    const target = file('outer-fence.md');
+    const body = file('outer-fence-body.md');
+    writeStructuredPlanFile(body, 'Outer Fence Plan');
+    const inner = readFileSync(body, 'utf8');
+    writeFileSync(
+      target,
+      `I have reviewed the codebase. Here is the plan.\n\n\`\`\`text\n${inner}\`\`\`\n`,
+    );
+
+    expect(planHasTitleHeading(target)).toBe(false);
+
+    normalizeQuiet(target);
+
+    expect(planHasTitleHeading(target)).toBe(true);
+    expect(readFileSync(target, 'utf8')).toContain('# Outer Fence Plan');
+    expect(existsSync(`${target}.raw`)).toBe(true);
+    expect(readFileSync(`${target}.raw`, 'utf8')).toContain('I have reviewed');
+    expect(planDocumentShapeOk(target)).toBe(true);
   });
 });
 

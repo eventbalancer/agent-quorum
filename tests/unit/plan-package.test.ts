@@ -89,7 +89,7 @@ describe('parsePlanStructure', () => {
 
   it('parses a numbered Work Plan as one phase per item', () => {
     const plan = file('numbered.md');
-    writeStructuredPlanFile(plan, 'Numbered Plan');
+    writeStructuredPlanFile(plan, 'Numbered Plan', { frontmatter: false });
     const structure = parsePlanStructure(plan);
     expect(structure.phases).toHaveLength(1);
     expect(structure.phases[0]?.id).toBe('P1');
@@ -98,7 +98,7 @@ describe('parsePlanStructure', () => {
 
   it('parses a prose Work Plan as a single synthetic P1 phase', () => {
     const plan = file('synthetic.md');
-    writeStructuredPlanFile(plan, 'Synthetic Plan');
+    writeStructuredPlanFile(plan, 'Synthetic Plan', { frontmatter: false });
     const content = readFileSync(plan, 'utf8').replace(
       '1. Fixture step.',
       'Do the work as one prose block.',
@@ -112,12 +112,22 @@ describe('parsePlanStructure', () => {
 
   it('reports zero phases for an empty Work Plan', () => {
     const plan = file('empty-wp.md');
-    writeStructuredPlanFile(plan, 'Empty WP');
+    writeStructuredPlanFile(plan, 'Empty WP', { frontmatter: false });
     const content = readFileSync(plan, 'utf8').replace('1. Fixture step.', '');
     writeFileSync(plan, content);
     const structure = parsePlanStructure(plan);
     expect(structure.phases).toHaveLength(0);
     expect(structure.workPlanPresent).toBe(false);
+  });
+
+  it('5-column Work Plan table: Effort column does not shift acceptanceGate extraction', () => {
+    const plan = file('five-col.md');
+    writeLargeStructuredPlanFile(plan, 'Five Col Plan', 3);
+    const structure = parsePlanStructure(plan);
+    expect(structure.phases).toHaveLength(3);
+    expect(structure.phases[0]?.acceptanceGate).toContain('Phase 1 gate observable');
+    expect(structure.phases[1]?.acceptanceGate).toContain('Phase 2 gate observable');
+    expect(structure.phases[2]?.acceptanceGate).toContain('Phase 3 gate observable');
   });
 });
 
@@ -260,7 +270,7 @@ describe('emitPlanPackage', () => {
 
   it('emits a valid one-phase package when forcing a split of a numbered Work Plan', () => {
     const plan = file('numbered.md');
-    writeStructuredPlanFile(plan, 'Numbered');
+    writeStructuredPlanFile(plan, 'Numbered', { frontmatter: false });
     const structure = parsePlanStructure(plan);
     const result = emitPlanPackage(work, plan, structure, splitFor(plan));
     expect(result.kind).toBe('emitted');
@@ -273,7 +283,7 @@ describe('emitPlanPackage', () => {
 
   it('writes no package for an empty Work Plan forced split', () => {
     const plan = file('empty.md');
-    writeStructuredPlanFile(plan, 'Empty');
+    writeStructuredPlanFile(plan, 'Empty', { frontmatter: false });
     writeFileSync(plan, readFileSync(plan, 'utf8').replace('1. Fixture step.', ''));
     const structure = parsePlanStructure(plan);
     const result = emitPlanPackage(work, plan, structure, splitFor(plan));

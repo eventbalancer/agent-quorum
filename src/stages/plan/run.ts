@@ -379,10 +379,10 @@ function resolveFinalStatus({
   findings,
   packageHealth,
 }: ResolveFinalStatusParams): FinalStatusResult {
-  if (finalTitle !== 1 || shape.missing !== 0 || shape.graph !== 1) {
+  if (finalTitle !== 1 || shape.missing !== 0 || shape.graph !== 1 || shape.frontmatter !== 1) {
     return {
       status: 'blocked',
-      reason: `plan shape broken (title=${finalTitle} missing_sections=${shape.missing} impact_graph_mermaid=${shape.graph})`,
+      reason: `plan shape broken (title=${finalTitle} missing_sections=${shape.missing} impact_graph_mermaid=${shape.graph} frontmatter=${shape.frontmatter})`,
     };
   }
 

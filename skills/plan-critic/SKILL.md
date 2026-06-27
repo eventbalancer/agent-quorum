@@ -60,6 +60,15 @@ If the plan references external systems, APIs, products, standards, or infrastru
 
 Before codebase-specific judgments, **by default** inspect the relevant local code via Read. Narrow reads of files, tests, and configs that can confirm or refute the plan's claims. Do not read the whole repository — targeted verification only.
 
+## Pre-sweep: gate enumeration
+
+Before walking the Checklist, enumerate every acceptance gate from the Work Plan table:
+
+1. Read every row of the Work Plan table and extract the value in the `Acceptance gate` column for each phase.
+2. For each gate, verify that the plan body contains the evidence needed to confirm or refute it — a test command, an observable output, a configuration check, or a concrete reviewer step. This verification drives your `correctness` and `testability` findings.
+3. When a `correctness` or `testability` issue traces to a specific gate, name the gate explicitly in `evidence` (e.g., `evidence: "P3 gate: 'pnpm run test green' — no test covers the new frontmatter path"`).
+4. The enumerated gates are context for the scan, not issues themselves; they do not consume the 8-issue budget.
+
 ## Checklist (constitution)
 
 Walk it explicitly. If you find nothing for an item, skip it — do not invent issues.
@@ -81,6 +90,11 @@ Walk it explicitly. If you find nothing for an item, skip it — do not invent i
 - **Self-contained sections.** Does a section depend on another by position rather than by name — "as noted above", "the file mentioned earlier", a dangling "it"/"this" — so it loses meaning when read in isolation? Evidence — quote the dangling back-reference. `minor` by default; `major` only when the ambiguity makes a Work Plan step genuinely unexecutable.
 - **Split-readiness.** Is each Work Plan phase **split-ready** — self-contained enough to become a standalone `plan.package/` phase doc (goal, prerequisites, touch surfaces, ordered steps, local verification, acceptance gate, common pitfalls, stop conditions)? Has the plan omitted material execution detail to stay under the size policy, instead of leaving the detail in (the orchestrator splits large plans into a `plan.package/`)? Evidence — a phase a weaker model could not execute without reading other phases or the original prompt. `minor` by default; `major` only when a phase is genuinely unexecutable in isolation.
 
+- **Frontmatter presence.** Does the plan begin with a valid leading YAML frontmatter block (`---`…`---`) containing all four required keys (`phase_count`, `effort_total`, `phases` with ≥1 item, `status`)? If the block is absent or structurally malformed (missing a required key, missing the closing `---`), flag as `severity: blocker`, `category: missing_context`, citing the document head in `evidence`. A missing frontmatter block is the upgrade trigger: a `blocker` here routes the plan through the creator's update mode, which adds the block rather than letting a header-less plan reach `plan.final.md` blocked.
+- **Effort-cell coverage.** Does every Work Plan phase row carry a non-empty Effort cell? Flag a missing or empty Effort cell as `severity: minor`, `category: missing_context`, citing the phase row in `evidence`.
+- **Status coherence.** Is the frontmatter `status` consistent with the plan body? Flag a `status: clean` when an Open Question lists a blocking decision, or a `status: clean` when a STOP trigger is already satisfied, as `severity: minor`, `category: correctness`, citing the frontmatter line and the conflicting section. (The shape gate already rejects out-of-enum values; this rule checks readiness coherence.)
+- **Frontmatter↔Work-Plan coherence.** Does the `phase_count` match the number of Work Plan phase rows? Does each `phases[].name` correspond 1:1 to a Work Plan phase label, and does each `phases[].effort` match the Effort cell? Flag a mismatch as `severity: minor`, `category: correctness`, citing the frontmatter line and the Work Plan table. (The shape gate cannot cross-check these without a YAML parser; the critic is the consistency check that makes the machine-readable header reliable.)
+
 Calibrating the structural and readability checks (clean cutover, Impact Graph completeness, structural target, At a Glance, self-contained sections): use `major` only when the gap genuinely blocks confident execution, and keep the pure-readability checks (At a Glance, self-contained sections) at `nit`/`minor`. Never let these displace a correctness, scope, or sequencing finding under the 8-issue limit — raise them only when real issues leave room.
 
 ## Workspace topology (injected automatically)
@@ -97,7 +111,7 @@ If `## Repo topology (ecosystem.yaml)` is present, verify:
 - Do not repeat rejected-log entries without `duplicate_of`.
 - Critique the plan's writing style only when it obscures _what_ needs to be done.
 - Keep each issue pointed and self-contained; do not propose whole alternative plans.
-- Do not assess effort, timeline, or complexity.
+- Do not assess whether an effort estimate is accurate or well-calibrated; only flag a missing or empty Effort cell (`minor`, `missing_context`).
 - Do not propose or assess fallback/rollback strategies — that is the plan author's domain.
 - No file edits, no Bash. Reading via Read is allowed to verify evidence.
 

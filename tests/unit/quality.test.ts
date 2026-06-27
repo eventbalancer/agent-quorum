@@ -56,7 +56,11 @@ describe('reasoningFor', () => {
         const base = reasoningFor(quality, runner, 'fixer');
         const high = reasoningFor(quality, runner, 'critic');
         expect(rank(base)).toBeGreaterThanOrEqual(0);
-        expect(rank(high)).toBe(rank(base) + 1);
+        if (quality === 'thorough') {
+          expect(high).toBe('max');
+        } else {
+          expect(rank(high)).toBe(rank(base) + 1);
+        }
         for (const role of BASE_TIER) {
           expect(reasoningFor(quality, runner, role)).toBe(base);
         }
@@ -75,7 +79,7 @@ describe('reasoningFor', () => {
         reasoningFor('balanced', runner, 'critic'),
       );
       expect(reasoningFor('thorough', runner, 'creator')).toBe('max');
-      expect(rank('max')).toBe(rank(reasoningFor('thorough', runner, 'critic')) + 1);
+      expect(reasoningFor('thorough', runner, 'critic')).toBe('max');
     }
   });
 

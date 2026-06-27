@@ -8,6 +8,29 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 export const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
 const FAKE_BIN_FIXTURES = path.join(REPO_ROOT, 'tests', 'fixtures', 'fake-bin');
 
+interface PlanFrontmatterPhase {
+  readonly name: string;
+  readonly effort: string;
+}
+
+function planFrontmatterLines(
+  phaseCount: number,
+  effortTotal: string,
+  phases: readonly PlanFrontmatterPhase[],
+  status = 'clean',
+): string[] {
+  return [
+    '---',
+    `phase_count: ${phaseCount}`,
+    `effort_total: "${effortTotal}"`,
+    'phases:',
+    ...phases.flatMap((phase) => [`  - name: "${phase.name}"`, `    effort: "${phase.effort}"`]),
+    `status: ${status}`,
+    '---',
+    '',
+  ];
+}
+
 export function writeFakeBin(dir: string): void {
   mkdirSync(dir, { recursive: true });
   for (const name of ['codex', 'claude', 'cursor-agent', 'ajv', 'pnpm']) {
@@ -17,8 +40,27 @@ export function writeFakeBin(dir: string): void {
   }
 }
 
-export function writeStructuredPlanFile(file: string, title: string): void {
+export function writeStructuredPlanFile(
+  file: string,
+  title: string,
+  opts: { frontmatter?: boolean } = {},
+): void {
+  const withFrontmatter = opts.frontmatter !== false;
+  const header = withFrontmatter
+    ? planFrontmatterLines(1, '~1h', [{ name: 'P1 — Fixture Phase', effort: '~1h' }])
+    : [];
+  const workPlan = withFrontmatter
+    ? [
+        '## Work Plan',
+        '',
+        '| Phase | Touches | Depends on | Effort | Acceptance gate |',
+        '| --- | --- | --- | --- | --- |',
+        '| P1 — Fixture Phase | `fixture.md` | — | ~1h | fixture gate observable |',
+        '',
+      ]
+    : ['## Work Plan', '1. Fixture step.', ''];
   const body = [
+    ...header,
     `# ${title}`,
     '',
     '## At a Glance',
@@ -39,9 +81,7 @@ export function writeStructuredPlanFile(file: string, title: string): void {
     '- In scope: fixture.',
     '- Out of scope: fixture.',
     '',
-    '## Work Plan',
-    '1. Fixture step.',
-    '',
+    ...workPlan,
     '## Files and Interfaces',
     '- `fixture.md`',
     '',
@@ -62,10 +102,10 @@ export function writeStructuredPlanFile(file: string, title: string): void {
   writeFileSync(file, body);
 }
 
-// A structurally complex plan: a `Phase | Touches | Depends on | Acceptance
-// gate` table plus matching `### P#` detail subsections, Files/Verification/STOP
-// sections, and non-goals/Open Questions — enough to exercise the table-branch
-// parser and the package emitter.
+// A structurally complex plan: a `Phase | Touches | Depends on | Effort |
+// Acceptance gate` table plus matching `### P#` detail subsections,
+// Files/Verification/STOP sections, and non-goals/Open Questions — enough to
+// exercise the table-branch parser and the package emitter.
 export function writeLargeStructuredPlanFile(
   file: string,
   title: string,
@@ -76,10 +116,11 @@ export function writeLargeStructuredPlanFile(
   const details: string[] = [];
   const verification: string[] = [];
   const files: string[] = [];
+  const phaseEntries: PlanFrontmatterPhase[] = [];
   for (let i = startIndex; i < startIndex + phaseCount; i += 1) {
     const dep = i === startIndex ? 'requirements' : `P${i - 1}`;
     rows.push(
-      `| P${i} Phase ${i} work | \`src/core/mod-${i}.ts\` | ${dep} | Phase ${i} gate observable |`,
+      `| P${i} Phase ${i} work | \`src/core/mod-${i}.ts\` | ${dep} | ~1h | Phase ${i} gate observable |`,
     );
     details.push(
       `### P${i} — Phase ${i} work`,
@@ -90,8 +131,10 @@ export function writeLargeStructuredPlanFile(
     );
     verification.push(`- P${i}: \`pnpm run test\` proves phase ${i} gate observable.`);
     files.push(`- \`src/core/mod-${i}.ts\``);
+    phaseEntries.push({ name: `P${i} Phase ${i} work`, effort: '~1h' });
   }
   const body = [
+    ...planFrontmatterLines(phaseCount, `~${phaseCount}h`, phaseEntries),
     `# ${title}`,
     '',
     '## At a Glance',
@@ -118,8 +161,8 @@ export function writeLargeStructuredPlanFile(
     '',
     '## Work Plan',
     '',
-    '| Phase | Touches | Depends on | Acceptance gate |',
-    '| --- | --- | --- | --- |',
+    '| Phase | Touches | Depends on | Effort | Acceptance gate |',
+    '| --- | --- | --- | --- | --- |',
     ...rows,
     '',
     ...details,

@@ -81,11 +81,15 @@ is reproducible for the same plan + config + workspace. See
 ## Plan shape contract
 
 Existing plan inputs are expected to be complete implementation plans, not
-summaries or external pointers. The shape gate requires a top-level title,
-`## At a Glance`, Context, Verified Facts, Target State, Scope, Work Plan, Files
-and Interfaces, Verification, STOP Triggers, and a final `## Impact Graph` with
-a Mermaid flowchart. Prompt-created and revised plans are normalized to the same
-contract by the packaged role skills.
+summaries or external pointers. The shape gate requires a leading YAML frontmatter
+block (four required keys: `phase_count` integer, `effort_total` non-empty string,
+`phases` list with ≥1 item, `status` enum `clean|needs-review|blocked`; delimiters
+CRLF-tolerant via `SPACE`), a top-level title, `## At a Glance`, Context, Verified
+Facts, Target State, Scope, Work Plan, Files and Interfaces, Verification, STOP
+Triggers, and a final `## Impact Graph` with a Mermaid flowchart. Consistency
+between the frontmatter header and the Work Plan (phase count, names, effort) is
+enforced by the critic, not the gate. Prompt-created and revised plans are
+normalized to the same contract by the packaged role skills.
 
 ## Artifact contract ($WORK)
 

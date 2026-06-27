@@ -144,7 +144,13 @@ describe('package emission through runPlanLoop', () => {
   it('blocks an otherwise-clean run when a forced split hits an empty Work Plan', async () => {
     const input = path.join(tmp, 'empty-wp.md');
     writeStructuredPlanFile(input, 'Empty Work Plan');
-    writeFileSync(input, readFileSync(input, 'utf8').replace('1. Fixture step.', ''));
+    writeFileSync(
+      input,
+      readFileSync(input, 'utf8').replace(
+        '| Phase | Touches | Depends on | Effort | Acceptance gate |\n| --- | --- | --- | --- | --- |\n| P1 — Fixture Phase | `fixture.md` | — | ~1h | fixture gate observable |',
+        '',
+      ),
+    );
 
     const result = await withEnvAsync(baseEnv({ AGENT_QUORUM_SPLIT: 'always' }), () =>
       runPlanLoop({ input, iters: 1, quality: 'quick', fix: false, translate: false }),
