@@ -12,11 +12,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveConfig } from '../../src/core/config.js';
+import { PLAN_ROLES, resolveConfig } from '../../src/core/config.js';
 import { runConfigShowCli } from '../../src/cli/config-show.js';
 import { runSetupCli } from '../../src/cli/setup.js';
 import { globalHelp } from '../../src/cli/help.js';
 import { telegramDiscoverChatId } from '../../src/channels/telegram/index.js';
+import type { Role } from '../../src/types.js';
 import { captureStderr, withEnv, withEnvAsync, type StderrCapture } from '../helpers/harness.js';
 import { runCli } from '../helpers/cli.js';
 import { startTelegramStub, type TelegramStub } from '../helpers/telegram-stub.js';
@@ -149,11 +150,69 @@ describe('telegramDiscoverChatId', () => {
 });
 
 describe('agent-quorum setup — interactive', () => {
-  // iters, quality, locale, translate, then one line per role (creator, critic,
-  // fixer, reviewer, translator), then the Telegram token.
-  function feed(input: PassThrough, answers: readonly string[]): void {
-    input.write(answers.map((line) => `${line}\n`).join(''));
+  // Answers map positionally to setup.ts's prompt order: 4 globals, one per
+  // PLAN_ROLES role in list order, then the token.
+  interface InteractiveAnswers {
+    readonly iters?: string;
+    readonly quality?: string;
+    readonly locale?: string;
+    readonly translate?: string;
+    readonly token?: string;
+    readonly roleRunners?: Partial<Record<Role, string>>;
   }
+
+  const GLOBAL_PROMPTS = 4;
+  const INTERACTIVE_PROMPTS = GLOBAL_PROMPTS + PLAN_ROLES.length + 1;
+
+  function answerSequence(spec: InteractiveAnswers): string[] {
+    return [
+      spec.iters ?? '',
+      spec.quality ?? '',
+      spec.locale ?? '',
+      spec.translate ?? '',
+      ...PLAN_ROLES.map((role) => spec.roleRunners?.[role] ?? ''),
+      spec.token ?? '',
+    ];
+  }
+
+  function feedRaw(input: PassThrough, lines: readonly string[]): number {
+    input.write(lines.map((line) => `${line}\n`).join(''));
+    return lines.length;
+  }
+
+  function feed(input: PassThrough, spec: InteractiveAnswers): number {
+    return feedRaw(input, answerSequence(spec));
+  }
+
+  const GUARD_MS = 4000;
+
+  function expectSetupCompletes(pending: Promise<number>, emitted: number): Promise<number> {
+    let timer!: ReturnType<typeof setTimeout>;
+    const guard = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `setup did not complete: fed ${emitted} answers but expected ${INTERACTIVE_PROMPTS} interactive prompts (${GLOBAL_PROMPTS} global + ${PLAN_ROLES.length} roles + 1 token)`,
+          ),
+        );
+      }, GUARD_MS);
+      timer.unref();
+    });
+    return Promise.race([pending, guard]).finally(() => {
+      clearTimeout(timer);
+    });
+  }
+
+  it('derives answer count and per-role slots from PLAN_ROLES', () => {
+    expect(answerSequence({}).length).toBe(INTERACTIVE_PROMPTS);
+    PLAN_ROLES.forEach((role, roleIndex) => {
+      const roleRunners: Partial<Record<Role, string>> = { [role]: 'X' };
+      const sequence = answerSequence({ roleRunners });
+      sequence.forEach((line, slot) => {
+        expect(line).toBe(slot === GLOBAL_PROMPTS + roleIndex ? 'X' : '');
+      });
+    });
+  });
 
   it('AC-1: completes on a fresh home and re-enters cleanly on a re-run', async () => {
     installRunnerBins(bin, ['codex', 'claude']);
@@ -161,8 +220,8 @@ describe('agent-quorum setup — interactive', () => {
       for (let run = 0; run < 2; run += 1) {
         const { input, output } = ttyStreams();
         const pending = runSetupCli([], { streams: { input, output } });
-        feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
-        expect(await pending).toBe(0);
+        const fed = feed(input, {});
+        expect(await expectSetupCompletes(pending, fed)).toBe(0);
       }
     });
     expect(existsSync(path.join(home, 'config.json'))).toBe(true);
@@ -184,8 +243,8 @@ describe('agent-quorum setup — interactive', () => {
               stub.queueReply(1, code, { chatId: '42' });
             },
           });
-          feed(input, ['7', '', '', '', '', '', '', '', '', '', 'BOTTOKEN-1']);
-          expect(await pending).toBe(0);
+          const fed = feed(input, { iters: '7', token: 'BOTTOKEN-1' });
+          expect(await expectSetupCompletes(pending, fed)).toBe(0);
         },
       );
       expect(readConfig()).toEqual({ settings: { iters: 7 }, telegram: { chatId: '42' } });
@@ -204,8 +263,8 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['3', '', '', '', '', '', '', '', '', '', '']);
-      expect(await pending).toBe(0);
+      const fed = feed(input, { iters: '3' });
+      expect(await expectSetupCompletes(pending, fed)).toBe(0);
     });
     expect(readConfig()).toEqual({ settings: { iters: 3 } });
     expect(existsSync(path.join(home, 'secrets.json'))).toBe(false);
@@ -216,9 +275,8 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      // Override critic (default codex) to claude; accept the rest.
-      feed(input, ['', '', '', '', '', 'claude', '', '', '', '', '']);
-      expect(await pending).toBe(0);
+      const fed = feed(input, { roleRunners: { critic: 'claude' } });
+      expect(await expectSetupCompletes(pending, fed)).toBe(0);
     });
     expect(readConfig()).toEqual({
       roles: { critic: { runner: 'claude', model: 'claude-opus-4-8' } },
@@ -237,8 +295,8 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
-      expect(await pending).toBe(0);
+      const fed = feed(input, {});
+      expect(await expectSetupCompletes(pending, fed)).toBe(0);
     });
     expect(readConfig()).toEqual(seeded);
   });
@@ -251,8 +309,8 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
-      expect(await pending).toBe(0);
+      const fed = feed(input, {});
+      expect(await expectSetupCompletes(pending, fed)).toBe(0);
     });
     expect(readConfig()).toEqual(seeded);
   });
@@ -262,13 +320,27 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', 'ru', 'no', '', '', '', '', '', '', '']);
-      expect(await pending).toBe(0);
+      const fed = feed(input, { locale: 'ru', translate: 'no' });
+      expect(await expectSetupCompletes(pending, fed)).toBe(0);
     });
     expect(readConfig()).toEqual({ settings: { locale: 'ru', translate: false } });
     const { config } = resolveConfig({ home, env: {} });
     expect(config.settings.translatePass).toBe(0);
     expect(config.settings.locale).toBe('ru');
+  });
+
+  it('fails fast naming the emitted count when answers underfill the prompts', async () => {
+    installRunnerBins(bin, ['codex', 'claude']);
+    await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
+      const { input, output } = ttyStreams();
+      const pending = runSetupCli([], { streams: { input, output } });
+      const emitted = feedRaw(input, ['', '', '', '']);
+      await expect(expectSetupCompletes(pending, emitted)).rejects.toThrow(
+        /fed 4 answers but expected/,
+      );
+      feedRaw(input, [...PLAN_ROLES.map(() => ''), '']);
+      expect(await pending).toBe(0);
+    });
   });
 });
 
@@ -280,7 +352,7 @@ describe('agent-quorum setup — non-TTY', () => {
       expect(await runSetupCli([], { streams: { input, output } })).toBe(0);
     });
     const { config } = resolveConfig({ home, env: {} });
-    for (const role of ['creator', 'critic', 'fixer', 'reviewer', 'translator', 'judge'] as const) {
+    for (const role of PLAN_ROLES) {
       expect(config.matrix[role].runner).toBe('codex');
     }
   });
