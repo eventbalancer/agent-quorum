@@ -116,20 +116,27 @@ operator confirmation, and every history- or remote-touching command:
 `worktree:done`, and the release version bump, tag, and publish. Workers never
 stage, commit, push, tag, edit a PR, or write tracked files.
 
-**Verification fan-out.** Once scope is fixed, run one worker per check instead
-of the sequential `pnpm run check`:
+**Verification fan-out.** Once scope is fixed, replace the sequential
+`pnpm run check` with a build barrier followed by a concurrent fan-out:
 
 ```text
-build | typecheck | lint | format-check | test
+build  ->  typecheck | lint | format-check | test
 ```
 
-The checks are independent and only `build` writes `dist/` (gitignored), so a
-shared checkout is safe. Each worker runs its single `pnpm run <check>` and
-returns pass/fail plus the failing output on failure. Wall-clock becomes the
-slowest check, not their sum. Verification is green only when every worker
-passes; one failure fails verification, and the conductor reports which check
-failed. For a docs-only change the fan-out is a single `format-check` worker;
-add a `build` (and smoke) worker for package or public-API changes.
+`build` runs first and alone: it does `rm -rf dist` and regenerates `dist/`,
+and the type-aware `lint` (plus any test that imports the built package)
+resolves the `agent-quorum` self-import through `dist/`. A `build` running
+concurrently with those readers transiently deletes the types they read and
+yields false `no-unsafe-*` lint failures, so build must finish before they
+start - it is a barrier, not a peer worker. After it completes, fan out
+`typecheck`, `lint`, `format-check`, and `test` concurrently; those four only
+read the tree and are mutually independent. Each worker runs its single
+`pnpm run <check>` and returns pass/fail plus the failing output. Wall-clock
+becomes build plus the slowest reader, not the full sum. Verification is green
+only when every worker passes; one failure fails verification, and the conductor
+reports which check failed. For a docs-only change the fan-out is a single
+`format-check` worker; for package or public-API changes keep the `build`
+barrier and add a smoke worker after it.
 
 **Read-prep, overlapped with the fan-out.** While the checks run, delegate the
 read-only preparation: a diff summary and blast-radius proposal from
@@ -142,9 +149,10 @@ Suggested model tiers: a cheap mechanical tier (for example Haiku) for the
 verification workers, the mirror checks, and issue discovery; a mid tier (for
 example Sonnet) for the diff summary, blast-radius, and commit-message draft.
 Keep the conductor on its own model for routing, the plan, and the irreversible
-steps. In the release flow, fan out the `pnpm run check` sub-steps only after
-`pnpm install` completes, and keep install, publish dry-run, version bump, tag,
-and publish sequential in the conductor.
+steps. In the release flow, run the build barrier and then fan out the
+read-only `pnpm run check` sub-steps only after `pnpm install` completes, and
+keep install, publish dry-run, version bump, tag, and publish sequential in the
+conductor.
 
 ## Step 0 - Preflight and route
 
