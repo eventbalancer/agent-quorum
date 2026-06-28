@@ -9,7 +9,14 @@ import { isQuality, reasoningFor } from './quality.js';
 import type { SplitMode } from './split-policy.js';
 import { readConfigStore, readSecretsStore } from './store.js';
 
-export const PLAN_ROLES: readonly Role[] = ['creator', 'critic', 'fixer', 'reviewer', 'translator'];
+export const PLAN_ROLES: readonly Role[] = [
+  'creator',
+  'critic',
+  'fixer',
+  'reviewer',
+  'translator',
+  'judge',
+];
 
 export interface RoleMatrixEntry {
   runner: Runner;
@@ -37,6 +44,7 @@ export interface RolePermissions {
   fixer: RoleTools;
   reviewer: RoleTools;
   translator: RoleTools;
+  judge: RoleTools;
 }
 
 export interface CliSettings {
@@ -140,16 +148,27 @@ export function resolveRolePermissions(resolved: ResolvedConfig): RolePermission
   log(
     `  → translator: tools=${permissions.translator.tools} disallowed=${permissions.translator.disallowedTools}`,
   );
+  log(
+    `  → judge: tools=${permissions.judge.tools} disallowed=${permissions.judge.disallowedTools}`,
+  );
   return permissions;
 }
 
-export function runnersInUse(matrix: RoleMatrix, fixPass: 0 | 1, translatePass: 0 | 1): Runner[] {
+export function runnersInUse(
+  matrix: RoleMatrix,
+  fixPass: 0 | 1,
+  translatePass: 0 | 1,
+  judgeEnabled: 0 | 1 = 0,
+): Runner[] {
   const roles: Role[] = ['creator', 'critic'];
   if (fixPass === 1) {
     roles.push('fixer', 'reviewer');
   }
   if (translatePass === 1) {
     roles.push('translator');
+  }
+  if (judgeEnabled === 1) {
+    roles.push('judge');
   }
   const seen = new Set(roles.map((role) => matrix[role].runner));
   return RUNNERS.filter((runner) => seen.has(runner));
@@ -678,6 +697,7 @@ function resolvePermissions(
     fixer: tools('fixer'),
     reviewer: tools('reviewer'),
     translator: tools('translator'),
+    judge: tools('judge'),
   };
 }
 

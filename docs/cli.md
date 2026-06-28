@@ -78,6 +78,11 @@ the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
 keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
+`--quality` also controls the judge readiness gate: `balanced` and `thorough`
+enable a judge call after each critic pass when no blocker or major issues are
+open; if the judge returns `ready: true`, the loop exits early with that plan
+revision as `plan.final.md`. `quick` skips the judge entirely.
+
 After the fix pass and before the single `FINAL:` status, a deterministic split
 policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
 `AGENT_QUORUM_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records

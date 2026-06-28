@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanReadiness",
+  "type": "object",
+  "required": ["ready", "rationale"],
+  "additionalProperties": false,
+  "properties": {
+    "ready": {
+      "type": "boolean"
+    },
+    "rationale": {
+      "type": "string",
+      "maxLength": 700
+    }
+  }
+}

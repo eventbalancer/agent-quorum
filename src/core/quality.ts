@@ -7,6 +7,7 @@ export interface QualityMatrix {
   creatorOneShot: 0 | 1;
   previousCritiques: CritiquesMode;
   topology: CritiquesMode;
+  judge: 0 | 1;
 }
 
 export const QUALITY_VALUES: readonly Quality[] = ['quick', 'balanced', 'thorough'];
@@ -27,6 +28,7 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         creatorOneShot: 1,
         previousCritiques: 'compact',
         topology: 'compact',
+        judge: 0,
       };
     case 'balanced':
       return {
@@ -34,6 +36,7 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         creatorOneShot: 0,
         previousCritiques: 'full',
         topology: 'full',
+        judge: 1,
       };
     case 'thorough':
       return {
@@ -41,17 +44,18 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         creatorOneShot: 0,
         previousCritiques: 'full',
         topology: 'full',
+        judge: 1,
       };
   }
 }
 
 // Reasoning is derived from quality at runtime, never stored. The high tier
-// (critic) sits one rung above the base tier on a shared codex/claude ladder;
-// at thorough both the critic (high) and creator (top) reach max — below
+// (critic, judge) sits one rung above the base tier on a shared codex/claude
+// ladder; at thorough both high-tier and creator (top) reach max — below
 // thorough the creator tracks the high tier. cursor ignores reasoning and
 // warns on a non-empty value, so it always resolves to ''.
 const TOP_TIER_ROLES: ReadonlySet<Role> = new Set<Role>(['creator']);
-const HIGH_TIER_ROLES: ReadonlySet<Role> = new Set<Role>(['critic']);
+const HIGH_TIER_ROLES: ReadonlySet<Role> = new Set<Role>(['critic', 'judge']);
 
 interface ReasoningLadderRung {
   base: string;

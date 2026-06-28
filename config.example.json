@@ -96,6 +96,21 @@
         "ToolSearch",
         "AskUserQuestion"
       ]
+    },
+    "judge": {
+      "runner": "claude",
+      "model": "claude-opus-4-8",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
     }
   },
   "knobs": {

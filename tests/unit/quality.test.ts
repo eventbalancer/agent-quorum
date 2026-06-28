@@ -4,7 +4,7 @@ import { QUALITY_VALUES, isQuality, qualityMatrix, reasoningFor } from '../../sr
 import type { Role } from '../../src/types.js';
 
 const TOP_TIER: readonly Role[] = ['creator'];
-const HIGH_TIER: readonly Role[] = ['critic'];
+const HIGH_TIER: readonly Role[] = ['critic', 'judge'];
 const BASE_TIER: readonly Role[] = ['fixer', 'reviewer', 'translator'];
 const LADDER = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 const rank = (value: string): number => LADDER.indexOf(value as (typeof LADDER)[number]);
@@ -16,18 +16,21 @@ describe('qualityMatrix', () => {
       creatorOneShot: 1,
       previousCritiques: 'compact',
       topology: 'compact',
+      judge: 0,
     });
     expect(qualityMatrix('balanced')).toEqual({
       sessionMode: 1,
       creatorOneShot: 0,
       previousCritiques: 'full',
       topology: 'full',
+      judge: 1,
     });
     expect(qualityMatrix('thorough')).toEqual({
       sessionMode: 0,
       creatorOneShot: 0,
       previousCritiques: 'full',
       topology: 'full',
+      judge: 1,
     });
   });
 

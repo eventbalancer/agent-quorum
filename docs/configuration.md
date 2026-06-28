@@ -99,21 +99,22 @@ default is the built-in fallback.
 
 ### Role matrix (`roles.<role>`)
 
-Roles: `creator`, `critic`, `fixer`, `reviewer`, `translator`. Each carries
-`runner` (`codex` \| `claude` \| `cursor`) and `model`, plus tool-permission
-fields; the per-role reasoning level is derived from `settings.quality` at
-runtime rather than stored per role. `runner`/`model` accept an env override
-`AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL`; tool fields are store-only and accept a
-non-empty string or string array (joined with commas).
+Roles: `creator`, `critic`, `fixer`, `reviewer`, `translator`, `judge`. Each
+carries `runner` (`codex` \| `claude` \| `cursor`) and `model`, plus
+tool-permission fields; the per-role reasoning level is derived from
+`settings.quality` at runtime rather than stored per role. `runner`/`model`
+accept an env override `AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL`; tool fields are
+store-only and accept a non-empty string or string array (joined with commas).
 
-| Tool field (per role)                                                          | Applies to                       |
-| ------------------------------------------------------------------------------ | -------------------------------- |
-| `tools`, `disallowedTools`                                                     | critic/fixer/reviewer/translator |
-| `createTools`, `createDisallowedTools`, `updateTools`, `updateDisallowedTools` | creator                          |
+| Tool field (per role)                                                          | Applies to                             |
+| ------------------------------------------------------------------------------ | -------------------------------------- |
+| `tools`, `disallowedTools`                                                     | critic/fixer/reviewer/translator/judge |
+| `createTools`, `createDisallowedTools`, `updateTools`, `updateDisallowedTools` | creator                                |
 
 Defaults: `creator` = `claude`/`claude-opus-4-8`; `critic` = `codex`/`gpt-5.5`;
-`fixer`/`reviewer`/`translator` = `codex`/`gpt-5.5`. Read-only roles default to
-`Read,Grep,Glob` tools with write/exec/agent tools disallowed.
+`fixer`/`reviewer`/`translator` = `codex`/`gpt-5.5`; `judge` =
+`claude`/`claude-opus-4-8`. Read-only roles default to `Read,Grep,Glob` tools
+with write/exec/agent tools disallowed.
 
 The creator must return a complete plan in one capture. Reliable minimum creator
 tiers: claude opus class (`claude-opus-4-8`; weaker claude needs `default`

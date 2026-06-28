@@ -161,7 +161,7 @@ describe('agent-quorum setup — interactive', () => {
       for (let run = 0; run < 2; run += 1) {
         const { input, output } = ttyStreams();
         const pending = runSetupCli([], { streams: { input, output } });
-        feed(input, ['', '', '', '', '', '', '', '', '', '']);
+        feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
         expect(await pending).toBe(0);
       }
     });
@@ -184,7 +184,7 @@ describe('agent-quorum setup — interactive', () => {
               stub.queueReply(1, code, { chatId: '42' });
             },
           });
-          feed(input, ['7', '', '', '', '', '', '', '', '', 'BOTTOKEN-1']);
+          feed(input, ['7', '', '', '', '', '', '', '', '', '', 'BOTTOKEN-1']);
           expect(await pending).toBe(0);
         },
       );
@@ -204,7 +204,7 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['3', '', '', '', '', '', '', '', '', '']);
+      feed(input, ['3', '', '', '', '', '', '', '', '', '', '']);
       expect(await pending).toBe(0);
     });
     expect(readConfig()).toEqual({ settings: { iters: 3 } });
@@ -217,7 +217,7 @@ describe('agent-quorum setup — interactive', () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
       // Override critic (default codex) to claude; accept the rest.
-      feed(input, ['', '', '', '', '', 'claude', '', '', '', '']);
+      feed(input, ['', '', '', '', '', 'claude', '', '', '', '', '']);
       expect(await pending).toBe(0);
     });
     expect(readConfig()).toEqual({
@@ -237,7 +237,7 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', '', '', '', '', '', '', '', '']);
+      feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
       expect(await pending).toBe(0);
     });
     expect(readConfig()).toEqual(seeded);
@@ -251,7 +251,7 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', '', '', '', '', '', '', '', '']);
+      feed(input, ['', '', '', '', '', '', '', '', '', '', '']);
       expect(await pending).toBe(0);
     });
     expect(readConfig()).toEqual(seeded);
@@ -262,7 +262,7 @@ describe('agent-quorum setup — interactive', () => {
     await withEnvAsync({ PATH: bin, AGENT_QUORUM_HOME: home }, async () => {
       const { input, output } = ttyStreams();
       const pending = runSetupCli([], { streams: { input, output } });
-      feed(input, ['', '', 'ru', 'no', '', '', '', '', '', '']);
+      feed(input, ['', '', 'ru', 'no', '', '', '', '', '', '', '']);
       expect(await pending).toBe(0);
     });
     expect(readConfig()).toEqual({ settings: { locale: 'ru', translate: false } });
@@ -280,7 +280,7 @@ describe('agent-quorum setup — non-TTY', () => {
       expect(await runSetupCli([], { streams: { input, output } })).toBe(0);
     });
     const { config } = resolveConfig({ home, env: {} });
-    for (const role of ['creator', 'critic', 'fixer', 'reviewer', 'translator'] as const) {
+    for (const role of ['creator', 'critic', 'fixer', 'reviewer', 'translator', 'judge'] as const) {
       expect(config.matrix[role].runner).toBe('codex');
     }
   });

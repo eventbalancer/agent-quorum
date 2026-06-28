@@ -49,6 +49,11 @@ const REFERENCE_KEY_ORDER = [
   'reviewer_reasoning',
   'reviewer_tools',
   'reviewer_disallowed_tools',
+  'judge_runner',
+  'judge_model',
+  'judge_reasoning',
+  'judge_tools',
+  'judge_disallowed_tools',
 ];
 
 function sampleMeta(workDir: string): RunMetadata {
@@ -80,6 +85,7 @@ function sampleMeta(workDir: string): RunMetadata {
     },
     fixer: { runner: 'claude', model: 'm3', reasoning: 'r3', tools: 't3', disallowedTools: 'd3' },
     reviewer: { runner: 'codex', model: 'm4', reasoning: 'r4', tools: 't4', disallowedTools: 'd4' },
+    judge: { runner: 'claude', model: 'm5', reasoning: 'r5', tools: 't5', disallowedTools: 'd5' },
     runId: 'r000000abc-0123456789abcdef0123',
     name: 'in',
   };

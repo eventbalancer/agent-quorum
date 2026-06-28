@@ -39,11 +39,12 @@ export interface RunMetadata {
   critic: RunMetadataSingleToolsRole;
   fixer: RunMetadataSingleToolsRole;
   reviewer: RunMetadataSingleToolsRole;
+  judge: RunMetadataSingleToolsRole;
   runId: string;
   name: string;
 }
 
-// Role rows follow the execution sequence (creator, critic, fixer, reviewer;
+// Role rows follow the execution sequence (creator, critic, fixer, reviewer, judge;
 // translator is omitted here); run_id and name are appended as trailing rows.
 export function renderRunMetadata(meta: RunMetadata): string {
   const rows: [string, string][] = [
@@ -86,6 +87,11 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['reviewer_reasoning', meta.reviewer.reasoning],
     ['reviewer_tools', meta.reviewer.tools],
     ['reviewer_disallowed_tools', meta.reviewer.disallowedTools],
+    ['judge_runner', meta.judge.runner],
+    ['judge_model', meta.judge.model],
+    ['judge_reasoning', meta.judge.reasoning],
+    ['judge_tools', meta.judge.tools],
+    ['judge_disallowed_tools', meta.judge.disallowedTools],
     ['run_id', meta.runId],
     ['name', meta.name],
   ];

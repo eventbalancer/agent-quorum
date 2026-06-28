@@ -61,6 +61,12 @@ export const DEFAULT_CONFIG: OperatorConfig = {
       tools: READ_TOOLS,
       disallowedTools: TOOL_DISALLOWED,
     },
+    judge: {
+      runner: 'claude',
+      model: 'claude-opus-4-8',
+      tools: READ_TOOLS,
+      disallowedTools: TOOL_DISALLOWED,
+    },
   },
   knobs: {
     claude: {

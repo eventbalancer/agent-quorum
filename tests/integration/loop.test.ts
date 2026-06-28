@@ -41,6 +41,20 @@ const SINGLE_ISSUE = [
   },
 ];
 
+const ALL_DUPLICATE_ISSUES = [
+  {
+    id: 'C1',
+    addresses: null,
+    severity: 'nit',
+    category: 'correctness',
+    claim: 'duplicate issue',
+    evidence: 'fixture',
+    suggested_fix: 'fix',
+    confidence: 1,
+    duplicate_of: 'r1',
+  },
+];
+
 let tmp: string;
 let fake: string;
 let work: string;
@@ -320,6 +334,125 @@ describe('iteration loop', () => {
     expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
+  });
+
+  it('all-duplicate critique converges without creator update (AC-1)', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, ALL_DUPLICATE_ISSUES);
+    const ctx = makeContext({ maxIters: 2 });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(capture.text()).toContain('converged at v0 (critic returned no issues)');
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
+      readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
+    );
+    expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
+  });
+
+  it('health log includes unanchored count for non-duplicate issues (FR-2)', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, SINGLE_ISSUE);
+    const next = path.join(tmp, 'next.md');
+    writeStructuredPlanFile(next, 'Next');
+    const update = path.join(tmp, 'update.json');
+    writeAcceptUpdate(update, 1, next);
+    const ctx = makeContext({ maxIters: 1, diffThreshold: 0 });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_RESULT: update,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    const text = capture.text();
+    expect(text).toContain('unanchored=');
+    expect(text).toContain('possible evidence drift');
+  });
+
+  it('judge ready:true exits at v0 without creator update (AC-4)', async () => {
+    seedWork();
+    const critiqueFile = path.join(tmp, 'critique.json');
+    writeCritique(critiqueFile, [
+      {
+        id: 'C1',
+        addresses: null,
+        severity: 'nit',
+        category: 'convention',
+        claim: 'minor nit',
+        evidence: 'fixture:1',
+        suggested_fix: 'fix',
+        confidence: 1,
+        duplicate_of: null,
+      },
+    ]);
+    const judgeResult = path.join(tmp, 'judge-result.json');
+    writeFileSync(judgeResult, JSON.stringify({ ready: true, rationale: 'implementation-ready' }));
+    const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critiqueFile,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_RESULT: judgeResult,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(capture.text()).toContain('converged at v0 (judge verdict: implementation-ready)');
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
+      readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
+    );
+    expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
+  });
+
+  it('judge is absent from log when quality is quick (AC-6)', async () => {
+    seedWork();
+    const critiqueFile = path.join(tmp, 'critique.json');
+    writeCritique(critiqueFile, [
+      {
+        id: 'C1',
+        addresses: null,
+        severity: 'nit',
+        category: 'convention',
+        claim: 'minor nit',
+        evidence: 'fixture:1',
+        suggested_fix: 'fix',
+        confidence: 1,
+        duplicate_of: null,
+      },
+    ]);
+    const next = path.join(tmp, 'next.md');
+    writeStructuredPlanFile(next, 'Next');
+    const update = path.join(tmp, 'update.json');
+    writeAcceptUpdate(update, 1, next);
+    const ctx = makeContext({ quality: 'quick', maxIters: 1 });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critiqueFile,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_RESULT: update,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(capture.text()).not.toContain('— judge (');
   });
 
   it('creator prompt receives operator interventions and migrates them', async () => {

@@ -19,6 +19,8 @@ export interface SkillPaths {
   reviewerSchema: string;
   translatorSkill: string;
   markdownSchema: string;
+  judgeSkill: string;
+  judgeSchema: string;
 }
 
 export function skillPaths(packageRootDir: string): SkillPaths {
@@ -35,6 +37,8 @@ export function skillPaths(packageRootDir: string): SkillPaths {
     reviewerSchema: path.join(skills, 'plan-fix-reviewer', 'review.schema.json'),
     translatorSkill: path.join(skills, 'plan-translator', 'SKILL.md'),
     markdownSchema: path.join(skills, '_shared', 'markdown.schema.json'),
+    judgeSkill: path.join(skills, 'plan-judge', 'SKILL.md'),
+    judgeSchema: path.join(skills, 'plan-judge', 'readiness.schema.json'),
   };
 }
 

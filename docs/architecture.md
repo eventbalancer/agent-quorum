@@ -2,16 +2,17 @@
 
 ## Roles and providers
 
-Five roles drive the loop, each resolved to a provider through the per-user
+Six roles drive the loop, each resolved to a provider through the per-user
 config store (`override > env > store > default` per field):
 
-| Role       | Purpose                                            | Mode                   |
-| ---------- | -------------------------------------------------- | ---------------------- |
-| critic     | finds issues in the current plan                   | JSON (critique schema) |
-| creator    | creates plan.v0 and applies critique verdicts      | markdown + JSON        |
-| fixer      | proposes/applies reference fixes after convergence | markdown               |
-| reviewer   | reviews the fixer's proposal                       | JSON (review schema)   |
-| translator | renders the localized companion plan               | markdown               |
+| Role       | Purpose                                                                | Mode                    |
+| ---------- | ---------------------------------------------------------------------- | ----------------------- |
+| critic     | finds issues in the current plan                                       | JSON (critique schema)  |
+| creator    | creates plan.v0 and applies critique verdicts                          | markdown + JSON         |
+| fixer      | proposes/applies reference fixes after convergence                     | markdown                |
+| reviewer   | reviews the fixer's proposal                                           | JSON (review schema)    |
+| translator | renders the localized companion plan                                   | markdown                |
+| judge      | evaluates plan readiness after critic (balanced/thorough quality only) | JSON (readiness schema) |
 
 Three provider adapters share one entry point (`providerRun`) that owns the
 single retry wrapper:
@@ -52,11 +53,13 @@ disallowed tools.
 ## The loop
 
 Per iteration: critic → sanitize → schema-validate (exit 3) → health metrics →
-converge on zero issues; otherwise creator update → converge on zero accepted
-blockers/majors, on a `diff` below `diffThreshold`, or at `iters` (the last
-revision becomes final). Quality shapes the topology: `quick` runs the creator
-one-shot (plan + metadata in one JSON call, with a split-call fallback),
-`balanced` splits markdown and metadata, `thorough` additionally disables
+converge on zero issues; for `balanced`/`thorough` quality with no open
+blocker/major issues, a judge call exits early when it returns `ready: true`;
+otherwise creator update → converge on zero accepted blockers/majors, on a
+`diff` below `diffThreshold`, or at `iters` (the last revision becomes final).
+Quality shapes the topology: `quick` runs the creator one-shot (plan + metadata
+in one JSON call, with a split-call fallback), `balanced` splits markdown and
+metadata and enables the judge readiness gate, `thorough` additionally disables
 provider sessions.
 
 Post-convergence: the reference validator mines `file:line` tokens out of code

@@ -38,6 +38,7 @@ export function fixturePermissions(): RolePermissions {
     fixer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
     reviewer: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
     translator: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
+    judge: { tools: 'Read,Grep,Glob', disallowedTools: disallowed },
   };
 }
 
@@ -48,6 +49,7 @@ export function fixtureMatrix(): RoleMatrix {
     fixer: { runner: 'claude', model: 'claude-opus-4-8', reasoning: 'xhigh' },
     reviewer: { runner: 'codex', model: 'gpt-5.5', reasoning: 'xhigh' },
     translator: { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'high' },
+    judge: { runner: 'claude', model: 'claude-opus-4-8', reasoning: 'xhigh' },
   };
 }
 

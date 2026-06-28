@@ -5,10 +5,11 @@ import { fileLineCount } from '../../runtime/files.js';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { critiqueHealth } from '../../core/metrics.js';
+import { critiqueHealth, isCritiqueDuplicateIssue } from '../../core/metrics.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { runCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
+import { runJudge } from './judge.js';
 import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
 import type { RunContext } from '../../core/run-context.js';
 
@@ -52,6 +53,27 @@ function changedLineCount(oldFile: string, newFile: string): number {
   return count;
 }
 
+function openBlockerMajor(critiqueJson: JsonValue): { blockers: number; majors: number } {
+  const issues =
+    isJsonObject(critiqueJson) && Array.isArray(critiqueJson.issues) ? critiqueJson.issues : [];
+  let blockers = 0;
+  let majors = 0;
+  for (const issue of issues) {
+    if (!isJsonObject(issue)) {
+      continue;
+    }
+    if (issue.severity === 'blocker') {
+      blockers += 1;
+    }
+    if (issue.severity === 'major') {
+      majors += 1;
+    }
+  }
+  return { blockers, majors };
+}
+
+const UNANCHORED_WARN_RATIO = 0.5;
+
 export interface LoopResult {
   iter: number;
 }
@@ -76,13 +98,20 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     }
     ctx.lastCritiqueIter = iter;
     const critiqueJson = readJson(critique);
-    const issuesCount = jqLength(isJsonObject(critiqueJson) ? critiqueJson.issues : null);
-    log(`  → ${issuesCount} raw issues`);
+    const rawIssues =
+      isJsonObject(critiqueJson) && Array.isArray(critiqueJson.issues) ? critiqueJson.issues : [];
+    const duplicateCount = rawIssues.filter(isCritiqueDuplicateIssue).length;
+    const issuesCount = rawIssues.length - duplicateCount;
+    if (duplicateCount > 0) {
+      log(`  → ${issuesCount} actionable issues (${duplicateCount} duplicate)`);
+    } else {
+      log(`  → ${issuesCount} issues`);
+    }
 
     const health = critiqueHealth(ctx.work, ctx.skills.criticSchema, iter, critique);
     if (health.total > 0) {
       log(
-        `  → addressed=${health.addressed} new=${health.newIssues} invalid=${health.invalid} (${health.pct}% valid-addressed)`,
+        `  → addressed=${health.addressed} new=${health.newIssues} invalid=${health.invalid} unanchored=${health.unanchored} (${health.pct}% valid-addressed)`,
       );
       if (health.invalid > 0) {
         log(`WARNING: critic returned ${health.invalid} invalid address reference(s)`);
@@ -90,12 +119,38 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       if (health.pct < 30 && iter >= 2) {
         log('WARNING: critic is mostly finding new issues, not refining — possible drift');
       }
+      if (health.unanchored > 0 && health.unanchored / health.total >= UNANCHORED_WARN_RATIO) {
+        log(
+          `WARNING: ${health.unanchored}/${health.total} issues lack file:line or section-anchor evidence — possible evidence drift`,
+        );
+      }
     }
 
     if (issuesCount === 0) {
       log(`converged at v${iter} (critic returned no issues)`);
       copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
       break;
+    }
+
+    if (ctx.quality.judge === 1) {
+      const { blockers, majors } = openBlockerMajor(critiqueJson);
+      if (blockers === 0 && majors === 0) {
+        log(
+          `iter=${iter} — judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
+        );
+        const judgeFile = path.join(ctx.work, `judge.v${iter}.json`);
+        const verdict = await runJudge(ctx, iter, plan, critique, judgeFile);
+        log(
+          `  → judge ready=${verdict.ready}${verdict.rationale !== '' ? ` (${verdict.rationale})` : ''}`,
+        );
+        if (verdict.ready) {
+          log(`converged at v${iter} (judge verdict: implementation-ready)`);
+          copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
+          break;
+        }
+      } else {
+        log(`iter=${iter} — judge skipped (${blockers} blocker / ${majors} major open)`);
+      }
     }
 
     log(`iter=${iter} — creator update (${matrix.creator.runner} ${matrix.creator.model})`);

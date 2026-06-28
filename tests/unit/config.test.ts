@@ -100,7 +100,8 @@ describe('resolveConfig role matrix', () => {
     const { config } = resolveConfig({ env: {}, home: tmp });
     expect(config.matrix.critic).toEqual({ runner: 'codex', model: 'gpt-5.5', reasoning: 'high' });
     expect(config.matrix.creator.runner).toBe('claude');
-    expect(runnersInUse(config.matrix, 0, 0)).toEqual(['codex', 'claude']);
+    expect(runnersInUse(config.matrix, 0, 0, 0)).toEqual(['codex', 'claude']);
+    expect(runnersInUse(config.matrix, 0, 0, 1)).toEqual(['codex', 'claude']);
   });
 });
 

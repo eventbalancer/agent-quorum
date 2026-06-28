@@ -643,6 +643,13 @@ export async function runPlanLoopCli(
         tools: permissions.reviewer.tools,
         disallowedTools: permissions.reviewer.disallowedTools,
       },
+      judge: {
+        runner: matrix.judge.runner,
+        model: matrix.judge.model,
+        reasoning: matrix.judge.reasoning,
+        tools: permissions.judge.tools,
+        disallowedTools: permissions.judge.disallowedTools,
+      },
       runId,
       name,
     };
@@ -661,6 +668,8 @@ export async function runPlanLoopCli(
       skills.reviewerSchema,
       skills.translatorSkill,
       skills.markdownSchema,
+      skills.judgeSkill,
+      skills.judgeSchema,
     ]) {
       if (!existsSync(skillFile)) {
         process.stderr.write(`missing: ${skillFile}\n`);
@@ -672,7 +681,12 @@ export async function runPlanLoopCli(
     }
 
     const binaries = { ...resolveRunnerBinaries(), cursor: resolved.providers.cursorBin };
-    const required = runnersInUse(matrix, settings.fixPass, settings.translatePass);
+    const required = runnersInUse(
+      matrix,
+      settings.fixPass,
+      settings.translatePass,
+      qualityKnobs.judge,
+    );
     const preflightFailure = preflightRunners(required, binaries);
     if (preflightFailure !== undefined) {
       process.stderr.write(`${preflightFailure.message}\n`);
