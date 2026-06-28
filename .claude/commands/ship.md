@@ -96,6 +96,56 @@ See `docs/development/worktree-selection-gate.md` for candidate discovery, the
 durable-record contract keyed by worktree, the conservative active-edit signal,
 and the presentation surface.
 
+## Parallel delegation
+
+The conductor - the agent that runs `/ship` - keeps every decision and every
+irreversible operation, and delegates only read-only and `dist/`-only work to
+cheaper sub-agents through the harness `Agent` tool. Run the workers
+concurrently and overlap them with verification: this trades fan-out for
+wall-clock without moving any side effect off the conductor. Cheaper models do
+not make a shell command faster; the speedup comes from running independent
+checks at once and from doing the diff reading on a faster tier while
+verification runs. When the `Agent` tool is unavailable, run the same steps
+sequentially in the conductor with no other change.
+
+**Conductor only - never delegate.** The worktree selection gate, the
+delivery-target classification (new / follow-up / direct-to-main), the
+behind-upstream stop, the unsafe-scope rejection, the irreversible plan and the
+operator confirmation, and every history- or remote-touching command:
+`git add`, `git commit`, `git push`, `git tag`, `gh pr create`, PR body edits,
+`worktree:done`, and the release version bump, tag, and publish. Workers never
+stage, commit, push, tag, edit a PR, or write tracked files.
+
+**Verification fan-out.** Once scope is fixed, run one worker per check instead
+of the sequential `pnpm run check`:
+
+```text
+build | typecheck | lint | format-check | test
+```
+
+The checks are independent and only `build` writes `dist/` (gitignored), so a
+shared checkout is safe. Each worker runs its single `pnpm run <check>` and
+returns pass/fail plus the failing output on failure. Wall-clock becomes the
+slowest check, not their sum. Verification is green only when every worker
+passes; one failure fails verification, and the conductor reports which check
+failed. For a docs-only change the fan-out is a single `format-check` worker;
+add a `build` (and smoke) worker for package or public-API changes.
+
+**Read-prep, overlapped with the fan-out.** While the checks run, delegate the
+read-only preparation: a diff summary and blast-radius proposal from
+`git diff`, the documentation-reconciliation scan, originating-issue discovery,
+the command-mirror `cmp -s` checks, and a draft commit message. These results
+are advisory; the conductor confirms the blast-radius classification, the issue
+link, and the commit message before using them.
+
+Suggested model tiers: a cheap mechanical tier (for example Haiku) for the
+verification workers, the mirror checks, and issue discovery; a mid tier (for
+example Sonnet) for the diff summary, blast-radius, and commit-message draft.
+Keep the conductor on its own model for routing, the plan, and the irreversible
+steps. In the release flow, fan out the `pnpm run check` sub-steps only after
+`pnpm install` completes, and keep install, publish dry-run, version bump, tag,
+and publish sequential in the conductor.
+
 ## Step 0 - Preflight and route
 
 1. Apply the worktree selection gate first: resolve, enter, and verify the target
@@ -192,7 +242,10 @@ repository-local skill changes that do not publish a new npm version. A
    ```
 
    Read untracked text files before including them. For binary files, report
-   type and origin instead of guessing.
+   type and origin instead of guessing. Delegate this inspection and the other
+   read-prep items to concurrent workers per
+   [Parallel delegation](#parallel-delegation); the conductor confirms their
+   proposals before planning the commit.
 
 2. Classify the blast radius:
 
@@ -240,6 +293,11 @@ repository-local skill changes that do not publish a new npm version. A
    - package contents, public API, or release-adjacent changes: run
      `pnpm run build` after `pnpm run check`; smoke-test the built public
      package when the API surface changed.
+
+   Run the chosen checks through the verification fan-out in
+   [Parallel delegation](#parallel-delegation): one worker per check, run
+   concurrently and overlapped with the read-prep, green only when every worker
+   passes.
 
    If verification cannot be run, stop before commit/push unless the operator
    explicitly accepts the residual risk.
