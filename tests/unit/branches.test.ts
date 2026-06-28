@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   cursorStreamJsonEvent,
@@ -25,7 +26,12 @@ import {
 import { resolveConfig } from '../../src/core/config.js';
 import { resolveWatchdogKnobs } from '../../src/core/knobs.js';
 import { HaltError } from '../../src/runtime/halt.js';
-import { interruptThenTerminate, spawnDetached, waitForExit } from '../../src/runtime/exec.js';
+import {
+  interruptThenTerminate,
+  killTree,
+  spawnDetached,
+  waitForExit,
+} from '../../src/runtime/exec.js';
 import {
   captureStderr,
   defaultPlanLoopConfig,
@@ -37,6 +43,7 @@ import { Scratch } from '../../src/runtime/scratch.js';
 import type { JsonObject } from '../../src/core/json.js';
 
 let tmp: string;
+const spawnedChildren: ChildProcess[] = [];
 
 interface SanitizedCritiqueIssue {
   id: string;
@@ -63,6 +70,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const child of spawnedChildren) {
+    killTree(child, 'SIGKILL');
+  }
+  spawnedChildren.length = 0;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -392,6 +403,7 @@ describe('config and knob halts', () => {
 describe('exec escalation', () => {
   it('escalates SIGINT to SIGTERM for children that ignore INT', async () => {
     const child = spawnDetached('sh', ['-c', "trap '' INT; sleep 30"], { stdio: 'ignore' });
+    spawnedChildren.push(child);
     await new Promise((resolve) => setTimeout(resolve, 200));
     await interruptThenTerminate(child, 1);
     const status = await waitForExit(child);

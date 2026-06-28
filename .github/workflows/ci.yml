@@ -26,3 +26,5 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check
         run: pnpm run check
+      - name: Coverage
+        run: pnpm run coverage

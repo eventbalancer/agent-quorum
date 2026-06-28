@@ -1,6 +1,16 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { describe, expect, it } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
+import { afterEach, describe, expect, it } from 'vitest';
 import { killTree, spawnDetached, waitForExit } from '../../src/runtime/exec.js';
+
+const spawnedChildren: ChildProcess[] = [];
+
+afterEach(() => {
+  for (const child of spawnedChildren) {
+    killTree(child, 'SIGKILL');
+  }
+  spawnedChildren.length = 0;
+});
 
 function isAlive(pid: number): boolean {
   try {
@@ -16,6 +26,7 @@ describe('exec process groups', () => {
     const child = spawnDetached('sh', ['-c', 'sleep 30 & echo "grandchild:$!"; sleep 30'], {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
+    spawnedChildren.push(child);
     let stdout = '';
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -37,11 +48,13 @@ describe('exec process groups', () => {
 
   it('waitForExit maps clean exits to their code', async () => {
     const child = spawnDetached('sh', ['-c', 'exit 5'], { stdio: 'ignore' });
+    spawnedChildren.push(child);
     expect(await waitForExit(child)).toBe(5);
   });
 
   it('waitForExit reports 127 for unknown binaries', async () => {
     const child = spawnDetached('agent-quorum-no-such-binary', [], { stdio: 'ignore' });
+    spawnedChildren.push(child);
     expect(await waitForExit(child)).toBe(127);
   });
 });

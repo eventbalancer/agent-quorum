@@ -60,7 +60,7 @@
   },
   "autoMode": {
     "allow": [
-      "Project-local pnpm commands from the agent-quorum repository root are authorized: pnpm install --frozen-lockfile, pnpm run build, pnpm run typecheck, pnpm run lint, pnpm run format-check, pnpm run test, pnpm run check, pnpm run dev, pnpm run plan:self, pnpm run launch:self, and pnpm exec <repo-local-bin>.",
+      "Project-local pnpm commands from the agent-quorum repository root are authorized: pnpm install --frozen-lockfile, pnpm run build, pnpm run typecheck, pnpm run lint, pnpm run format-check, pnpm run test, pnpm run coverage, pnpm run check, pnpm run dev, pnpm run plan:self, pnpm run launch:self, and pnpm exec <repo-local-bin>.",
       "Read-only git inspection in this repository is authorized: git status, git diff, git show, git log, and git branch --show-current.",
       "Local self-planning dogfood through pnpm run plan:self (foreground) and pnpm run launch:self (detached, survives session close) is authorized, along with pnpm run dev -- logs / status / show / intervene to observe and steer those runs."
     ]

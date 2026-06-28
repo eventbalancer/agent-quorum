@@ -222,7 +222,8 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 ```sh
 corepack enable
 pnpm install --frozen-lockfile
-pnpm run check          # typecheck + lint + format check + tests with coverage
+pnpm run check          # typecheck + lint + format check + tests
+pnpm run coverage       # tests with V8 coverage thresholds (also enforced in CI)
 ```
 
 Code style, git, and verification rules live in
