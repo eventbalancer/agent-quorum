@@ -104,7 +104,8 @@ pnpm run typecheck    # tsc --noEmit
 pnpm run lint         # eslint .
 pnpm run format       # prettier --write .
 pnpm run format-check # prettier --check .
-pnpm run test         # vitest run --coverage
+pnpm run test         # vitest run
+pnpm run coverage     # vitest run --coverage (lines/functions >=80%, branches >=69%)
 pnpm run check        # build && typecheck && lint && format-check && test
 pnpm run dev          # tsx src/cli/main.ts
 ```
@@ -665,4 +666,4 @@ Before claiming done, or for any behavior change:
 pnpm run check
 ```
 
-`pnpm run typecheck` green is the floor; `pnpm run check` green (typecheck + lint + format-check + tests with coverage) is the bar for a finished change.
+`pnpm run typecheck` green is the floor; `pnpm run check` green (typecheck + lint + format-check + tests) is the bar for a finished change. Coverage thresholds are enforced separately by `pnpm run coverage` (run in CI on every PR and push to `main` via `ci.yml` and in `release.yml` `validate`, and on demand locally), so a local commit or `pnpm run check` no longer measures coverage.

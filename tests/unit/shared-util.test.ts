@@ -1,18 +1,24 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isJsonObject, jqAlt } from '../../src/core/json.js';
 import { countNewlines, fileLineCount, nonEmptyFile } from '../../src/runtime/files.js';
 import { killTree, ownPgid, spawnDetached, waitForExit } from '../../src/runtime/exec.js';
 
 let tmp: string;
+const spawnedChildren: ChildProcess[] = [];
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-shared.'));
 });
 
 afterEach(() => {
+  for (const child of spawnedChildren) {
+    killTree(child, 'SIGKILL');
+  }
+  spawnedChildren.length = 0;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -88,6 +94,7 @@ describe('process helpers', () => {
 
   it('maps SIGKILL terminations to 137 and tolerates dead trees', async () => {
     const child = spawnDetached('sleep', ['30'], { stdio: 'ignore' });
+    spawnedChildren.push(child);
     await new Promise((resolve) => setTimeout(resolve, 100));
     killTree(child, 'SIGKILL');
     expect(await waitForExit(child)).toBe(137);
