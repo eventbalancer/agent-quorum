@@ -63,7 +63,7 @@ if [[ -n "${FAKE_CLAUDE_THINKING_LOOP_ONCE:-}" ]]; then
     while true; do
       echo '{"type":"system","subtype":"thinking_tokens","tokens":1}'
       echo '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172,"error":"unknown"}'
-      sleep 0.2 & wait "$!"
+      sleep 0.2
     done
   fi
 fi
@@ -75,7 +75,7 @@ if [[ -n "${FAKE_CLAUDE_API_RETRY_LOOP_ONCE:-}" ]]; then
     trap 'exit 130' INT TERM
     while true; do
       echo '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"delay_ms":1172,"error":"unknown"}'
-      sleep 0.2 & wait "$!"
+      sleep 0.2
     done
   fi
 fi
@@ -87,7 +87,7 @@ if [[ -n "${FAKE_CLAUDE_WALLCLOCK_LOOP_ONCE:-}" ]]; then
     trap 'exit 130' INT TERM
     while true; do
       echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}'
-      sleep 0.4 & wait "$!"
+      sleep 0.4
     done
   fi
 fi

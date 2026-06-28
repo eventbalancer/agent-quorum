@@ -667,3 +667,20 @@ pnpm run check
 ```
 
 `pnpm run typecheck` green is the floor; `pnpm run check` green (typecheck + lint + format-check + tests) is the bar for a finished change. Coverage thresholds are enforced separately by `pnpm run coverage` (run in CI on every PR and push to `main` via `ci.yml` and in `release.yml` `validate`, and on demand locally), so a local commit or `pnpm run check` no longer measures coverage.
+
+### Concurrent shared-root verification
+
+The vitest suite is deterministic under two `pnpm run test` runs sharing one
+checkout root, so multiple agents (or CI) orienting in the same tree do not flake
+the timing-sensitive provider watchdog tests. `pnpm run test:concurrent` is the
+repeatable check: it runs five rounds of two simultaneous `pnpm run test`
+invocations (round and parallelism counts are positional, default `5 2`), each in
+its own process group under a bounded per-run hang timeout (`AQ_RUN_TIMEOUT_SECS`,
+default 600s), runs every configured round, and exits non-zero if any run fails or
+times out.
+
+This guarantee covers the **test suite** (`pnpm run test`), not a concurrent full
+`pnpm run check`: the `dist/` build-output race (two `pnpm run build` sharing
+`rm -rf dist` then `tsc → dist`) is a separate, deferred concern, so
+`pnpm run test:concurrent` never runs the build. For fully isolated concurrent
+`check` runs, give each session its own root with `pnpm run worktree:create`.

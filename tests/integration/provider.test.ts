@@ -391,7 +391,7 @@ describe('claude sessions', () => {
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       streamKnobs: {
         codex: DISABLED_STREAM_KNOBS,
-        claude: { ...BASE_STREAM_KNOBS, byteTimeoutSeconds: 1 },
+        claude: { ...BASE_STREAM_KNOBS, byteTimeoutSeconds: 3 },
         cursor: BASE_STREAM_KNOBS,
       },
     });
@@ -473,7 +473,7 @@ describe('claude watchdog', () => {
       retry: { retryCount: 0, retryDelaySeconds: 0 },
       streamKnobs: {
         codex: DISABLED_STREAM_KNOBS,
-        claude: { ...BASE_STREAM_KNOBS, semanticTimeoutSeconds: 2, wallTimeoutSeconds: 5 },
+        claude: { ...BASE_STREAM_KNOBS, semanticTimeoutSeconds: 3, wallTimeoutSeconds: 5 },
         cursor: BASE_STREAM_KNOBS,
       },
     });
