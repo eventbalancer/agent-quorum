@@ -44,6 +44,7 @@
   "scripts": {
     "dev": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts",
     "plan:self": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts plan",
+    "launch:self": "AGENT_QUORUM_PLANS_DIR=.agents/plans tsx src/cli/main.ts launch",
     "smoke:codex": "scripts/smoke.sh codex",
     "smoke:claude": "scripts/smoke.sh claude",
     "smoke:cursor": "scripts/smoke.sh cursor",

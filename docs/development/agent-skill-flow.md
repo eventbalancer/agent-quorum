@@ -246,20 +246,28 @@ Rules:
 
 ## Running agent-quorum
 
-Dogfood the loop through the `agent-quorum` bin, run straight from source:
+Dogfood the loop through the `agent-quorum` bin, run straight from source. When
+an agent starts the run on the operator's behalf, use the detached
+`launch:self`: it returns immediately and the run survives the Claude Code
+session that started it being closed.
 
 ```sh
-pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
+pnpm run launch:self -- --prompt .agents/prompts/<slug>.md
 ```
 
 Useful options:
 
 ```sh
-pnpm run plan:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
-AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-balanced pnpm run plan:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
+pnpm run launch:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
+AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-balanced pnpm run launch:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
 ```
 
-`plan:self` runs `src/cli/main.ts` via `tsx` — no build step — and writes run
+`launch:self` prints a `started:` block (run log path plus follow/stop
+commands); observe the run afterward with `pnpm run dev -- logs --last -f`. Use
+the foreground `pnpm run plan:self -- …` instead for interactive, session-bound
+debugging where blocking output is wanted.
+
+Both scripts run `src/cli/main.ts` via `tsx` — no build step — and write run
 artifacts and the ledger under `.agents/plans/`. For the public API path that
 external consumers use, see [`examples/api.ts`](../../examples/api.ts).
 

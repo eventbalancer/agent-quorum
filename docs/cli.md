@@ -130,8 +130,12 @@ agent-quorum launch [--resume] [--iters N] [--quality {quick,balanced,thorough}]
 
 Backgrounds the run in its own process group, rotates `run.log`, exports
 `CI=true` (and `AGENT_QUORUM_RESUME=1` for `--resume`), verifies liveness, and
-prints pid/log/work plus follow/stop hints. Usage errors exit 2; resume workdir
-resolution exits 3 (none found) or 4 (ambiguous).
+prints pid/log/work plus follow/stop hints. The `detached: true` process group
+is a new session (cross-platform; no `setsid` binary needed), so the run
+outlives the terminal or Claude Code session that started it. Usage errors exit
+2; resume workdir resolution exits 3 (none found) or 4 (ambiguous). For a manual
+detach without this command, see the fallback in
+[`run-lifecycle.md`](run-lifecycle.md).
 
 ## Selector grammar
 

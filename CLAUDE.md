@@ -46,9 +46,12 @@ Override all other project-level guidance.
   docblocks may explain invariants, units, failure modes, and external contracts;
   do not write parameter-by-parameter docblocks that repeat the type signature.
 - **Dogfood through the real CLI.** For changes that should be designed by
-  `agent-quorum` itself, drive the loop with `pnpm run plan:self -- --prompt …`
-  (the `agent-quorum` bin from source, no build required); see
-  [`examples/`](examples/).
+  `agent-quorum` itself, drive the loop with the `agent-quorum` bin from source
+  (no build required); see [`examples/`](examples/). When you start a run on the
+  operator's behalf, use the detached `pnpm run launch:self -- --prompt …`: it
+  returns immediately and the run survives the Claude Code session closing.
+  Reserve foreground `pnpm run plan:self -- --prompt …` for interactive,
+  session-bound debugging where blocking output is wanted.
 - **Isolate sessions in worktrees.** Run nontrivial, multi-file, or potentially
   concurrent work in a session worktree
   (`pnpm run worktree:create <slug> --desc <text>`), not the shared checkout;
@@ -77,21 +80,22 @@ When facts conflict, trust in this order:
 
 ## 3. Required Entry Points
 
-| Task                       | Use                                                                                                                        |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Install dependencies       | `pnpm install --frozen-lockfile`                                                                                           |
-| Build                      | `pnpm run build`                                                                                                           |
-| Typecheck                  | `pnpm run typecheck`                                                                                                       |
-| Lint                       | `pnpm run lint`                                                                                                            |
-| Format check               | `pnpm run format-check`                                                                                                    |
-| Tests                      | `pnpm run test`                                                                                                            |
-| Full verification          | `pnpm run check`                                                                                                           |
-| Local CLI                  | `pnpm run dev -- <args>`                                                                                                   |
-| Public API smoke           | `pnpm run build` then import from `agent-quorum`                                                                           |
-| Self-planning dogfood      | `pnpm run plan:self -- --prompt <prompt.md>`                                                                               |
-| Repo-local binaries        | `pnpm exec <bin>`                                                                                                          |
-| Start a session worktree   | `pnpm run worktree:create <slug> --desc <text>`                                                                            |
-| Session worktree lifecycle | `pnpm run worktree:list` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
+| Task                         | Use                                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Install dependencies         | `pnpm install --frozen-lockfile`                                                                                           |
+| Build                        | `pnpm run build`                                                                                                           |
+| Typecheck                    | `pnpm run typecheck`                                                                                                       |
+| Lint                         | `pnpm run lint`                                                                                                            |
+| Format check                 | `pnpm run format-check`                                                                                                    |
+| Tests                        | `pnpm run test`                                                                                                            |
+| Full verification            | `pnpm run check`                                                                                                           |
+| Local CLI                    | `pnpm run dev -- <args>`                                                                                                   |
+| Public API smoke             | `pnpm run build` then import from `agent-quorum`                                                                           |
+| Self-planning dogfood        | `pnpm run plan:self -- --prompt <prompt.md>` (foreground, session-bound)                                                   |
+| Agent-initiated detached run | `pnpm run launch:self -- --prompt <prompt.md>` (detached, survives session close)                                          |
+| Repo-local binaries          | `pnpm exec <bin>`                                                                                                          |
+| Start a session worktree     | `pnpm run worktree:create <slug> --desc <text>`                                                                            |
+| Session worktree lifecycle   | `pnpm run worktree:list` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
 
 ## 4. Git Boundaries
 
@@ -116,14 +120,23 @@ When facts conflict, trust in this order:
 
 ## 6. Self-Planning Workflow
 
-Use this when the repository should plan its own change before implementation:
+Use this when the repository should plan its own change before implementation.
+When you start the run on the operator's behalf, launch it detached so it
+outlives the Claude Code session that started it:
 
 ```sh
-pnpm run plan:self -- --prompt path/to/task.md
+pnpm run launch:self -- --prompt path/to/task.md
 ```
 
-`plan:self` runs the `agent-quorum` bin from source (no build) and writes plan
-artifacts under `.agents/plans/`. Requirements live under
+`launch:self` detaches the run into its own process group, returns immediately,
+and prints a `started:` block with the run log path plus the commands to follow
+(`tail -F`) and stop (`kill -TERM -<pgid>`) it; report those to the operator.
+Observe a detached run later with `pnpm run dev -- logs --last -f`. Use the
+foreground `pnpm run plan:self -- --prompt path/to/task.md` instead only for
+interactive, session-bound debugging where blocking output is wanted.
+
+Both entry points run the `agent-quorum` bin from source (no build) and write
+plan artifacts under `.agents/plans/`. Requirements live under
 `.agents/requirements/`; prompts live under `.agents/prompts/`. Read the
 reported `summary.md` and `plan.final.md`, then implement and verify normally.
 
@@ -134,8 +147,8 @@ Canonical planning chains:
 - `/solution-handoff` -> `/prompt-architect` -> confirmed self-planning run.
 - `/prompt-architect` -> confirmed self-planning run.
 
-Only `/prompt-architect` asks for launch confirmation and starts the
-`plan:self` run; earlier steps prepare context and hand it downstream.
+Only `/prompt-architect` asks for launch confirmation and starts the detached
+self-planning run; earlier steps prepare context and hand it downstream.
 
 ## 7. Verification Floor
 

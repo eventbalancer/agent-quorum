@@ -22,7 +22,7 @@ any working-tree action.
 Agnostic skills (FR-10): `issues`, `requirements`, and `solution-handoff` never
 present the gate, because they produce documents from conversation and read-only
 inspection and never act on a working tree. `prompt-architect` is also not gated;
-its `plan:self` runs are excluded by D-1.
+its detached self-planning runs are excluded by D-1.
 
 ## Dependency and single-worktree no-op
 
