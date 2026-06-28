@@ -3,4 +3,7 @@ set -euo pipefail
 
 pnpm run format
 git add -u
-pnpm run check
+pnpm run build
+pnpm run typecheck
+pnpm run lint
+pnpm run format-check
