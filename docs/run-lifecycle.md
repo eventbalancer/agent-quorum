@@ -47,7 +47,22 @@ agent-quorum launch --quality balanced task.md  # detach into its own process gr
 
 A foreground run logs `run <id> (<name>)` at start and writes `run.log` in its
 workdir. `launch` prints a `started:` block with the `run:` id, `pid`, `log`,
-and `work` paths, then returns immediately.
+and `work` paths, then returns immediately. Because `launch` puts the run in its
+own process group with `detached: true` (a new session, cross-platform on macOS
+and Linux without the `setsid` binary), the run survives the terminal — or the
+Claude Code session — that started it being closed; follow and stop it later
+with the printed commands.
+
+Without the `launch` command — for example a manual operator run from a plain
+shell — wrap the foreground `plan` so it detaches the same way. This works on
+macOS (no `setsid`) and Linux:
+
+```sh
+( nohup agent-quorum plan task.md > task.run.log 2>&1 & )   # detached; ignores SIGHUP on close
+```
+
+The subshell plus `nohup` keeps the run alive after the launching shell exits;
+inspect `task.run.log` for progress and outcome.
 
 API — the same two entry points; both report `runId`/`name`:
 

@@ -245,7 +245,10 @@ pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
 `plan:self` runs `src/cli/main.ts` via `tsx` (no build), points run artifacts at
 `.agents/plans/`, and accepts the usual `--quality`, `--iters`, `--locale`,
 `--translate`, and `--fix` / `--no-fix` flags; set `AGENT_QUORUM_WORK_DIR` to pin a
-workdir name.
+workdir name. Its sibling `pnpm run launch:self -- …` takes the same flags but
+detaches the run into its own process group, so a run started on your behalf
+keeps going after the launching session closes; follow it with
+`pnpm run dev -- logs --last -f`.
 
 Artifact ownership:
 

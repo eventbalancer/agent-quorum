@@ -16,7 +16,7 @@ handoff, not a solver.
 - Upstream: ad-hoc debugging, review, audit, failed test investigation.
 - Upstream: `/requirements` when product or public-contract forks were resolved
   first.
-- Downstream: `/prompt-architect` -> confirmed `plan:self` self-planning run ->
+- Downstream: `/prompt-architect` -> confirmed detached self-planning run ->
   implementation.
 - Optional intermediate: `/requirements` when the fix raises product-level or
   public-contract forks that need operator decisions.
@@ -200,7 +200,7 @@ confirmation.
 - `/prompt-architect` emits run profiles that execute:
 
 ```text
-AGENT_QUORUM_WORK_DIR=<workdir> pnpm run plan:self -- --quality <quality> --iters <n> --prompt <prompt-path>
+AGENT_QUORUM_WORK_DIR=<workdir> pnpm run launch:self -- --quality <quality> --iters <n> --prompt <prompt-path>
 ```
 
 Run artifacts should use distinct workdirs under `.agents/plans/`. Do not start
