@@ -5,10 +5,9 @@ intervene, stop — from both the CLI and the library, using one selector gramma
 This page walks the five stages end to end. For the full flag reference see
 [`cli.md`](cli.md); for the typed surface see [`api.md`](api.md).
 
-In a dual-TTY terminal, the [interactive shell](interactive-shell.md)
-(`agent-quorum` with no command) is an additional entry surface for all five
-stages — discover, inspect, follow logs, launch, intervene, and stop — over the
-same engines this page describes.
+In a dual-TTY terminal, bare `agent-quorum` opens the
+[local web workspace](web-workspace.md); run-lifecycle operations remain on the
+explicit CLI commands and the API this page describes.
 
 ## Identity and selectors
 

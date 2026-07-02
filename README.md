@@ -112,6 +112,7 @@ you care about are:
 A single `agent-quorum` bin fronts these entry points:
 
 ```sh
+agent-quorum                                 # local web workspace (first slice: chat page)
 agent-quorum plan my-plan.md                 # core loop over an existing plan
 agent-quorum plan --prompt my-prompt.md      # create plan.v0 from a prompt first
 agent-quorum launch --quality balanced task.md  # detached background run + run.log
@@ -122,7 +123,10 @@ agent-quorum intervene <selector> "note"     # inject operator guidance mid-run
 agent-quorum prune [--keep N] [--dry-run]    # bound the run ledger
 ```
 
-Runs are addressable by a durable `runId`/`name` selector; see the end-to-end
+The bare command serves a loopback-only URL (printed as
+`workspace: http://127.0.0.1:<port>/`) and stops with Ctrl-C; see
+[`docs/web-workspace.md`](docs/web-workspace.md). Runs are addressable by a
+durable `runId`/`name` selector; see the end-to-end
 walk-through in [`docs/run-lifecycle.md`](docs/run-lifecycle.md). The full flag
 reference and exit codes live in [`docs/cli.md`](docs/cli.md), and the plan
 shape gate that existing plan inputs must satisfy is documented in
@@ -197,6 +201,8 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 - [`docs/configuration.md`](docs/configuration.md) — the per-user store and the
   environment-variable surface.
 - [`docs/cli.md`](docs/cli.md) — entry points, flags, exit codes.
+- [`docs/web-workspace.md`](docs/web-workspace.md) — the bare-command local web
+  workspace: served page, HTTP contract, privacy, and lifecycle.
 - [`docs/api.md`](docs/api.md) — typed API and CommonJS consumption.
 - [`docs/release.md`](docs/release.md) — release flow across git tags, GitHub
   Actions, GitHub Releases, and npm.

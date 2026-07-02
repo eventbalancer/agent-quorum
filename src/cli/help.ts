@@ -138,7 +138,7 @@ export function globalHelp(stages: readonly StageSummary[]): string {
     '  setup       guided configuration: essentials, auto-detected role runners, optional Telegram\n' +
     '  config      print the resolved configuration and each value’s winning layer (token masked)\n' +
     '\n' +
-    'in a TTY, run agent-quorum with no command to open the interactive shell.\n' +
+    'in a TTY, run agent-quorum with no command to start the local web workspace.\n' +
     '\n' +
     'agent-quorum <command> --help prints command-specific usage.\n' +
     'agent-quorum --version (or -V, as the first argument) prints the package version.\n' +
