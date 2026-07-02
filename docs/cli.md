@@ -20,11 +20,11 @@ codes are identical to the reference scripts, with one documented deviation: an
 explicit `-h`/`--help` prints usage to **stdout** and exits **0** (the reference
 run/intervene scripts replied on stderr with exit 1). Error-path usage output
 keeps the reference streams and exit codes. With no arguments in a dual-TTY
-terminal (both stdin and stdout are TTYs), `agent-quorum` opens the
-[interactive shell](interactive-shell.md); with no arguments in any
+terminal (both stdin and stdout are TTYs), `agent-quorum` starts the
+[local web workspace](web-workspace.md); with no arguments in any
 non-interactive context — piped or redirected stdio — or with `--help`/`-h`, it
 prints the global help (stages, run-lifecycle commands, the configuration
-commands, the additive interactive-shell line, and the effective defaults from the
+commands, the additive web-workspace line, and the effective defaults from the
 resolved store); `agent-quorum --version`/`-V` prints the package version,
 byte-identical.
 
@@ -38,21 +38,31 @@ normal output. On a non-zero provider exit, `agent-quorum` emits one compact
 `<role>/<provider> call failed` summary with status, captured stderr line
 count, and a classified reason when one is recognized.
 
-## Interactive shell
+## Web workspace
 
-In a dual-TTY terminal, `agent-quorum` with no command opens a full-screen,
-keyboard-first shell over the existing run lifecycle — discover runs grouped by
-store, inspect detail, follow `run.log`, launch, intervene, and stop, all from
-one control surface. It is built only on `node:readline` raw-mode keypresses and
-raw ANSI, with no new dependency. Opening the shell performs no mutation: it
-reads ledger and artifact metadata and starts a read-only refresh; launch,
-intervene, and a typed-name-confirmed stop are the only write paths. Runs are
-status-color-coded (running/finished/failed/blocked) from the 16-color palette,
-with a full `NO_COLOR` text fallback — a glyph and a label carry the same state
-when color is off. Every other no-argument path (piped or redirected stdio,
-`--help`/`-h`) is unchanged and still prints the global help. See the
-[interactive shell runbook](interactive-shell.md) for keys, views, and the
-`NO_COLOR`/80×24 behavior.
+In a dual-TTY terminal, `agent-quorum` with no command starts an in-process,
+loopback-only HTTP server and serves a self-contained chat page — the first
+slice of the local web workspace. The command prints a `workspace:` block whose
+stable first line carries the URL:
+
+```text
+workspace: http://127.0.0.1:4747/
+  note:  preferred port 4747 busy — using an ephemeral port      (only on fallback)
+  open:  automatic browser open unavailable — open the url above (only on open failure)
+  chat:  local first slice — messages stay in this process and are discarded on exit
+  stop:  Ctrl-C stops the local server
+```
+
+The server binds `127.0.0.1` only — never a non-local interface — and prefers
+port `4747`, falling back to an ephemeral port when the preferred one is busy.
+A best-effort platform opener (`open`/`xdg-open`/`start`) tries to open the
+browser; when the attempt fails, the printed URL is the fallback. Ctrl-C
+(SIGINT) or SIGTERM closes the server, frees the port, and exits 0. The chat
+transcript is in-memory and provider-free in this first slice. Every other
+no-argument path (piped or redirected stdio, `--help`/`-h`) is unchanged and
+still prints the global help. See the
+[web workspace runbook](web-workspace.md) for the served page, the HTTP
+contract, and the privacy and lifecycle guarantees.
 
 ## Plan stage — `agent-quorum plan [flags] <plan.md>`
 

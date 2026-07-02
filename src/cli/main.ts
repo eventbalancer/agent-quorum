@@ -7,7 +7,7 @@ import { runSetupCli } from './setup.js';
 import { runInterveneCli } from './intervene.js';
 import { runLaunchCli } from './launch.js';
 import { runLogsCli, runPruneCli, runShowCli } from './runs.js';
-import { openShellOrHelp, runShell } from './shell/index.js';
+import { openWorkspaceOrHelp, runWebWorkspace } from './web/index.js';
 import { runStatusCliInteractive } from './status.js';
 
 process.title = 'agent-quorum';
@@ -29,9 +29,12 @@ async function main(): Promise<number> {
   }));
   const first = args[0];
   if (first === undefined) {
-    return await openShellOrHelp(
+    return await openWorkspaceOrHelp(
       { input: process.stdin, output: process.stdout },
-      { runShell, writeHelp: () => process.stdout.write(globalHelp(summaries)) },
+      {
+        runWorkspace: runWebWorkspace,
+        writeHelp: () => process.stdout.write(globalHelp(summaries)),
+      },
     );
   }
   if (first === '--help' || first === '-h') {

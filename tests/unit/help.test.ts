@@ -41,9 +41,9 @@ describe('help text', () => {
     expect(packageVersion()).toBe(pkg.version);
   });
 
-  it('globalHelp advertises the interactive shell entry surface', () => {
+  it('globalHelp advertises the web workspace entry surface', () => {
     expect(globalHelp(STAGE_SUMMARIES)).toContain(
-      'in a TTY, run agent-quorum with no command to open the interactive shell.',
+      'in a TTY, run agent-quorum with no command to start the local web workspace.',
     );
   });
 
