@@ -185,7 +185,8 @@ override > env > store > default
 | Windows       | Not supported | —               |
 
 Both macOS and Linux are tested on every push and pull request via the full
-`pnpm run check` matrix (build · typecheck · lint · format · tests). Install the
+`pnpm run check` matrix (build · format · types · lint) plus
+`pnpm run test:coverage`. Install the
 provider CLIs you plan to use (`npm install -g @anthropic-ai/claude-code`,
 `npm install -g @openai/codex`) and authenticate each. `cursor-agent` has no
 official Linux package yet; point `AGENT_QUORUM_CURSOR_BIN` at your Cursor headless
@@ -229,8 +230,9 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 ```sh
 corepack enable
 pnpm install --frozen-lockfile
-pnpm run check          # typecheck + lint + format check + tests
-pnpm run coverage       # tests with V8 coverage thresholds (also enforced in CI)
+pnpm run check          # build + format/lint autofix + format/lint/types checks (no tests)
+pnpm run test           # vitest run
+pnpm run test:coverage  # tests with V8 coverage thresholds (also enforced in CI)
 ```
 
 Code style, git, and verification rules live in
@@ -247,16 +249,18 @@ through the `agent-quorum` bin straight from source — see [`examples/`](exampl
 for the full CLI and API walkthrough:
 
 ```sh
-pnpm run plan:self -- --prompt .agents/prompts/<slug>.md
+pnpm run run:cli -- plan --prompt .agents/prompts/<slug>.md
 ```
 
-`plan:self` runs `src/cli/main.ts` via `tsx` (no build), points run artifacts at
-`.agents/plans/`, and accepts the usual `--quality`, `--iters`, `--locale`,
-`--translate`, and `--fix` / `--no-fix` flags; set `AGENT_QUORUM_WORK_DIR` to pin a
-workdir name. Its sibling `pnpm run launch:self -- …` takes the same flags but
-detaches the run into its own process group, so a run started on your behalf
-keeps going after the launching session closes; follow it with
-`pnpm run dev -- logs --last -f`.
+`run:web` and `run:cli` run `src/cli/main.ts` via `tsx` (no build) and point
+run artifacts at `.agents/plans/`. Bare `pnpm run run:web` serves the local web
+workspace; bare `pnpm run run:cli` prints CLI help. Forward subcommands with
+`pnpm run run:cli -- …`: the `plan` subcommand accepts the usual `--quality`,
+`--iters`, `--locale`, `--translate`, and `--fix` / `--no-fix` flags; set
+`AGENT_QUORUM_WORK_DIR` to pin a workdir name. The same entry with `launch`
+takes the same flags but detaches the run into its own process group, so a run
+started on your behalf keeps going after the launching session closes; follow
+it with `pnpm run run:cli -- logs --last -f`.
 
 Artifact ownership:
 

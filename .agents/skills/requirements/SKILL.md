@@ -92,7 +92,7 @@ Check the relevant surfaces:
 - Orchestration: `src/core/*`, `docs/architecture.md`.
 - Providers and watchdogs: `src/providers/*`, `src/runtime/*`.
 - Role skills and schemas: `skills/**/SKILL.md`, `skills/**/*.schema.json`.
-- Self-planning dogfood: the `plan:self` (foreground) and `launch:self`
+- Self-planning dogfood: the `run:cli -- plan` (foreground) and `run:cli -- launch`
   (detached) package scripts (`agent-quorum` from source).
 
 Every claim about existing code carries `file:line`. Every claim about behavior

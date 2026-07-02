@@ -52,7 +52,8 @@ nothing more.
 `--to-main` selects a direct-to-main delivery: it commits and fast-forward pushes
 straight to `origin/main`, bypassing the PR and required-status-checks ruleset.
 Only the repository's ruleset bypass actor (an admin) can land it, and because no
-server CI gate runs, `pnpm run check` locally is mandatory. Never force-push
+server CI gate runs, `pnpm run check` and `pnpm run test` locally are
+mandatory. Never force-push
 `main`, and always confirm before the push. See
 [Direct-to-main delivery](#direct-to-main-delivery).
 
@@ -117,25 +118,27 @@ operator confirmation, and every history- or remote-touching command:
 stage, commit, push, tag, edit a PR, or write tracked files.
 
 **Verification fan-out.** Once scope is fixed, replace the sequential
-`pnpm run check` with a build barrier followed by a concurrent fan-out:
+`pnpm run check` plus `pnpm run test` with a build barrier followed by a
+concurrent fan-out:
 
 ```text
-build  ->  typecheck | lint | format-check | test
+build  ->  types:check | lint:check | format:check | test
 ```
 
 `build` runs first and alone: it does `rm -rf dist` and regenerates `dist/`,
-and the type-aware `lint` (plus any test that imports the built package)
+and the type-aware `lint:check` (plus any test that imports the built package)
 resolves the `agent-quorum` self-import through `dist/`. A `build` running
 concurrently with those readers transiently deletes the types they read and
 yields false `no-unsafe-*` lint failures, so build must finish before they
 start - it is a barrier, not a peer worker. After it completes, fan out
-`typecheck`, `lint`, `format-check`, and `test` concurrently; those four only
+`types:check`, `lint:check`, `format:check`, and `test` concurrently; those
+four only
 read the tree and are mutually independent. Each worker runs its single
 `pnpm run <check>` and returns pass/fail plus the failing output. Wall-clock
 becomes build plus the slowest reader, not the full sum. Verification is green
 only when every worker passes; one failure fails verification, and the conductor
 reports which check failed. For a docs-only change the fan-out is a single
-`format-check` worker; for package or public-API changes keep the `build`
+`format:check` worker; for package or public-API changes keep the `build`
 barrier and add a smoke worker after it.
 
 **Read-prep, overlapped with the fan-out.** While the checks run, delegate the
@@ -288,7 +291,7 @@ repository-local skill changes that do not publish a new npm version. A
    - docs or repository-local skills only:
 
      ```sh
-     pnpm run format-check
+     pnpm run format:check
      ```
 
    - code, config, scripts, tests, CLI/API, package metadata, provider/runtime,

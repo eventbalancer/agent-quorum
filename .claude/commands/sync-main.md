@@ -204,7 +204,7 @@ GIT_EDITOR=true git rebase --continue
 Isolate-and-verify between commits when a resolution was non-trivial:
 
 ```sh
-pnpm run typecheck
+pnpm run types:check
 ```
 
 When the rebase finishes, confirm the state and the shape of history:

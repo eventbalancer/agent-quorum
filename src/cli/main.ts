@@ -15,8 +15,8 @@ process.title = 'agent-quorum';
 // Umbrella dispatcher: reserved run-lifecycle commands plus a stage registry
 // (`plan` is the sole entry today). No default fallthrough — an unrecognized
 // first token is an error. A leading `--` is dropped twice: at the front for the
-// `pnpm run dev -- <command>` forwarding case, and again after the subcommand for
-// the `pnpm run plan:self -- --prompt …` case, so the stage parser sees its
+// `pnpm run run:cli -- <command>` forwarding case, and again after the subcommand for
+// the `pnpm run run:cli -- plan --prompt …` case, so the stage parser sees its
 // own flags intact.
 async function main(): Promise<number> {
   const args = process.argv.slice(2);

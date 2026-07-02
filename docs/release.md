@@ -18,7 +18,7 @@ One release version must line up across all surfaces:
 The `release` GitHub Actions workflow has two paths:
 
 - Manual `workflow_dispatch`: validate only (`pnpm run check`,
-  `pnpm run coverage`, build, `npm publish --dry-run --access public`). It
+  `pnpm run test:coverage`, build, `npm publish --dry-run --access public`). It
   never receives an npm token.
 - Tag push `v*`: validate first, then run the `publish` job behind the protected
   `npm-publish` environment. A tag push alone does not publish; the environment
@@ -77,7 +77,7 @@ Run the same core validation the package uses in CI:
 ```bash
 pnpm install --frozen-lockfile
 pnpm run check
-pnpm run coverage
+pnpm run test:coverage
 pnpm run build
 npm publish --dry-run --access public
 ```

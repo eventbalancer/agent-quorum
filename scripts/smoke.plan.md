@@ -22,8 +22,9 @@ quality, at most two iterations, fix and translate passes off by default.
 
 - The umbrella CLI entry point is `src/cli/main.ts`; the plan stage runs through
   `src/stages/plan/run.ts` and parses arguments in `parseRunArgs`.
-- `pnpm run plan:self` (`package.json` scripts) runs `tsx src/cli/main.ts plan`
-  with `AGENT_QUORUM_PLANS_DIR=.agents/plans`, so artifacts land under
+- `pnpm run run:cli -- plan` (`package.json` `run:cli`; bare defaults to
+  `--help`, forwarded args run `tsx src/cli/main.ts <command>`) runs the plan
+  stage with `AGENT_QUORUM_PLANS_DIR=.agents/plans`, so artifacts land under
   `.agents/plans/`.
 - The default role matrix lives in `src/core/defaults.ts` (`DEFAULT_CONFIG`,
   mirrored by `config.example.json`); per-role runner and model are overridable
@@ -71,7 +72,7 @@ Non-goals:
 
 ## Verification
 
-- `pnpm run smoke:<provider>` completes with exit 0 and writes `plan.final.md` +
+- `pnpm run test:smoke:<provider>` completes with exit 0 and writes `plan.final.md` +
   `summary.md`.
 
 ## STOP Triggers

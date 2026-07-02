@@ -207,9 +207,9 @@ For each phase or step:
 3. Use repository entry points: `pnpm run <script>` and `pnpm exec <bin>`. Do
    not use `npx`.
 4. After each meaningful phase, run the narrowest relevant check:
-   - markdown or repository-local skill text only: `pnpm run format-check` when
+   - markdown or repository-local skill text only: `pnpm run format:check` when
      practical;
-   - routine TypeScript edits: `pnpm run typecheck`;
+   - routine TypeScript edits: `pnpm run types:check`;
    - broad, public, schema, provider, CLI, or behavior changes:
      `pnpm run check`.
 5. Journal only deviations, blockers, tool failures, pre-existing bugs surfaced
@@ -221,8 +221,8 @@ For each phase or step:
 Choose verification by blast radius, then run it before claiming the work is
 done:
 
-- docs or repository-local skill text only: `pnpm run format-check`;
-- routine code changes: `pnpm run typecheck` and `pnpm run lint` at minimum;
+- docs or repository-local skill text only: `pnpm run format:check`;
+- routine code changes: `pnpm run types:check` and `pnpm run lint:check` at minimum;
 - behavior changes, public API, CLI flags, config, schemas, providers, runtime,
   role skills, or cross-module orchestration: `pnpm run check`;
 - tests added or changed: include `pnpm run test` if a narrower command was
@@ -277,7 +277,7 @@ Log one terse line per relevant item.
 | Side-effect breakage | Changing `RunContext` affected `src/core/summary.ts`, which the plan did not mention.             |
 | Stale reference      | Plan references `src/core/pass.ts`; the behavior now lives in `src/core/loop.ts`.                 |
 | Design decision      | Plan says "add retry" without count; chose the existing `retry` helper defaults.                  |
-| Tooling issue        | `pnpm run typecheck` failed before edits on unrelated `tests/helpers/harness.ts` diagnostics.     |
+| Tooling issue        | `pnpm run types:check` failed before edits on unrelated `tests/helpers/harness.ts` diagnostics.   |
 | Pre-existing bug     | `validatePlanShape()` accepts empty reviewer output; unrelated to this plan, surfaced in testing. |
 | Blocked step         | Phase 4 requires a GitHub token; skipped and flagged for manual completion.                       |
 
@@ -294,7 +294,7 @@ Do not log:
 - Plan is the spec. Do not add scope, refactor adjacent code, or improve
   unrelated behavior.
 - Journal is for the reviewer. Keep it scannable in 30 seconds.
-- Verify before claiming done. `pnpm run typecheck` is the floor for code
+- Verify before claiming done. `pnpm run types:check` is the floor for code
   changes; `pnpm run check` is the floor for broad or contract-touching changes.
 - Do not commit. The operator decides when to `/ship`.
 - Stop on blockers. Missing dependencies, broken upstream state, and ambiguous

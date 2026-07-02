@@ -425,7 +425,7 @@ describe('entry-point dispatch', () => {
     expect(result.stdout).toContain('stages:');
   });
 
-  it('drops a forwarded -- separator before the plan flags (plan:self shape)', () => {
+  it('drops a forwarded -- separator before the plan flags (run:cli plan shape)', () => {
     const result = runCli(
       [
         'plan',

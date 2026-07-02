@@ -31,17 +31,20 @@ The workflow Claude commands and Codex skills are mirrored byte-for-byte:
 .claude/commands/execute.md             <-> .agents/skills/execute/SKILL.md
 .claude/commands/tidy.md                <-> .agents/skills/tidy/SKILL.md
 .claude/commands/ship.md                <-> .agents/skills/ship/SKILL.md
+.claude/commands/sync-main.md           <-> .agents/skills/sync-main/SKILL.md
+.claude/commands/switch.md              <-> .agents/skills/switch/SKILL.md
 ```
 
 When one side changes, update the other side in the same change and verify the
 pairs with `cmp`.
 
-The working-tree-dependent skills `tidy`, `ship`, and `execute` additionally
-share the [Worktree selection gate](worktree-selection-gate.md): before acting,
-each resolves and enters the operator's intended session worktree. The
-worktree-agnostic skills `issues`, `requirements`, and `solution-handoff` (and
-`prompt-architect`) do not present the gate, because they never act on a
-checkout's working tree.
+The working-tree-dependent skills `tidy`, `ship`, `execute`, and `sync-main`
+additionally share the [Worktree selection gate](worktree-selection-gate.md):
+before acting, each resolves and enters the operator's intended session
+worktree. `/switch` uses the same gate semantics when presenting targets and
+confirming an actively edited worktree. The worktree-agnostic skills `issues`,
+`requirements`, and `solution-handoff` (and `prompt-architect`) do not present
+the gate, because they never act on a checkout's working tree.
 
 ## Artifact Root
 
@@ -248,23 +251,23 @@ Rules:
 
 Dogfood the loop through the `agent-quorum` bin, run straight from source. When
 an agent starts the run on the operator's behalf, use the detached
-`launch:self`: it returns immediately and the run survives the Claude Code
+`run:cli -- launch`: it returns immediately and the run survives the Claude Code
 session that started it being closed.
 
 ```sh
-pnpm run launch:self -- --prompt .agents/prompts/<slug>.md
+pnpm run run:cli -- launch --prompt .agents/prompts/<slug>.md
 ```
 
 Useful options:
 
 ```sh
-pnpm run launch:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
-AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-balanced pnpm run launch:self -- --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
+pnpm run run:cli -- launch --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
+AGENT_QUORUM_WORK_DIR=.agents/plans/loop-<slug>-balanced pnpm run run:cli -- launch --quality balanced --iters 5 --prompt .agents/prompts/<slug>.md
 ```
 
-`launch:self` prints a `started:` block (run log path plus follow/stop
-commands); observe the run afterward with `pnpm run dev -- logs --last -f`. Use
-the foreground `pnpm run plan:self -- …` instead for interactive, session-bound
+`run:cli -- launch` prints a `started:` block (run log path plus follow/stop
+commands); observe the run afterward with `pnpm run run:cli -- logs --last -f`. Use
+the foreground `pnpm run run:cli -- plan …` instead for interactive, session-bound
 debugging where blocking output is wanted.
 
 Both scripts run `src/cli/main.ts` via `tsx` — no build step — and write run
@@ -280,14 +283,14 @@ committed [`scripts/smoke.plan.md`](../../scripts/smoke.plan.md) prompt and
 writes to `.agents/plans/smoke-<provider>/`.
 
 ```sh
-pnpm run smoke:codex     # all roles on codex gpt-5.5
-pnpm run smoke:claude    # all roles on claude sonnet
-pnpm run smoke:cursor    # all roles on cursor composer-2.5
+pnpm run test:smoke:codex     # all roles on codex gpt-5.5
+pnpm run test:smoke:claude    # all roles on claude sonnet
+pnpm run test:smoke:cursor    # all roles on cursor composer-2.5
 ```
 
 Each is a single quick-quality iteration with no fix or translate pass. A pass
 ends with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving
-`plan.final.md` and `summary.md` in the workdir. `smoke:claude` runs on
+`plan.final.md` and `summary.md` in the workdir. `test:smoke:claude` runs on
 `sonnet`: in `default`
 permission mode a cheap claude creator returns a complete plan, but the `haiku`
 critic still emits schema-invalid critique JSON, so `sonnet` is the smallest
@@ -296,8 +299,8 @@ table in [`configuration.md`](../configuration.md)). Override the model or
 input:
 
 ```sh
-SMOKE_MODEL=sonnet pnpm run smoke:claude
-SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run smoke:codex
+SMOKE_MODEL=sonnet pnpm run test:smoke:claude
+SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run test:smoke:codex
 ```
 
 ## Verification
@@ -305,7 +308,7 @@ SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run smoke:codex
 For skill or workflow documentation changes:
 
 ```sh
-pnpm run format-check
+pnpm run format:check
 ```
 
 For script, public contract, schema, provider, CLI, or orchestration changes:

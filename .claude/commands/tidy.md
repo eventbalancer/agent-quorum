@@ -215,14 +215,14 @@ Do not report success until this gate is complete.
 
 ## Verification
 
-- For routine TypeScript refactors, run `pnpm run typecheck` and
-  `pnpm run lint` at minimum.
+- For routine TypeScript refactors, run `pnpm run types:check` and
+  `pnpm run lint:check` at minimum.
 - Before claiming a behavior-affecting or implementation task is done, run
   `pnpm run check`.
 - If public API, CLI, config, schemas, or role skills are touched, include the
   relevant docs/tests and use `pnpm run check` as the floor.
 - If the tidy touches only markdown or agent skill text, run the relevant
-  validator or `pnpm run format-check` when practical, and report any check not
+  validator or `pnpm run format:check` when practical, and report any check not
   run.
 - If `.agents/skills/` or `.claude/commands/` changed, run `cmp -s` for every
   documented mirror pair affected by the scoped change, and report the pairs

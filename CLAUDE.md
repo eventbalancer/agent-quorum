@@ -48,17 +48,19 @@ Override all other project-level guidance.
 - **Dogfood through the real CLI.** For changes that should be designed by
   `agent-quorum` itself, drive the loop with the `agent-quorum` bin from source
   (no build required); see [`examples/`](examples/). When you start a run on the
-  operator's behalf, use the detached `pnpm run launch:self -- --prompt …`: it
+  operator's behalf, use the detached `pnpm run run:cli -- launch --prompt …`: it
   returns immediately and the run survives the Claude Code session closing.
-  Reserve foreground `pnpm run plan:self -- --prompt …` for interactive,
+  Reserve foreground `pnpm run run:cli -- plan --prompt …` for interactive,
   session-bound debugging where blocking output is wanted.
 - **Isolate sessions in worktrees.** Run nontrivial, multi-file, or potentially
   concurrent work in a session worktree
   (`pnpm run worktree:create <slug> --desc <text>`), not the shared checkout.
   Right after creating one for implementation work, open it in the operator's
   editor with `pnpm run worktree:open <slug>` (best-effort; a missing editor
-  launcher never blocks the session). Integrate to `main` via `/ship` plus an
-  explicit step. See
+  launcher never blocks the session). Switch the session's execution context
+  between the primary checkout and a worktree on operator request via `/switch`
+  (`pnpm run worktree:switch [root|<id>]`). Integrate to `main` via `/ship`
+  plus an explicit step. See
   [Session Worktrees](docs/development/conventions.md#session-worktrees).
 - **No orphan background shells.** Do not leave long-running shell sessions or
   detached commands alive after moving on.
@@ -87,18 +89,20 @@ When facts conflict, trust in this order:
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Install dependencies         | `pnpm install --frozen-lockfile`                                                                                                                  |
 | Build                        | `pnpm run build`                                                                                                                                  |
-| Typecheck                    | `pnpm run typecheck`                                                                                                                              |
-| Lint                         | `pnpm run lint`                                                                                                                                   |
-| Format check                 | `pnpm run format-check`                                                                                                                           |
+| Typecheck                    | `pnpm run types:check`                                                                                                                            |
+| Lint                         | `pnpm run lint:check` (autofix: `pnpm run lint:fix`)                                                                                              |
+| Format check                 | `pnpm run format:check` (rewrite: `pnpm run format:write`)                                                                                        |
 | Tests                        | `pnpm run test`                                                                                                                                   |
-| Full verification            | `pnpm run check`                                                                                                                                  |
-| Local CLI                    | `pnpm run dev -- <args>`                                                                                                                          |
+| Full verification            | `pnpm run check` (build + format + static checks; no tests) plus `pnpm run test`                                                                  |
+| Local web workspace          | `pnpm run run:web` (bare: loopback chat page)                                                                                                     |
+| Local CLI                    | `pnpm run run:cli` (bare: help); subcommands via `pnpm run run:cli -- <command>`                                                                  |
 | Public API smoke             | `pnpm run build` then import from `agent-quorum`                                                                                                  |
-| Self-planning dogfood        | `pnpm run plan:self -- --prompt <prompt.md>` (foreground, session-bound)                                                                          |
-| Agent-initiated detached run | `pnpm run launch:self -- --prompt <prompt.md>` (detached, survives session close)                                                                 |
+| Self-planning dogfood        | `pnpm run run:cli -- plan --prompt <prompt.md>` (foreground, session-bound)                                                                       |
+| Agent-initiated detached run | `pnpm run run:cli -- launch --prompt <prompt.md>` (detached, survives session close)                                                              |
 | Repo-local binaries          | `pnpm exec <bin>`                                                                                                                                 |
 | Start a session worktree     | `pnpm run worktree:create <slug> --desc <text>`                                                                                                   |
 | Session worktree lifecycle   | `pnpm run worktree:list` / `worktree:open <id>` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
+| Switch execution context     | `pnpm run worktree:switch [target]` — `root` or a worktree slug/path/branch; operator skill `/switch`                                             |
 
 ## 4. Git Boundaries
 
@@ -128,14 +132,14 @@ When you start the run on the operator's behalf, launch it detached so it
 outlives the Claude Code session that started it:
 
 ```sh
-pnpm run launch:self -- --prompt path/to/task.md
+pnpm run run:cli -- launch --prompt path/to/task.md
 ```
 
-`launch:self` detaches the run into its own process group, returns immediately,
+`run:cli -- launch` detaches the run into its own process group, returns immediately,
 and prints a `started:` block with the run log path plus the commands to follow
 (`tail -F`) and stop (`kill -TERM -<pgid>`) it; report those to the operator.
-Observe a detached run later with `pnpm run dev -- logs --last -f`. Use the
-foreground `pnpm run plan:self -- --prompt path/to/task.md` instead only for
+Observe a detached run later with `pnpm run run:cli -- logs --last -f`. Use the
+foreground `pnpm run run:cli -- plan --prompt path/to/task.md` instead only for
 interactive, session-bound debugging where blocking output is wanted.
 
 Both entry points run the `agent-quorum` bin from source (no build) and write
@@ -156,8 +160,8 @@ self-planning run; earlier steps prepare context and hand it downstream.
 ## 7. Verification Floor
 
 Before claiming implementation is complete, run the narrowest relevant checks.
-For broad or contract-touching changes, `pnpm run check` is the floor. If a
-check cannot be run, report why and what risk remains.
+For broad or contract-touching changes, `pnpm run check` plus `pnpm run test`
+is the floor. If a check cannot be run, report why and what risk remains.
 
 ## 8. Self-Improvement
 

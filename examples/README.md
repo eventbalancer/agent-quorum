@@ -14,38 +14,40 @@ Prerequisites: Node ≥ 24 and at least one authenticated provider CLI (`codex`,
 
 ## Two ways to invoke the CLI
 
-| Context          | Command                   | Build needed?                   |
-| ---------------- | ------------------------- | ------------------------------- |
-| Installed user   | `agent-quorum …`          | n/a (global bin)                |
-| Inside this repo | `pnpm run plan:self -- …` | no (runs from source via `tsx`) |
+| Context          | Command                      | Build needed?                   |
+| ---------------- | ---------------------------- | ------------------------------- |
+| Installed user   | `agent-quorum …`             | n/a (global bin)                |
+| Inside this repo | `pnpm run run:cli -- plan …` | no (runs from source via `tsx`) |
 
-`plan:self` is a one-line convenience in `package.json`: it points the run
-artifacts at this repo's `.agents/plans/` ledger and invokes the `plan` stage
-from source — so `pnpm run plan:self -- …` reads as `agent-quorum plan …` for an
-installed user. The run-lifecycle commands (`launch`, `status`, `show`, `logs`,
+`run:web` and `run:cli` in `package.json` both run `src/cli/main.ts` via `tsx`
+(no build) with run artifacts pointed at this repo's `.agents/plans/` ledger.
+`run:web` with no arguments opens the local web workspace; bare `run:cli` prints
+CLI help. Forward subcommands with `pnpm run run:cli -- <command>`, so
+`pnpm run run:cli -- plan …` reads as `agent-quorum plan …` for an installed
+user. The run-lifecycle commands (`launch`, `status`, `show`, `logs`,
 `intervene`) are not part of the `plan` stage; from source drive them through
-`pnpm run dev -- <command>` (the same repo ledger), which an installed user
+`pnpm run run:cli -- <command>` (the same repo ledger), which an installed user
 spells `agent-quorum <command>`.
 
 ## CLI walkthrough
 
 ```sh
 # 1. Plan from a task prompt (creates plan.v0, then loops to convergence).
-pnpm run plan:self -- --prompt examples/task.example.md --quality balanced --iters 3
+pnpm run run:cli -- plan --prompt examples/task.example.md --quality balanced --iters 3
 
 # 1b. Or refine an existing plan file instead of a prompt.
-pnpm run plan:self -- my-plan.md
+pnpm run run:cli -- plan my-plan.md
 
 # 2. Detach a long run into its own process group with run.log redirection.
-pnpm run dev -- launch --quality balanced --prompt examples/task.example.md
+pnpm run run:cli -- launch --quality balanced --prompt examples/task.example.md
 
 # 3. Inspect runs.
-pnpm run dev -- status            # list runs (interactive picker in a TTY)
-pnpm run dev -- show --last       # artifact paths + state of the latest run
-pnpm run dev -- logs --last -f    # follow a detached run's log until it ends
+pnpm run run:cli -- status            # list runs (interactive picker in a TTY)
+pnpm run run:cli -- show --last       # artifact paths + state of the latest run
+pnpm run run:cli -- logs --last -f    # follow a detached run's log until it ends
 
 # 4. Steer a run mid-flight.
-pnpm run dev -- intervene --last "prefer an additive migration"
+pnpm run run:cli -- intervene --last "prefer an additive migration"
 ```
 
 When the loop converges it writes, under the run's workdir:

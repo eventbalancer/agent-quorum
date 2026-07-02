@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Session worktree lifecycle for agent-quorum. Each subcommand keeps a session's
 # work in its own linked git worktree on a session/<slug> branch so the unmodified
-# pre-commit hook (git add -u + pnpm run check) operates only on that tree.
+# pre-commit hook (pnpm run check + git add -u) operates only on that tree.
 #
 #   create <slug> (--desc <text> | --desc-file <path>) [--from <ref>]
 #   list
 #   open <slug|path|branch> [--editor <bin>]
+#   switch [root|<slug|path|branch>]
 #   touch <slug|path|branch>
 #   done <slug|path|branch>
 #   reopen <slug|path|branch>
@@ -344,7 +345,25 @@ cmd_create() {
   echo ""
   echo "Enter it with the harness 'EnterWorktree $dir' tool, or 'cd $dir'."
   echo "Open it in the operator's editor with 'pnpm run worktree:open $slug'."
-  echo "Per-worktree DoD: run 'pnpm run check' inside the worktree before committing."
+  echo "Per-worktree DoD: run 'pnpm run check' and 'pnpm run test' inside the worktree before committing."
+}
+
+worktree_task_description() {
+  local admin="$1"
+  if [ -n "$admin" ] && [ -f "$admin/$RECORD_FILE" ]; then
+    head -1 "$admin/$RECORD_FILE"
+    return
+  fi
+  echo "(no task description recorded)"
+}
+
+print_worktree_task_and_status() {
+  local path="$1" now_epoch="$2"
+  local admin status
+  admin="$(git -C "$path" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  status="$(edit_status "$admin" "$path" "$now_epoch")"
+  printf '  task:   %s\n' "$(worktree_task_description "$admin")"
+  printf '  status: %s\n' "$status"
 }
 
 cmd_list() {
@@ -354,18 +373,9 @@ cmd_list() {
   local i
   for i in "${!WT_PATHS[@]}"; do
     local p="${WT_PATHS[$i]}" b="${WT_BRANCHES[$i]}"
-    local admin task status
-    admin="$(git -C "$p" rev-parse --absolute-git-dir 2>/dev/null || true)"
-    if [ -n "$admin" ] && [ -f "$admin/$RECORD_FILE" ]; then
-      task="$(head -1 "$admin/$RECORD_FILE")"
-    else
-      task="(no task description recorded)"
-    fi
-    status="$(edit_status "$admin" "$p" "$now_epoch")"
     printf '%s\n' "${b:-(detached)}"
     printf '  path:   %s\n' "$p"
-    printf '  task:   %s\n' "$task"
-    printf '  status: %s\n' "$status"
+    print_worktree_task_and_status "$p" "$now_epoch"
     echo ""
   done
 }
@@ -426,6 +436,102 @@ cmd_open() {
   "$launcher" "$RESOLVED_PATH"
   echo "[worktree] opened ${RESOLVED_BRANCH:-(detached)} in $launcher"
   echo "  path:   $RESOLVED_PATH"
+}
+
+# Label a checkout path against the parsed worktree arrays. `git worktree list`
+# always reports the primary checkout first, so WT_PATHS[0] is root.
+describe_context() {
+  local path="$1" i
+  if [ -z "$path" ]; then
+    echo "(not inside a git repository)"
+    return
+  fi
+  if [ "$path" = "${WT_PATHS[0]}" ]; then
+    echo "root (primary checkout, branch ${WT_BRANCHES[0]:-detached})"
+    return
+  fi
+  for i in "${!WT_PATHS[@]}"; do
+    if [ "${WT_PATHS[$i]}" = "$path" ]; then
+      echo "linked worktree (branch ${WT_BRANCHES[$i]:-detached})"
+      return
+    fi
+  done
+  echo "(checkout not registered in this repository)"
+}
+
+switch_target_kind() {
+  local dest="$1" primary="$2" branch="$3"
+  if [ "$dest" = "$primary" ]; then
+    echo "root (primary checkout)"
+    return
+  fi
+  if is_session_branch "${branch:-}"; then
+    echo "session worktree"
+    return
+  fi
+  echo "linked worktree"
+}
+
+# Resolve a switch target and print the handoff block for the agent. The script
+# cannot change the caller's working directory; the agent performs the move with
+# the host EnterWorktree/ExitWorktree tools or cd, then verifies the handoff.
+cmd_switch() {
+  list_worktrees
+  local primary="${WT_PATHS[0]}" primary_branch="${WT_BRANCHES[0]}"
+  local current
+  current="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ "$#" -lt 1 ]; then
+    echo "[worktree] current context"
+    printf '  path:   %s\n' "${current:-(none)}"
+    printf '  kind:   %s\n' "$(describe_context "$current")"
+    echo ""
+    echo "Switch with 'scripts/worktree.sh switch <root|slug|path|branch>'."
+    echo "Targets: 'root' (primary checkout) plus the entries from 'scripts/worktree.sh list'."
+    return
+  fi
+  if [ "$#" -gt 1 ]; then
+    echo "worktree switch: unexpected argument '$2'" >&2
+    echo "usage: scripts/worktree.sh switch [root|<slug|path|branch>]" >&2
+    exit 2
+  fi
+  local target="$1"
+  if [ "$target" = "root" ]; then
+    RESOLVED_PATH="$primary"
+    RESOLVED_BRANCH="$primary_branch"
+  else
+    resolve_worktree "$target" 0
+  fi
+  local dest="$RESOLVED_PATH" branch="$RESOLVED_BRANCH"
+  local kind
+  kind="$(switch_target_kind "$dest" "$primary" "$branch")"
+  echo "[worktree] switch context"
+  printf '  from:   %s\n' "${current:-(unknown)}"
+  printf '  to:     %s\n' "$dest"
+  printf '  branch: %s\n' "${branch:-(detached)}"
+  printf '  kind:   %s\n' "$kind"
+  if [ "$dest" != "$primary" ]; then
+    local admin now_epoch
+    now_epoch="$(date -u +%s)"
+    admin="$(git -C "$dest" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    print_worktree_task_and_status "$dest" "$now_epoch"
+    if [ -n "$admin" ] && [ -f "$admin/$DONE_FILE" ]; then
+      echo "  note:   marked done; run 'scripts/worktree.sh reopen ${branch:-$dest}' before editing"
+    elif [ -n "$admin" ] && [ -f "$admin/$MARKER_FILE" ]; then
+      refresh_marker "$admin/$MARKER_FILE"
+      echo "  marker: refreshed $admin/$MARKER_FILE"
+    fi
+  fi
+  echo ""
+  if [ "$dest" = "$current" ]; then
+    echo "Already in this context; no handoff needed."
+    return
+  fi
+  if [ "$dest" = "$primary" ]; then
+    echo "Enter it with the harness 'ExitWorktree' tool (when the session entered via EnterWorktree), or 'cd $dest'."
+  else
+    echo "Enter it with the harness 'EnterWorktree $dest' tool, or 'cd $dest'."
+  fi
+  echo "Confirm the handoff: 'git rev-parse --show-toplevel' must print $dest."
 }
 
 cmd_touch() {
@@ -540,7 +646,7 @@ cmd_release() {
 
 main() {
   if [ "$#" -lt 1 ]; then
-    echo "usage: scripts/worktree.sh <create|list|open|touch|done|reopen|release> ..." >&2
+    echo "usage: scripts/worktree.sh <create|list|open|switch|touch|done|reopen|release> ..." >&2
     exit 2
   fi
   local sub="$1"
@@ -549,13 +655,14 @@ main() {
     create) cmd_create "$@" ;;
     list) cmd_list "$@" ;;
     open) cmd_open "$@" ;;
+    switch) cmd_switch "$@" ;;
     touch) cmd_touch "$@" ;;
     done) cmd_done "$@" ;;
     reopen) cmd_reopen "$@" ;;
     release) cmd_release "$@" ;;
     *)
       echo "worktree: unknown subcommand '$sub'" >&2
-      echo "usage: scripts/worktree.sh <create|list|open|touch|done|reopen|release> ..." >&2
+      echo "usage: scripts/worktree.sh <create|list|open|switch|touch|done|reopen|release> ..." >&2
       exit 2
       ;;
   esac

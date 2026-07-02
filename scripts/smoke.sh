@@ -46,4 +46,4 @@ export AGENT_QUORUM_WORK_DIR="$work"
 rm -rf "$work"
 echo "[smoke] provider=$provider model=$model reasoning=$reasoning"
 echo "[smoke] workdir=$work"
-exec pnpm run plan:self -- --prompt "$prompt" --effort low --iters 1 --no-fix --no-translate
+exec pnpm run run:cli -- plan --prompt "$prompt" --effort low --iters 1 --no-fix --no-translate

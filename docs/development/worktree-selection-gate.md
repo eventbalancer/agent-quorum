@@ -15,9 +15,14 @@ behavior only: no public API, CLI bin, configuration, or schema contract changes
 
 ## Scope
 
-Gated skills (FR-1): `tidy`, `ship`, `execute`, and any future skill that reads
-or mutates a checkout's working tree. Each resolves its target worktree before
-any working-tree action.
+Gated skills (FR-1): `tidy`, `ship`, `execute`, `sync-main`, and any future
+skill that reads or mutates a checkout's working tree. Each resolves its target
+worktree before any working-tree action.
+
+`/switch` uses the same candidate discovery, done-worktree filtering,
+active-edit confirmation, and handoff verification when presenting targets and
+entering a worktree, but it does not integrate, rebase, or edit project files
+by itself.
 
 Agnostic skills (FR-10): `issues`, `requirements`, and `solution-handoff` never
 present the gate, because they produce documents from conversation and read-only

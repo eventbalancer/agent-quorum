@@ -635,7 +635,7 @@ function renderPhaseDoc(phase: PlanPhase, phases: readonly PlanPhase[], index: n
     'Run before editing:',
     '',
     '```bash',
-    'pnpm run typecheck',
+    'pnpm run types:check',
     '```',
     '',
     'Add narrower checks when this phase touches schemas, providers, the CLI, the public API, or generated artifacts.',

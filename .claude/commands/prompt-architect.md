@@ -9,7 +9,7 @@ Transform a brief or vague request into a problem-describing prompt for a
 downstream coding agent. The prompt hands the agent what is known about the
 problem and lets it choose the solution shape. For this repository, the primary
 downstream runner is the local `agent-quorum` self-planning loop, started
-detached through the `launch:self` package script (the `agent-quorum` bin, run
+detached through `pnpm run run:cli -- launch` (the `agent-quorum` bin, run
 from source) so the run outlives the Claude Code session that confirmed it.
 
 This is the only command in the chain that may start `agent-quorum`, and it does
@@ -335,12 +335,12 @@ Before commands, choose iteration caps:
 Command template:
 
 ```sh
-cd <repo-absolute-path> && AGENT_QUORUM_WORK_DIR=<workdir-absolute-path> pnpm run launch:self -- --quality <quality> --iters <n> --prompt <prompt-absolute-path>
+cd <repo-absolute-path> && AGENT_QUORUM_WORK_DIR=<workdir-absolute-path> pnpm run run:cli -- launch --quality <quality> --iters <n> --prompt <prompt-absolute-path>
 ```
 
 Keep commands identical except `--quality`, `--iters`, and workdir suffix.
 
-`launch:self` detaches the run into its own process group and returns
+`run:cli -- launch` detaches the run into its own process group and returns
 immediately, so the run survives the Claude Code session closing. No manual
 detach command is required.
 
@@ -381,7 +381,7 @@ Run profiles (quality -> speed):
 Thorough:
 
 ```sh
-cd /Users/<you>/agent-quorum && AGENT_QUORUM_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-thorough pnpm run launch:self -- --quality thorough --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
+cd /Users/<you>/agent-quorum && AGENT_QUORUM_WORK_DIR=/Users/<you>/agent-quorum/.agents/plans/loop-api-consumer-example-thorough pnpm run run:cli -- launch --quality thorough --iters 8 --prompt /Users/<you>/agent-quorum/.agents/prompts/api-consumer-example.md
 ```
 
 Launch `agent-quorum` now?

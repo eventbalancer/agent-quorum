@@ -99,28 +99,33 @@ Do not use force pushes, `--no-verify`, or `--allow-unrelated`. Never commit or 
 Use the `package.json` scripts:
 
 ```bash
-pnpm run build        # tsc -p tsconfig.build.json
-pnpm run typecheck    # tsc --noEmit
-pnpm run lint         # eslint .
-pnpm run format       # prettier --write .
-pnpm run format-check # prettier --check .
-pnpm run test         # vitest run
-pnpm run coverage     # vitest run --coverage (lines/functions >=80%, branches >=69%)
-pnpm run check        # build && typecheck && lint && format-check && test
-pnpm run dev          # tsx src/cli/main.ts
+pnpm run build          # build:clean (rm -rf dist) + tsc -p tsconfig.build.json
+pnpm run types:check    # tsc --noEmit
+pnpm run lint:check     # eslint .
+pnpm run lint:fix       # eslint . --fix
+pnpm run format:write   # prettier --write .
+pnpm run format:check   # prettier --check .
+pnpm run test           # vitest run
+pnpm run test:coverage  # vitest run --coverage (lines/functions >=80%, branches >=69%)
+pnpm run check          # build && format:write && format:check && lint:fix && lint:check && types:check (no tests)
+pnpm run run:web        # tsx src/cli/main.ts — bare: local web workspace (127.0.0.1)
+pnpm run run:cli        # bare: CLI help; subcommands via pnpm run run:cli -- <command>
 ```
 
-Use `pnpm exec <bin>` for repo-local binaries; never `npx`. `pnpm run check` green is the floor before claiming an implementation is done.
+Use `pnpm exec <bin>` for repo-local binaries; never `npx`. `pnpm run check` plus `pnpm run test` green is the floor before claiming an implementation is done.
 
 ## Pre-commit Hook
 
 The repository ships a pre-commit hook in `.githooks/pre-commit`. It runs
 automatically on `git commit`:
 
-1. `pnpm run format` — rewrites all files with Prettier.
-2. `git add -u` — re-stages any files the formatter changed.
-3. `pnpm run check` — runs the full build · typecheck · lint · format-check ·
-   test pipeline; the commit is blocked if any step fails.
+1. `pnpm run check` — `build` regenerates `dist/`, `format:write` and
+   `lint:fix` rewrite files, and `format:check`, `lint:check`, and
+   `types:check` verify; the commit is blocked if any step fails.
+2. `git add -u` — re-stages any files the autofixes changed.
+
+Tests do not run in the hook; they are enforced in CI
+(`pnpm run test:coverage`) and run locally with `pnpm run test`.
 
 The hook is activated via `core.hooksPath .githooks`. `pnpm install` sets this
 up through the `prepare` lifecycle script so any fresh clone works after
@@ -161,8 +166,8 @@ install reuses pnpm's global content-addressable store, so a warm store hardlink
 rather than re-downloads.
 
 Enter the worktree with the harness `EnterWorktree <path>` tool, or `cd <path>`,
-and run every command — including `pnpm run check`, the per-worktree definition of
-done — inside it. For work already begun in the shared checkout, carry it over
+and run every command — including `pnpm run check` and `pnpm run test`, the
+per-worktree definition of done — inside it. For work already begun in the shared checkout, carry it over
 with a patch rather than re-editing: `git -C <shared> diff > /tmp/wip.patch`, then
 `git apply /tmp/wip.patch` inside the worktree.
 
@@ -182,6 +187,17 @@ An agent that creates a session worktree for implementation work runs
 `worktree:open` on it right after `worktree:create`, so the operator's editor is
 already tracking the tree when the work starts. The open is best-effort: a
 missing launcher is reported and never blocks the session.
+
+Switch the session's execution context on operator request with
+`pnpm run worktree:switch [root|<slug|path|branch>]`. Without a target it
+reports the current context (path and kind); with a target it resolves it —
+`root` is the primary checkout — reports a worktree's task, done, and
+active-edit status, refreshes a live session worktree's active-edit marker, and
+prints the handoff instructions plus the `git rev-parse --show-toplevel`
+verification. The script cannot change the caller's working directory: the move
+itself is the harness `EnterWorktree` / `ExitWorktree` tool or `cd`. The
+`/switch` skill wraps this resolver for operator requests, adding the target
+menu and the actively-edited confirmation from the selection gate.
 
 The hook is byte-for-byte unchanged; isolation comes from where it runs. Its
 relative `core.hooksPath` (`.githooks`) resolves against each worktree's own
@@ -292,11 +308,11 @@ run manually rather than in the network-guarded test suite.
 
 ### Enforcement Boundary Map
 
-Each project convention has exactly one owner. This table is the authoritative map; when a section below names an owner, it points here. Machine-checked conventions block `pnpm run lint` / `pnpm run check`; the rest are human review.
+Each project convention has exactly one owner. This table is the authoritative map; when a section below names an owner, it points here. Machine-checked conventions block `pnpm run lint:check` / `pnpm run check`; the rest are human review.
 
 | Convention                                                                  | Owner        | Mechanism                                                         | Notes                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pure formatting (quotes, semicolons, spacing, trailing commas, print width) | Prettier     | `.prettierrc`, `pnpm run format-check`                            | No formatting rule in ESLint                                                                                                                                                                                                                                                                                                                                          |
+| Pure formatting (quotes, semicolons, spacing, trailing commas, print width) | Prettier     | `.prettierrc`, `pnpm run format:check`                            | No formatting rule in ESLint                                                                                                                                                                                                                                                                                                                                          |
 | Control-flow block shape (braces)                                           | ESLint       | `curly: ['error', 'all']` on `src/**`                             | Multi-line expansion nuance beyond brace presence is out of machine scope (human review)                                                                                                                                                                                                                                                                              |
 | Logging boundary (`console.*` in core/providers)                            | ESLint       | `no-console: error` on `src/core/**`, `src/providers/**`          | —                                                                                                                                                                                                                                                                                                                                                                     |
 | Inward-only layer imports                                                   | ESLint       | `@typescript-eslint/no-restricted-imports` per layer + stages ban | Machine-forbids the `cli` edge for `core`/`providers`/`channels`, the full outward set for `runtime`, `stages` for all layers, and `providers`/`channels -> core` except `core/json` (any) and `core/config` (type-only); `core/config` value imports are rejected; `core -> {providers, channels}` is inward and allowed; lateral `providers <-> channels` is review |
@@ -673,17 +689,18 @@ Scale verification to risk and blast radius.
 Routine change:
 
 ```bash
-pnpm run typecheck
-pnpm run lint
+pnpm run types:check
+pnpm run lint:check
 ```
 
 Before claiming done, or for any behavior change:
 
 ```bash
 pnpm run check
+pnpm run test
 ```
 
-`pnpm run typecheck` green is the floor; `pnpm run check` green (typecheck + lint + format-check + tests) is the bar for a finished change. Coverage thresholds are enforced separately by `pnpm run coverage` (run in CI on every PR and push to `main` via `ci.yml` and in `release.yml` `validate`, and on demand locally), so a local commit or `pnpm run check` no longer measures coverage.
+`pnpm run types:check` green is the floor; `pnpm run check` green (build + format:write + format:check + lint:fix + lint:check + types:check) plus `pnpm run test` green is the bar for a finished change. `build` runs before `types:check` and `lint:check` because the `agent-quorum` self-import (`examples/`, tests) and the type-aware lint rules resolve through `dist/`. `pnpm run check` no longer runs tests: run `pnpm run test` explicitly for any behavior change, while docs-only or formatting-only work may stop at `pnpm run check`. Tests and coverage thresholds are enforced in CI by `pnpm run test:coverage` (on every PR and push to `main` via `ci.yml` and in `release.yml` `validate`, and on demand locally), so a local commit or `pnpm run check` measures neither tests nor coverage.
 
 ### Concurrent shared-root verification
 

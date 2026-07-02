@@ -200,7 +200,7 @@ confirmation.
 - `/prompt-architect` emits run profiles that execute:
 
 ```text
-AGENT_QUORUM_WORK_DIR=<workdir> pnpm run launch:self -- --quality <quality> --iters <n> --prompt <prompt-path>
+AGENT_QUORUM_WORK_DIR=<workdir> pnpm run run:cli -- launch --quality <quality> --iters <n> --prompt <prompt-path>
 ```
 
 Run artifacts should use distinct workdirs under `.agents/plans/`. Do not start
