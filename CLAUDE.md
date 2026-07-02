@@ -54,8 +54,11 @@ Override all other project-level guidance.
   session-bound debugging where blocking output is wanted.
 - **Isolate sessions in worktrees.** Run nontrivial, multi-file, or potentially
   concurrent work in a session worktree
-  (`pnpm run worktree:create <slug> --desc <text>`), not the shared checkout;
-  integrate to `main` via `/ship` plus an explicit step. See
+  (`pnpm run worktree:create <slug> --desc <text>`), not the shared checkout.
+  Right after creating one for implementation work, open it in the operator's
+  editor with `pnpm run worktree:open <slug>` (best-effort; a missing editor
+  launcher never blocks the session). Integrate to `main` via `/ship` plus an
+  explicit step. See
   [Session Worktrees](docs/development/conventions.md#session-worktrees).
 - **No orphan background shells.** Do not leave long-running shell sessions or
   detached commands alive after moving on.
@@ -80,22 +83,22 @@ When facts conflict, trust in this order:
 
 ## 3. Required Entry Points
 
-| Task                         | Use                                                                                                                        |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Install dependencies         | `pnpm install --frozen-lockfile`                                                                                           |
-| Build                        | `pnpm run build`                                                                                                           |
-| Typecheck                    | `pnpm run typecheck`                                                                                                       |
-| Lint                         | `pnpm run lint`                                                                                                            |
-| Format check                 | `pnpm run format-check`                                                                                                    |
-| Tests                        | `pnpm run test`                                                                                                            |
-| Full verification            | `pnpm run check`                                                                                                           |
-| Local CLI                    | `pnpm run dev -- <args>`                                                                                                   |
-| Public API smoke             | `pnpm run build` then import from `agent-quorum`                                                                           |
-| Self-planning dogfood        | `pnpm run plan:self -- --prompt <prompt.md>` (foreground, session-bound)                                                   |
-| Agent-initiated detached run | `pnpm run launch:self -- --prompt <prompt.md>` (detached, survives session close)                                          |
-| Repo-local binaries          | `pnpm exec <bin>`                                                                                                          |
-| Start a session worktree     | `pnpm run worktree:create <slug> --desc <text>`                                                                            |
-| Session worktree lifecycle   | `pnpm run worktree:list` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
+| Task                         | Use                                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install dependencies         | `pnpm install --frozen-lockfile`                                                                                                                  |
+| Build                        | `pnpm run build`                                                                                                                                  |
+| Typecheck                    | `pnpm run typecheck`                                                                                                                              |
+| Lint                         | `pnpm run lint`                                                                                                                                   |
+| Format check                 | `pnpm run format-check`                                                                                                                           |
+| Tests                        | `pnpm run test`                                                                                                                                   |
+| Full verification            | `pnpm run check`                                                                                                                                  |
+| Local CLI                    | `pnpm run dev -- <args>`                                                                                                                          |
+| Public API smoke             | `pnpm run build` then import from `agent-quorum`                                                                                                  |
+| Self-planning dogfood        | `pnpm run plan:self -- --prompt <prompt.md>` (foreground, session-bound)                                                                          |
+| Agent-initiated detached run | `pnpm run launch:self -- --prompt <prompt.md>` (detached, survives session close)                                                                 |
+| Repo-local binaries          | `pnpm exec <bin>`                                                                                                                                 |
+| Start a session worktree     | `pnpm run worktree:create <slug> --desc <text>`                                                                                                   |
+| Session worktree lifecycle   | `pnpm run worktree:list` / `worktree:open <id>` / `worktree:touch <id>` / `worktree:done <id>` / `worktree:reopen <id>` / `worktree:release <id>` |
 
 ## 4. Git Boundaries
 

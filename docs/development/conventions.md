@@ -166,6 +166,23 @@ done — inside it. For work already begun in the shared checkout, carry it over
 with a patch rather than re-editing: `git -C <shared> diff > /tmp/wip.patch`, then
 `git apply /tmp/wip.patch` inside the worktree.
 
+To work on a session in Cursor or VS Code, open the worktree as its own editor
+window, so the Explorer, open editors, and source control all track that tree:
+
+```bash
+pnpm run worktree:open <slug>                 # first launcher found wins: cursor, then code
+pnpm run worktree:open <slug> --editor code   # explicit launcher binary from PATH
+```
+
+`open` resolves a slug, path, or branch like the other subcommands, accepts the
+primary checkout too (`worktree:open main`), and never mutates the tree; when no
+launcher is on `PATH` it fails with the binaries it tried.
+
+An agent that creates a session worktree for implementation work runs
+`worktree:open` on it right after `worktree:create`, so the operator's editor is
+already tracking the tree when the work starts. The open is best-effort: a
+missing launcher is reported and never blocks the session.
+
 The hook is byte-for-byte unchanged; isolation comes from where it runs. Its
 relative `core.hooksPath` (`.githooks`) resolves against each worktree's own
 checkout top. A linked worktree's `.git` is a file, so its own `prepare` step

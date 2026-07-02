@@ -5,6 +5,7 @@
 #
 #   create <slug> (--desc <text> | --desc-file <path>) [--from <ref>]
 #   list
+#   open <slug|path|branch> [--editor <bin>]
 #   touch <slug|path|branch>
 #   done <slug|path|branch>
 #   reopen <slug|path|branch>
@@ -18,6 +19,7 @@ set -euo pipefail
 
 readonly ACTIVE_EDIT_TTL_SECONDS=900
 readonly DEFAULT_REF="main"
+readonly DEFAULT_EDITOR_LAUNCHERS="cursor code"
 readonly RECORD_FILE="agent-quorum-task.md"
 readonly MARKER_FILE="agent-quorum-active-edit.json"
 readonly DONE_FILE="agent-quorum-done.json"
@@ -341,6 +343,7 @@ cmd_create() {
   echo "  marker: $admin/$MARKER_FILE"
   echo ""
   echo "Enter it with the harness 'EnterWorktree $dir' tool, or 'cd $dir'."
+  echo "Open it in the operator's editor with 'pnpm run worktree:open $slug'."
   echo "Per-worktree DoD: run 'pnpm run check' inside the worktree before committing."
 }
 
@@ -365,6 +368,64 @@ cmd_list() {
     printf '  status: %s\n' "$status"
     echo ""
   done
+}
+
+usage_open() {
+  echo "usage: scripts/worktree.sh open <slug|path|branch> [--editor <bin>]" >&2
+}
+
+resolve_editor_launcher() {
+  local requested="$1" candidate tried=""
+  if [ -n "$requested" ]; then
+    if command -v "$requested" >/dev/null 2>&1; then
+      echo "$requested"
+      return
+    fi
+    echo "worktree open: editor launcher not found on PATH: $requested" >&2
+    return 1
+  fi
+  for candidate in $DEFAULT_EDITOR_LAUNCHERS; do
+    if [ -n "$tried" ]; then
+      tried="$tried, '$candidate'"
+    else
+      tried="'$candidate'"
+    fi
+    if command -v "$candidate" >/dev/null 2>&1; then
+      echo "$candidate"
+      return
+    fi
+  done
+  echo "worktree open: no editor launcher found (tried $tried); pass --editor <bin>" >&2
+  return 1
+}
+
+cmd_open() {
+  if [ "$#" -lt 1 ]; then
+    usage_open
+    exit 2
+  fi
+  local target="$1"
+  shift
+  local editor=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --editor)
+        editor="${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "worktree open: unknown argument '$1'" >&2
+        usage_open
+        exit 2
+        ;;
+    esac
+  done
+  resolve_worktree "$target" 0
+  local launcher
+  launcher="$(resolve_editor_launcher "$editor")"
+  "$launcher" "$RESOLVED_PATH"
+  echo "[worktree] opened ${RESOLVED_BRANCH:-(detached)} in $launcher"
+  echo "  path:   $RESOLVED_PATH"
 }
 
 cmd_touch() {
@@ -479,7 +540,7 @@ cmd_release() {
 
 main() {
   if [ "$#" -lt 1 ]; then
-    echo "usage: scripts/worktree.sh <create|list|touch|done|reopen|release> ..." >&2
+    echo "usage: scripts/worktree.sh <create|list|open|touch|done|reopen|release> ..." >&2
     exit 2
   fi
   local sub="$1"
@@ -487,13 +548,14 @@ main() {
   case "$sub" in
     create) cmd_create "$@" ;;
     list) cmd_list "$@" ;;
+    open) cmd_open "$@" ;;
     touch) cmd_touch "$@" ;;
     done) cmd_done "$@" ;;
     reopen) cmd_reopen "$@" ;;
     release) cmd_release "$@" ;;
     *)
       echo "worktree: unknown subcommand '$sub'" >&2
-      echo "usage: scripts/worktree.sh <create|list|touch|done|reopen|release> ..." >&2
+      echo "usage: scripts/worktree.sh <create|list|open|touch|done|reopen|release> ..." >&2
       exit 2
       ;;
   esac

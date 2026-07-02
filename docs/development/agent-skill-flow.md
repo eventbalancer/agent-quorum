@@ -76,7 +76,7 @@ Already clear prompt task:
   /prompt-architect -> confirmed run
 
 Before nontrivial implementation (multi-file or potentially concurrent):
-  pnpm run worktree:create <slug> --desc "<task>" -> work inside the worktree
+  pnpm run worktree:create <slug> --desc "<task>" -> pnpm run worktree:open <slug> -> work inside the worktree
 
 After implementation (a confirmed run, /execute, or a direct edit):
   /tidy -> /ship

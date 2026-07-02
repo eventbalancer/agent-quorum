@@ -50,6 +50,7 @@
     "smoke:cursor": "scripts/smoke.sh cursor",
     "worktree:create": "scripts/worktree.sh create",
     "worktree:list": "scripts/worktree.sh list",
+    "worktree:open": "scripts/worktree.sh open",
     "worktree:touch": "scripts/worktree.sh touch",
     "worktree:done": "scripts/worktree.sh done",
     "worktree:reopen": "scripts/worktree.sh reopen",

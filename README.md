@@ -213,7 +213,8 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
   `execute`.
 - [Session Worktrees](docs/development/conventions.md#session-worktrees) — the
   per-session worktree lifecycle (`worktree:create`, `worktree:list`,
-  `worktree:touch`, `worktree:done`, `worktree:reopen`, `worktree:release`)
+  `worktree:open`, `worktree:touch`, `worktree:done`, `worktree:reopen`,
+  `worktree:release`)
   that isolates concurrent sessions.
 - [`examples/`](examples/) — runnable CLI and API walkthroughs of the loop.
 
