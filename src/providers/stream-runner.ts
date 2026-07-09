@@ -2,12 +2,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
-import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
+import {
+  drainStderr,
+  ProviderStderr,
+  type DiagnosticSink,
+  type ProviderFailureReason,
+  type TraceContext,
+} from './trace.js';
 import { runLivenessHeartbeat } from './heartbeat.js';
 import { StreamState, watchStream, type StreamKnobs } from './watchdog.js';
 
 export interface StreamRunResult {
   readonly status: number;
+  readonly failureReason: ProviderFailureReason | undefined;
   readonly stallReason: string | undefined;
   readonly streamLines: string[];
 }
@@ -80,9 +87,9 @@ export async function runStreamingCli(options: StreamRunOptions): Promise<Stream
     consumeLine(pending);
   }
   await stderrDrained;
-  stderr.failureSummary(status);
+  const failureReason = stderr.failureSummary(status);
 
-  return { status, stallReason, streamLines: lines };
+  return { status, failureReason, stallReason, streamLines: lines };
 }
 
 function jqRawRender(value: JsonValue): string {

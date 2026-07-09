@@ -190,6 +190,16 @@ describe('resolveConfig precedence and provenance', () => {
     expect(provenance.get('settings.iters')).toBe('override');
   });
 
+  it('a structured telegram clarify override wins over env', () => {
+    const { config, provenance } = resolveConfig({
+      overrides: { config: { telegram: { clarify: 'auto' } } },
+      env: { AGENT_QUORUM_CLARIFY: '0' },
+      home: tmp,
+    });
+    expect(config.telegram.clarify).toBe('auto');
+    expect(provenance.get('telegram.clarify')).toBe('override');
+  });
+
   it('intra-override tie-break: a top-level CLI scalar beats structured config', () => {
     const { config } = resolveConfig({
       overrides: { cli: { maxIters: '11' }, config: { settings: { iters: 13 } } },

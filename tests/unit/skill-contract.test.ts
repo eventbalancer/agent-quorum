@@ -1,12 +1,94 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import ajvModule from 'ajv/dist/ajv.js';
+import type { AnySchema } from 'ajv/dist/ajv.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { schemaValidQuiet } from '../../src/core/schema.js';
 import { skillPaths } from '../../src/core/run-context.js';
+import { claudeJsonSchema } from '../../src/providers/claude.js';
 import { REPO_ROOT } from '../helpers/harness.js';
 
 const skills = skillPaths(REPO_ROOT);
+const DRAFT_2019_09_SCHEMA = 'https://json-schema.org/draft/2019-09/schema';
+const DRAFT_07_SCHEMA = 'http://json-schema.org/draft-07/schema#';
+const Ajv = ajvModule.default;
+
+interface SchemaContract {
+  readonly name: string;
+  readonly schemaFile: string;
+  readonly valid: unknown;
+  readonly invalid: unknown;
+}
+
+const schemaContracts: readonly SchemaContract[] = [
+  {
+    name: 'clarification',
+    schemaFile: skills.clarifySchema,
+    valid: { questions: [] },
+    invalid: {
+      questions: [
+        {
+          id: 'Q1',
+          question: 'Which region?',
+          why: 'Changes deployment.',
+          options: ['Only one option'],
+        },
+      ],
+    },
+  },
+  {
+    name: 'creator update',
+    schemaFile: skills.creatorSchema,
+    valid: {
+      plan_version: 1,
+      plan_markdown: '# Plan',
+      issues: [],
+      applied: [],
+      rejected_append: [],
+    },
+    invalid: {
+      plan_version: 1,
+      issues: [],
+      applied: [],
+      rejected_append: [],
+    },
+  },
+  {
+    name: 'creator update metadata',
+    schemaFile: skills.creatorMetaSchema,
+    valid: {
+      plan_version: 1,
+      issues: [],
+      applied: [],
+      rejected_append: [],
+    },
+    invalid: {
+      plan_version: 0,
+      issues: [],
+      applied: [],
+      rejected_append: [],
+    },
+  },
+  {
+    name: 'critique',
+    schemaFile: skills.criticSchema,
+    valid: { plan_version: 0, summary: 'ok', issues: [] },
+    invalid: { plan_version: 0, issues: [] },
+  },
+  {
+    name: 'fix review',
+    schemaFile: skills.reviewerSchema,
+    valid: { approval: 'accept', concerns: [] },
+    invalid: { approval: 'approve', concerns: [] },
+  },
+  {
+    name: 'readiness judgment',
+    schemaFile: skills.judgeSchema,
+    valid: { ready: true, rationale: 'ready' },
+    invalid: { ready: true },
+  },
+];
 
 function skillText(file: string): string {
   return readFileSync(file, 'utf8');
@@ -78,41 +160,31 @@ describe('execute skill package-aware workflow', () => {
   });
 });
 
-describe('unchanged role schemas still validate their fixtures', () => {
+describe('Claude JSON-mode schema contracts', () => {
   function fixture(name: string, value: unknown): string {
     const file = path.join(tmp, name);
     writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
     return file;
   }
 
-  it('validates a critique fixture', () => {
-    const file = fixture('critique.json', { plan_version: 0, summary: 'ok', issues: [] });
-    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(true);
-  });
+  it.each(schemaContracts)(
+    'projects only the $schema metadata for $name and preserves validation results',
+    ({ name, schemaFile, valid, invalid }) => {
+      const canonical = JSON.parse(readFileSync(schemaFile, 'utf8')) as Record<string, unknown>;
+      const projected = JSON.parse(claudeJsonSchema(schemaFile)) as Record<string, unknown>;
+      expect(canonical.$schema).toBe(DRAFT_2019_09_SCHEMA);
+      expect(projected.$schema).toBe(DRAFT_07_SCHEMA);
+      expect(projected).toEqual({ ...canonical, $schema: DRAFT_07_SCHEMA });
 
-  it('validates an update fixture', () => {
-    const file = fixture('update.json', {
-      plan_version: 1,
-      plan_markdown: '# Plan',
-      issues: [],
-      applied: [],
-      rejected_append: [],
-    });
-    expect(schemaValidQuiet(file, skills.creatorSchema)).toBe(true);
-  });
+      const validFile = fixture(`${name}-valid.json`, valid);
+      const invalidFile = fixture(`${name}-invalid.json`, invalid);
+      expect(schemaValidQuiet(validFile, schemaFile)).toBe(true);
+      expect(schemaValidQuiet(invalidFile, schemaFile)).toBe(false);
 
-  it('validates an update-meta fixture', () => {
-    const file = fixture('update-meta.json', {
-      plan_version: 1,
-      issues: [],
-      applied: [],
-      rejected_append: [],
-    });
-    expect(schemaValidQuiet(file, skills.creatorMetaSchema)).toBe(true);
-  });
-
-  it('validates a review fixture', () => {
-    const file = fixture('review.json', { approval: 'accept', concerns: [] });
-    expect(schemaValidQuiet(file, skills.reviewerSchema)).toBe(true);
-  });
+      const draft7 = new Ajv({ strict: true });
+      const validateProjected = draft7.compile(projected as AnySchema);
+      expect(validateProjected(valid)).toBe(true);
+      expect(validateProjected(invalid)).toBe(false);
+    },
+  );
 });

@@ -136,6 +136,13 @@ describe('classifyReason', () => {
     expect(classifyReason('401 invalid api key')).toBe('authentication');
     expect(classifyReason('ECONNRESET: socket hang up')).toBe('connection-closed');
     expect(classifyReason('insufficient quota for this request')).toBe('quota');
+    expect(
+      classifyReason(
+        'Error: --JSON-SCHEMA is not a valid JSON Schema: https://json-schema.org/draft/2019-09/schema',
+      ),
+    ).toBe('schema-incompatible');
+    expect(classifyReason('--json-schema was rejected as an invalid schema')).toBeUndefined();
+    expect(classifyReason('JSON schema compatibility failure')).toBeUndefined();
     expect(classifyReason(`mysterious failure ${REDACTION_LEAK_PLANT}`)).toBeUndefined();
     expect(classifyReason(undefined)).toBeUndefined();
     expect(classifyReason('')).toBeUndefined();
@@ -299,7 +306,8 @@ describe('ProviderStderr bounded buffer and stderr classifier', () => {
     try {
       const stderr = new ProviderStderr(traceContextFixture('codex'));
       stderr.push('Error: the server is overloaded, retry later\n');
-      stderr.failureSummary(1);
+      const reason = stderr.failureSummary(1);
+      expect(reason).toBe('overloaded');
       expect(recognized.text()).toContain(
         'critic/codex call failed (status=1, stderr_lines=1): overloaded',
       );
@@ -311,7 +319,8 @@ describe('ProviderStderr bounded buffer and stderr classifier', () => {
     try {
       const stderr = new ProviderStderr(traceContextFixture('codex'));
       stderr.push('something mysterious happened\n');
-      stderr.failureSummary(1);
+      const reason = stderr.failureSummary(1);
+      expect(reason).toBeUndefined();
       const text = plain.text();
       expect(text).toContain('critic/codex call failed (status=1, stderr_lines=1)');
       expect(text).not.toContain('mysterious');
@@ -326,7 +335,7 @@ describe('ProviderStderr bounded buffer and stderr classifier', () => {
     try {
       const stderr = new ProviderStderr(traceContextFixture('codex'));
       stderr.push('whatever\n');
-      stderr.failureSummary(0);
+      expect(stderr.failureSummary(0)).toBeUndefined();
       expect(capture.text()).toBe('');
     } finally {
       capture.restore();

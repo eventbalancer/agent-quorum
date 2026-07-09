@@ -55,6 +55,7 @@
     "test:coverage": "vitest run --coverage",
     "test:smoke:codex": "scripts/smoke.sh codex",
     "test:smoke:claude": "scripts/smoke.sh claude",
+    "test:smoke:claude-schemas": "tsx scripts/smoke-claude-schemas.ts",
     "test:smoke:cursor": "scripts/smoke.sh cursor",
     "test:concurrent": "scripts/concurrent-test-check.sh",
     "worktree:create": "scripts/worktree.sh create",

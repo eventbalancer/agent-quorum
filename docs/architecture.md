@@ -28,6 +28,14 @@ single retry wrapper:
   capability-probed `--trust/--approve-mcps`; tool and schema constraints are
   injected as prompt hints; the session id is captured from the result event.
 
+The JSON role schemas under `skills/` remain the canonical draft 2019-09
+contracts and continue to drive local AJV 2019 validation. For a Claude
+JSON-mode call only, the adapter parses the selected canonical schema and
+serializes an in-memory copy whose sole contract change is `$schema` =
+`http://json-schema.org/draft-07/schema#`; that projected copy is passed to
+`--json-schema`. The projection is never written to disk and does not affect
+Codex, Cursor, Markdown-mode calls, role payloads, or local validation.
+
 The supported runner set is declared once in `src/providers/registry.ts`
 (`RUNNER_META`), from which `Runner`, the config allow-list, dispatch, preflight,
 and watchdog knobs all derive. See
@@ -40,8 +48,15 @@ metadata are logged, while prompt, plan, source, tool-argument, and raw provider
 stderr bodies are omitted from normal logs. Provider stderr is captured and
 bounded rather than inherited directly; non-zero exits produce one
 `<role>/<provider> call failed` summary with status, stderr line count, and a
-classified reason when recognized. Raw stdout and stderr are dropped from normal
-logs by default; `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
+classified reason when recognized. The fixed `schema-incompatible` reason
+identifies Claude Code's deterministic `--json-schema` rejection without
+copying its stderr. For a Claude JSON-mode call, that category bypasses both
+session recovery and transient retries: the original nonzero status returns
+after one provider process, a pre-existing resumed creator session is preserved,
+and a newly allocated but unestablished session id is removed. Other failure
+categories and runners retain their existing recovery and retry behavior. Raw
+stdout and stderr are dropped from normal logs by default;
+`AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` adds an additive, opt-in
 `$WORK/diagnostics/` directory that captures each call's raw streams chunk-wise
 through a best-effort sink that never fails or alters the call.
 

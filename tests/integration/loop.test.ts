@@ -13,8 +13,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runIterationLoop } from '../../src/stages/plan/loop.js';
 import type { RunContext } from '../../src/core/run-context.js';
 import { Scratch } from '../../src/runtime/scratch.js';
-import { makeTestRunContext, type TestContextOptions } from '../helpers/test-context.js';
 import {
+  fixtureMatrix,
+  makeTestRunContext,
+  type TestContextOptions,
+} from '../helpers/test-context.js';
+import {
+  argvRecords,
   captureStderr,
   emptyCritique,
   REPO_ROOT,
@@ -109,11 +114,15 @@ describe('iteration loop', () => {
         FAKE_CODEX_OUTPUT: critique,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_JSON_RESULT: update,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
       () => runIterationLoop(ctx, 0),
     );
 
     expect(capture.text()).toContain('hit MAX_ITERS=1 without convergence');
+    expect(JSON.parse(readFileSync(path.join(work, 'update.v0.json'), 'utf8'))).toEqual(
+      JSON.parse(readFileSync(update, 'utf8')),
+    );
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
     );
@@ -227,6 +236,35 @@ describe('iteration loop', () => {
     expect(prompt).toContain('critic must check identity-aware convergence');
   });
 
+  it('consumes Claude critic output with a draft-07 schema', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const matrix = fixtureMatrix();
+    matrix.critic = {
+      runner: 'claude',
+      model: 'claude-opus-4-8',
+      reasoning: 'xhigh',
+    };
+    const ctx = makeContext({ maxIters: 1, matrix });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_JSON_RESULT: critique,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(JSON.parse(readFileSync(path.join(work, 'critique.v0.json'), 'utf8'))).toEqual(
+      JSON.parse(readFileSync(critique, 'utf8')),
+    );
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
+      readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
+    );
+  });
+
   it('split update produces revision, metadata, and combined update (quality balanced)', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
@@ -264,6 +302,7 @@ describe('iteration loop', () => {
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_MARKDOWN_RESULT: revision,
         FAKE_CLAUDE_JSON_RESULT: meta,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
       () => runIterationLoop(ctx, 0),
     );
@@ -276,7 +315,9 @@ describe('iteration loop', () => {
       plan_markdown: string;
     };
     expect(update.plan_markdown).toBe(readFileSync(revision, 'utf8'));
-    expect(existsSync(path.join(work, 'update-meta.v0.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(work, 'update-meta.v0.json'), 'utf8'))).toEqual(
+      JSON.parse(readFileSync(meta, 'utf8')),
+    );
   });
 
   it('an invalid one-shot update falls back to the split flow', async () => {
@@ -332,6 +373,86 @@ describe('iteration loop', () => {
     );
     expect(capture.text()).toContain('converged at v1 (no accepted blockers/majors)');
     expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
+      readFileSync(revision, 'utf8'),
+    );
+  });
+
+  it('a one-shot Claude schema rejection falls back without retrying either JSON call', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, SINGLE_ISSUE);
+    const revision = path.join(tmp, 'schema-fallback-revision.md');
+    writeStructuredPlanFile(revision, 'Schema Fallback Revision');
+    const meta = path.join(tmp, 'schema-fallback-meta.json');
+    writeFileSync(
+      meta,
+      `${JSON.stringify(
+        {
+          plan_version: 1,
+          issues: [
+            {
+              id: 'C1',
+              verdict: 'accept',
+              verdict_reason: 'fixture',
+              final_severity: 'minor',
+              duplicate_of: null,
+            },
+          ],
+          applied: ['C1'],
+          rejected_append: [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const argvLog = path.join(tmp, 'claude-schema-fallback.argv');
+    const ctx = makeContext({ quality: 'quick', maxIters: 2 });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 3, retryDelaySeconds: 0 },
+    };
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_ARGV_LOG: argvLog,
+        FAKE_CLAUDE_JSON_RESULT: meta,
+        FAKE_CLAUDE_MARKDOWN_RESULT: revision,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
+        FAKE_CLAUDE_SCHEMA_REJECT: '1',
+        FAKE_CLAUDE_SCHEMA_REJECT_TITLE: 'PlanUpdate',
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    const records = argvRecords(argvLog);
+    const jsonRecords = records.filter((record) => record.includes('--json-schema'));
+    const schemaTitles = jsonRecords.map((record) => {
+      const schemaIndex = record.indexOf('--json-schema');
+      const schema = JSON.parse(record[schemaIndex + 1] ?? '{}') as { title?: unknown };
+      return schema.title;
+    });
+    expect(records).toHaveLength(3);
+    expect(jsonRecords).toHaveLength(2);
+    expect(schemaTitles).toEqual(['PlanUpdate', 'PlanUpdateMeta']);
+
+    const log = capture.text();
+    expect(log).toContain('schema-incompatible');
+    expect(log).toContain('WARNING: one-shot creator update failed; falling back to split update');
+    expect(log).not.toContain('retry 1/3');
+    expect(readFileSync(path.join(work, 'plan.revision.v0.md'), 'utf8')).toBe(
+      readFileSync(revision, 'utf8'),
+    );
+    expect(JSON.parse(readFileSync(path.join(work, 'update-meta.v0.json'), 'utf8'))).toEqual(
+      JSON.parse(readFileSync(meta, 'utf8')),
+    );
+    const update = JSON.parse(readFileSync(path.join(work, 'update.v0.json'), 'utf8')) as {
+      plan_markdown: string;
+    };
+    expect(update.plan_markdown).toBe(readFileSync(revision, 'utf8'));
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
   });
@@ -409,11 +530,16 @@ describe('iteration loop', () => {
         FAKE_CODEX_OUTPUT: critiqueFile,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_JSON_RESULT: judgeResult,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
       () => runIterationLoop(ctx, 0),
     );
 
     expect(capture.text()).toContain('converged at v0 (judge verdict: implementation-ready)');
+    expect(JSON.parse(readFileSync(path.join(work, 'judge.v0.json'), 'utf8'))).toEqual({
+      ready: true,
+      rationale: 'implementation-ready',
+    });
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
     );

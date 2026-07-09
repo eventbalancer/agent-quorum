@@ -6,10 +6,11 @@
 #   claude   sonnet
 #   cursor   composer-2.5
 #
-# All roles use the selected provider; the run is a single low-effort iteration
-# with no fix or translate pass. Override the model with SMOKE_MODEL, reasoning
-# with SMOKE_REASONING, the input with SMOKE_PROMPT. See the smoke-testing section
-# of docs/development/agent-skill-flow.md.
+# The configured roles use the selected provider, but this quick run exercises
+# only creator and critic because clarification, fix, translate, and judge are
+# disabled. Override the model with SMOKE_MODEL, reasoning with SMOKE_REASONING,
+# and the input with SMOKE_PROMPT. See the smoke-testing section of
+# docs/development/agent-skill-flow.md.
 set -euo pipefail
 
 readonly DEFAULT_PROVIDER=codex
@@ -46,4 +47,4 @@ export AGENT_QUORUM_WORK_DIR="$work"
 rm -rf "$work"
 echo "[smoke] provider=$provider model=$model reasoning=$reasoning"
 echo "[smoke] workdir=$work"
-exec pnpm run run:cli -- plan --prompt "$prompt" --effort low --iters 1 --no-fix --no-translate
+exec pnpm run run:cli -- plan --prompt "$prompt" --quality quick --iters 1 --no-fix --no-translate
