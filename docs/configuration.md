@@ -158,6 +158,25 @@ Provider diagnostics keep the metadata-only log contract: normal logs emit only 
 `diagnostics →` reference; raw prompt/plan/source/tool/stderr bodies never reach
 standard output. Capture is best-effort and never changes a provider exit code.
 
+#### Claude structured-output compatibility
+
+Claude Code `2.1.205` is the verified structured-output baseline. The canonical
+role contracts stay on JSON Schema draft 2019-09 for local validation; immediately
+before a Claude JSON-mode invocation, agent-quorum supplies an equivalent,
+in-memory draft-07 projection through `--json-schema`. Later Claude Code releases
+are supported when they continue to accept that structured-output invocation
+contract. This is a compatibility contract, not a version pin or closed version
+range: preflight continues to check installation and authentication only and does
+not reject a CLI version.
+
+When Claude rejects the schema argument with the recognized deterministic
+signature, the normal metadata-only failure summary ends in
+`schema-incompatible`. The affected Claude JSON-mode call starts at most one
+provider process regardless of `settings.retryCount`; raw stderr remains omitted.
+Set `providers.providerDiagnostics` or
+`AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1` only when the raw opt-in diagnostic artifact
+is needed for deeper troubleshooting.
+
 ### Large-plan split (`split`) and status (`status`)
 
 | Store key             | Env var                         | Default | Meaning                                                  |

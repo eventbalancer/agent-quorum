@@ -128,9 +128,18 @@ export function describeCommand(command: JsonValue | undefined): string {
   return `${program} (${argc} args, ${inner.length} chars)`;
 }
 
+export type ProviderFailureReason =
+  | 'schema-incompatible'
+  | 'overloaded'
+  | 'rate-limited'
+  | 'authentication'
+  | 'connection-closed'
+  | 'quota';
+
 // Secret-free signatures: a match maps to a short token, anything else is
 // omitted so no free provider text reaches the logs.
-const REASON_SIGNATURES: readonly (readonly [RegExp, string])[] = [
+const REASON_SIGNATURES: readonly (readonly [RegExp, ProviderFailureReason])[] = [
+  [/--json-schema\s+is\s+not\s+a\s+valid\s+json\s+schema\b/, 'schema-incompatible'],
   [/overload/, 'overloaded'],
   [/rate.?limit|\b429\b|too many requests/, 'rate-limited'],
   [
@@ -144,7 +153,7 @@ const REASON_SIGNATURES: readonly (readonly [RegExp, string])[] = [
   [/quota|insufficient (funds|quota|balance)|billing|payment required/, 'quota'],
 ];
 
-export function classifyReason(raw: string | undefined): string | undefined {
+export function classifyReason(raw: string | undefined): ProviderFailureReason | undefined {
   if (raw === undefined || raw === '') {
     return undefined;
   }
@@ -204,17 +213,18 @@ export class ProviderStderr {
     }
   }
 
-  failureSummary(status: number): void {
+  failureSummary(status: number): ProviderFailureReason | undefined {
     if (this.pending !== '') {
       this.recordLine(this.pending);
       this.pending = '';
     }
     if (status === 0) {
-      return;
+      return undefined;
     }
     const base = `${this.traceContext.role}/${this.traceContext.provider} call failed (status=${status}, stderr_lines=${this.lineCount})`;
     const reason = classifyReason(this.ring.join('\n'));
     err(reason !== undefined ? `${base}: ${reason}` : base);
+    return reason;
   }
 }
 

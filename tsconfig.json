@@ -16,5 +16,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "examples", "vitest.config.ts", "eslint.config.ts"]
+  "include": ["src", "tests", "examples", "scripts/**/*.ts", "vitest.config.ts", "eslint.config.ts"]
 }

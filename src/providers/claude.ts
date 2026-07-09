@@ -1,4 +1,5 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { isJsonObject, type JsonValue } from '../core/json.js';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err, log } from '../runtime/log.js';
 import { claudeSessionArgs } from './session.js';
@@ -9,7 +10,7 @@ import {
   runStreamingCli,
   defaultJsonExtractionContext,
 } from './stream-runner.js';
-import type { DiagnosticSink, TraceContext } from './trace.js';
+import type { DiagnosticSink, ProviderFailureReason, TraceContext } from './trace.js';
 import { claudeProgressEvent } from './watchdog.js';
 import {
   resolveClaudePermissionMode,
@@ -25,6 +26,22 @@ const CLAUDE_STALL_RESUME_PROMPT =
 interface ClaudeStreamOutcome {
   readonly status: number;
   readonly output: string;
+  readonly failureReason: ProviderFailureReason | undefined;
+}
+
+export interface ClaudeInvokeOutcome {
+  readonly status: number;
+  readonly failureReason: ProviderFailureReason | undefined;
+}
+
+const CLAUDE_JSON_SCHEMA_DRAFT = 'http://json-schema.org/draft-07/schema#';
+
+export function claudeJsonSchema(schemaFile: string): string {
+  const schema = JSON.parse(readFileSync(schemaFile, 'utf8')) as JsonValue;
+  if (!isJsonObject(schema)) {
+    throw new TypeError('Claude JSON schema must be an object');
+  }
+  return JSON.stringify({ ...schema, $schema: CLAUDE_JSON_SCHEMA_DRAFT });
 }
 
 async function claudeStream(
@@ -52,7 +69,7 @@ async function claudeStream(
     err(`claude stream stalled: ${result.stallReason}`);
     status = providerRuntime.streamKnobs.claude.stallStatus;
   }
-  return { status, output };
+  return { status, output, failureReason: result.failureReason };
 }
 
 type ClaudeMode = 'json' | 'markdown';
@@ -65,8 +82,8 @@ async function claudeStreamToFile(
   args: readonly string[],
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
-): Promise<number> {
-  const { status, output } = await claudeStream(
+): Promise<ClaudeInvokeOutcome> {
+  const { status, output, failureReason } = await claudeStream(
     providerRuntime,
     promptText,
     args,
@@ -76,25 +93,29 @@ async function claudeStreamToFile(
   if (mode === 'markdown') {
     writeFileSync(outFile, output);
     if (status !== 0) {
-      return status;
+      return { status, failureReason };
     }
     if (output.length === 0) {
       err('claude produced no final result');
-      return 4;
+      return { status: 4, failureReason: undefined };
     }
-    return 0;
+    return { status: 0, failureReason: undefined };
   }
 
   if (status !== 0) {
-    return status;
+    return { status, failureReason };
   }
   if (output.length === 0) {
     err('claude produced no final result');
-    return 4;
+    return { status: 4, failureReason: undefined };
   }
   const extracted = extractJsonPayload(output, defaultJsonExtractionContext);
   writeFileSync(outFile, extracted.content);
-  return 0;
+  return { status: 0, failureReason: undefined };
+}
+
+function isSchemaIncompatible(mode: ClaudeMode, outcome: ClaudeInvokeOutcome): boolean {
+  return mode === 'json' && outcome.failureReason === 'schema-incompatible';
 }
 
 // Session self-heal only; transient-failure retries are owned by providerRun.
@@ -107,13 +128,13 @@ async function claudeRunOnce(
   invokeArgs: readonly string[],
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
-): Promise<number> {
+): Promise<ClaudeInvokeOutcome> {
   const session = claudeSessionArgs(sessionFile);
   const wasResume = session.wasResume;
   let attemptedStallResume = false;
 
   rmSync(outFile, { force: true });
-  let status = await claudeStreamToFile(
+  let outcome = await claudeStreamToFile(
     providerRuntime,
     mode,
     promptText,
@@ -122,12 +143,18 @@ async function claudeRunOnce(
     traceContext,
     diagnosticSink,
   );
-  if (status === 0) {
-    return 0;
+  if (outcome.status === 0) {
+    return outcome;
+  }
+  if (isSchemaIncompatible(mode, outcome)) {
+    if (sessionFile !== '' && !wasResume) {
+      rmSync(sessionFile, { force: true });
+    }
+    return outcome;
   }
 
   const isStallWithLiveSession =
-    status === providerRuntime.streamKnobs.claude.stallStatus &&
+    outcome.status === providerRuntime.streamKnobs.claude.stallStatus &&
     sessionFile !== '' &&
     nonEmptyFile(sessionFile);
   if (isStallWithLiveSession) {
@@ -135,7 +162,7 @@ async function claudeRunOnce(
     const resumeArgs = ['--resume', readFileSync(sessionFile, 'utf8').trim()];
     attemptedStallResume = true;
     rmSync(outFile, { force: true });
-    status = await claudeStreamToFile(
+    outcome = await claudeStreamToFile(
       providerRuntime,
       mode,
       CLAUDE_STALL_RESUME_PROMPT,
@@ -144,8 +171,14 @@ async function claudeRunOnce(
       traceContext,
       diagnosticSink,
     );
-    if (status === 0) {
-      return 0;
+    if (outcome.status === 0) {
+      return outcome;
+    }
+    if (isSchemaIncompatible(mode, outcome)) {
+      if (!wasResume) {
+        rmSync(sessionFile, { force: true });
+      }
+      return outcome;
     }
   }
 
@@ -155,7 +188,7 @@ async function claudeRunOnce(
       log('WARNING: creator session resume failed; re-establishing session');
       const freshSession = claudeSessionArgs(sessionFile);
       rmSync(outFile, { force: true });
-      return claudeStreamToFile(
+      const freshOutcome = await claudeStreamToFile(
         providerRuntime,
         mode,
         promptText,
@@ -164,10 +197,14 @@ async function claudeRunOnce(
         traceContext,
         diagnosticSink,
       );
+      if (isSchemaIncompatible(mode, freshOutcome)) {
+        rmSync(sessionFile, { force: true });
+      }
+      return freshOutcome;
     }
   }
 
-  return status;
+  return outcome;
 }
 
 function claudeInvokeArgs(
@@ -189,7 +226,7 @@ function claudeInvokeArgs(
     model,
   ];
   if (schemaFile !== undefined && schemaFile !== '') {
-    args.push('--json-schema', stripTrailingNewlines(readFileSync(schemaFile, 'utf8')));
+    args.push('--json-schema', claudeJsonSchema(schemaFile));
   }
   args.push(
     '--effort',
@@ -218,7 +255,7 @@ export async function claudeInvoke(
   promptText: string,
   traceContext: TraceContext,
   diagnosticSink: DiagnosticSink | undefined,
-): Promise<number> {
+): Promise<ClaudeInvokeOutcome> {
   const args = claudeInvokeArgs(
     providerRuntime,
     skillFile,

@@ -277,31 +277,53 @@ external consumers use, see [`examples/api.ts`](../../examples/api.ts).
 ## Smoke testing
 
 Use the smoke harness to confirm the `plan` stage still runs end to end after a
-change, cheaply and without a real planning task. There is one smoke per
-provider — each runs the whole loop on that provider's cheap model over the
-committed [`scripts/smoke.plan.md`](../../scripts/smoke.plan.md) prompt and
-writes to `.agents/plans/smoke-<provider>/`.
+change, cheaply and without a real planning task. There is one general smoke per
+provider — each configures the roles used by the smoke for that provider's cheap
+model, runs the quick creator/critic path over the committed
+[`scripts/smoke.plan.md`](../../scripts/smoke.plan.md) prompt, and writes to
+`.agents/plans/smoke-<provider>/`.
 
 ```sh
-pnpm run test:smoke:codex     # all roles on codex gpt-5.5
-pnpm run test:smoke:claude    # all roles on claude sonnet
-pnpm run test:smoke:cursor    # all roles on cursor composer-2.5
+pnpm run test:smoke:codex     # quick creator/critic path on codex gpt-5.5
+pnpm run test:smoke:claude    # quick creator/critic path on claude sonnet
+pnpm run test:smoke:cursor    # quick creator/critic path on cursor composer-2.5
 ```
 
-Each is a single quick-quality iteration with no fix or translate pass. A pass
-ends with `FINAL: clean` or `FINAL: needs-review` and exit 0, leaving
-`plan.final.md` and `summary.md` in the workdir. `test:smoke:claude` runs on
-`sonnet`: in `default`
-permission mode a cheap claude creator returns a complete plan, but the `haiku`
-critic still emits schema-invalid critique JSON, so `sonnet` is the smallest
-claude tier that turns the whole loop green (see the recommended creator-tier
-table in [`configuration.md`](../configuration.md)). Override the model or
-input:
+Each general smoke is a single quick-quality iteration with no fix or translate
+pass. Clarification is explicitly disabled, quick quality disables the judge,
+and `--no-fix --no-translate` leaves the fixer, reviewer, and translator paths
+inactive. A pass ends with `FINAL: clean` or `FINAL: needs-review` and exit 0,
+leaving `plan.final.md` and `summary.md` in the workdir.
+`test:smoke:claude` runs on `sonnet`: in `default` permission mode a cheap
+claude creator returns a complete plan, but the `haiku` critic still emits
+schema-invalid critique JSON, so `sonnet` is the smallest claude tier that turns
+the quick path green (see the recommended creator-tier table in
+[`configuration.md`](../configuration.md)). Override the model or input:
 
 ```sh
 SMOKE_MODEL=sonnet pnpm run test:smoke:claude
 SMOKE_PROMPT=.agents/prompts/<slug>.md pnpm run test:smoke:codex
 ```
+
+Use the separate authenticated compatibility smoke to exercise every Claude
+JSON-mode contract through the production provider boundary:
+
+```sh
+pnpm run test:smoke:claude-schemas
+```
+
+This command invokes clarification, one-shot creator update, split update
+metadata, critique, fix review, and readiness judgment with bounded synthetic
+prompts. It disables provider retries and sessions, validates every returned
+artifact against its canonical draft 2019-09 schema, reports one pass/fail line
+per contract, and stops at the first failure. It prints `claude --version` for
+the verification record but does not gate on the version string. The default
+model is `sonnet`; `SMOKE_MODEL` overrides it.
+
+`test:smoke:claude-schemas` requires an authenticated Claude CLI and performs six
+live provider calls. It is an opt-in release verification command, outside
+`pnpm run test` and CI. Run the general `test:smoke:claude` afterward when
+end-to-end creator/critic confidence is also required.
 
 ## Verification
 

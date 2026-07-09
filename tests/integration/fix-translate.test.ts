@@ -14,7 +14,11 @@ import {
   writeStructuredPlanFile,
   type StderrCapture,
 } from '../helpers/harness.js';
-import { makeTestRunContext, type TestContextOptions } from '../helpers/test-context.js';
+import {
+  fixtureMatrix,
+  makeTestRunContext,
+  type TestContextOptions,
+} from '../helpers/test-context.js';
 
 let tmp: string;
 let fake: string;
@@ -81,7 +85,7 @@ describe('fix pass', () => {
     expect(existsSync(path.join(work, 'plan.final.before-fix.md'))).toBe(false);
   });
 
-  it('clean accept uses the proposal as the final plan', async () => {
+  it('consumes a clean Claude review with a draft-07 schema', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
@@ -89,19 +93,29 @@ describe('fix pass', () => {
     writeStructuredPlanFile(proposal, 'Fixed Proposal');
     const review = path.join(tmp, 'review.json');
     writeReview(review, 'accept', []);
-    const ctx = makeContext();
+    const matrix = fixtureMatrix();
+    matrix.reviewer = {
+      runner: 'claude',
+      model: 'claude-opus-4-8',
+      reasoning: 'xhigh',
+    };
+    const ctx = makeContext({ matrix });
 
     await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
-        FAKE_CODEX_OUTPUT: review,
-        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_RESULT: review,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
       () => runFixPass(ctx, finalPlan),
     );
 
     expect(capture.text()).toContain('fix-pass: clean accept, using proposal as final plan');
+    expect(JSON.parse(readFileSync(path.join(work, 'fix-review.json'), 'utf8'))).toEqual({
+      approval: 'accept',
+      concerns: [],
+    });
     expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(proposal, 'utf8'));
     expect(readFileSync(path.join(work, 'plan.final.before-fix.md'), 'utf8')).toBe(before);
     expect(capture.text()).toContain('fix-pass: done (backup at plan.final.before-fix.md)');

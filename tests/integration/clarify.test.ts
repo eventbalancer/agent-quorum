@@ -153,6 +153,39 @@ describe('clarify gate enablement', () => {
 });
 
 describe('clarification gate', () => {
+  it('generates and consumes Claude clarification output with a draft-07 schema', async () => {
+    const fake = path.join(tmp, 'bin');
+    writeFakeBin(fake);
+    const questionsResult = path.join(tmp, 'questions-result.json');
+    writeFileSync(questionsResult, `${JSON.stringify(FIXED_QUESTIONS, null, 2)}\n`);
+    writeFileSync(path.join(work, 'clarify.offset'), '0');
+    stub.queueReply(90, 'IO and RU');
+    stub.queueReply(91, 'Phased');
+
+    const result = await withEnvAsync(
+      {
+        ...gateEnv(),
+        PATH: `${fake}:${process.env.PATH ?? ''}`,
+        FAKE_CLAUDE_JSON_RESULT: questionsResult,
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
+      },
+      () =>
+        runClarificationGate(
+          makeTestRunContext(tmp, work, scratch, { telegram: gateTelegram() }),
+          path.join(tmp, 'prompt.md'),
+        ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(work, 'clarify-questions.json'), 'utf8'))).toEqual(
+      FIXED_QUESTIONS,
+    );
+    expect(readJsonl(path.join(work, 'clarify-answers.jsonl'))).toMatchObject([
+      { id: 'Q1', answer: 'IO and RU' },
+      { id: 'Q2', answer: 'Phased' },
+    ]);
+  });
+
   it('blocks per question, records answers, and folds them into interventions', async () => {
     seedQuestions();
     stub.queueReply(100, 'IO and RU');

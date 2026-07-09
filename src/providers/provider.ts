@@ -8,7 +8,12 @@ import type { Runner } from './registry.js';
 import { codexRun } from './codex.js';
 import { claudeInvoke } from './claude.js';
 import { cursorInvoke } from './cursor.js';
-import { createDiagnosticSink, type DiagnosticSink, type TraceContext } from './trace.js';
+import {
+  createDiagnosticSink,
+  type DiagnosticSink,
+  type ProviderFailureReason,
+  type TraceContext,
+} from './trace.js';
 import { roleSessionFile, stripTrailingNewlines, type ProviderRuntime } from './runtime.js';
 
 export type ProviderMode = 'json' | 'markdown';
@@ -88,14 +93,19 @@ export interface ProviderCallInput {
   readonly diagnosticSink: DiagnosticSink | undefined;
 }
 
-export type ProviderInvoke = (input: ProviderCallInput) => Promise<number>;
+export interface ProviderAttemptOutcome {
+  readonly status: number;
+  readonly failureReason: ProviderFailureReason | undefined;
+}
+
+export type ProviderInvoke = (input: ProviderCallInput) => Promise<ProviderAttemptOutcome>;
 
 // Keyed by Runner via `satisfies`, so an omitted adapter is a compile error
 // naming the missing runner. Exported for the registry guard test but
 // deliberately not re-exported from src/index.ts (internal, not public surface).
 export const PROVIDER_DISPATCH = {
-  codex: (input) =>
-    providerRunCodex(
+  codex: async (input) => {
+    const status = await providerRunCodex(
       input.providerRuntime,
       input.mode,
       input.outFile,
@@ -106,7 +116,9 @@ export const PROVIDER_DISPATCH = {
       input.promptText,
       input.traceContext,
       input.diagnosticSink,
-    ),
+    );
+    return { status, failureReason: undefined };
+  },
   claude: (input) =>
     claudeInvoke(
       input.providerRuntime,
@@ -123,11 +135,11 @@ export const PROVIDER_DISPATCH = {
       input.traceContext,
       input.diagnosticSink,
     ),
-  cursor: (input) => {
+  cursor: async (input) => {
     if (input.reasoning !== '') {
       log(`WARNING: cursor runner ignores reasoning/effort field (reasoning=${input.reasoning})`);
     }
-    return cursorInvoke(
+    const status = await cursorInvoke(
       input.providerRuntime,
       input.mode,
       input.outFile,
@@ -143,6 +155,7 @@ export const PROVIDER_DISPATCH = {
       input.traceContext,
       input.diagnosticSink,
     );
+    return { status, failureReason: undefined };
   },
 } satisfies Record<Runner, ProviderInvoke>;
 
@@ -156,7 +169,7 @@ async function providerRunOnce(
   tools: string,
   disallowedTools: string,
   promptText: string,
-): Promise<number> {
+): Promise<ProviderAttemptOutcome> {
   const entry = providerRuntime.matrix[role];
   const sessionFile = roleSessionFile(providerRuntime, role);
   const traceContext: TraceContext = { role, provider: entry.runner, model: entry.model };
@@ -197,8 +210,8 @@ export async function providerRun(
   promptText: string,
 ): Promise<number> {
   const runner = providerRuntime.matrix[role].runner;
-  return runWithRetries(`${runner} call`, providerRuntime.retry, () => {
-    return providerRunOnce(
+  return runWithRetries(`${runner} call`, providerRuntime.retry, async () => {
+    const outcome = await providerRunOnce(
       providerRuntime,
       role,
       mode,
@@ -209,5 +222,8 @@ export async function providerRun(
       disallowedTools,
       promptText,
     );
+    const isClaudeSchemaRejection =
+      runner === 'claude' && mode === 'json' && outcome.failureReason === 'schema-incompatible';
+    return { status: outcome.status, retryable: !isClaudeSchemaRejection };
   });
 }

@@ -7,10 +7,15 @@ if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
 fi
 is_json=0
 is_resume=0
+schema_json=''
 args=("$@")
-for arg in "${args[@]}"; do
+for ((i = 0; i < ${#args[@]}; i += 1)); do
+  arg="${args[$i]}"
   [[ "$arg" == "--json-schema" ]] && is_json=1
   [[ "$arg" == "--resume" ]] && is_resume=1
+  if [[ "$arg" == "--json-schema" ]]; then
+    schema_json="${args[$((i + 1))]:-}"
+  fi
 done
 if [[ -n "${FAKE_CLAUDE_ARGS_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$FAKE_CLAUDE_ARGS_LOG"
@@ -37,6 +42,22 @@ if [[ -n "${FAKE_CLAUDE_ATTEMPTS:-}" ]]; then
   printf '%s' "$attempts" > "$FAKE_CLAUDE_ATTEMPTS"
   if (( attempts <= ${FAKE_CLAUDE_FAILS:-0} )); then
     printf '{"type":"assistant","message":{"content":[{"type":"text","text":"API Error: The socket connection was closed unexpectedly"}]}}\n'
+    exit 1
+  fi
+fi
+if (( is_json == 1 )) && [[ -n "${FAKE_CLAUDE_SCHEMA_REJECT:-}" ]]; then
+  reject_title="${FAKE_CLAUDE_SCHEMA_REJECT_TITLE:-}"
+  schema_title="$(printf '%s' "$schema_json" | node -e 'let d="";process.stdin.on("data",c=>{d+=c}).on("end",()=>{try{const s=JSON.parse(d);process.stdout.write(typeof s.title==="string"?s.title:"")}catch{}})')"
+  if [[ -z "$reject_title" || "$schema_title" == "$reject_title" ]]; then
+    detail="${FAKE_CLAUDE_SCHEMA_REJECT_DETAIL:-no schema with key or ref \"https://json-schema.org/draft/2019-09/schema\"}"
+    printf 'Error: --json-schema is not a valid JSON Schema: %s\n' "$detail" >&2
+    exit "${FAKE_CLAUDE_SCHEMA_REJECT_STATUS:-1}"
+  fi
+fi
+if (( is_json == 1 )) && [[ -n "${FAKE_CLAUDE_REQUIRE_DRAFT7:-}" ]]; then
+  schema_draft="$(printf '%s' "$schema_json" | node -e 'let d="";process.stdin.on("data",c=>{d+=c}).on("end",()=>{try{const s=JSON.parse(d);process.stdout.write(typeof s.$schema==="string"?s.$schema:"")}catch{}})')"
+  if [[ "$schema_draft" != "http://json-schema.org/draft-07/schema#" ]]; then
+    printf 'Error: --json-schema is not a valid JSON Schema: %s\n' "$schema_draft" >&2
     exit 1
   fi
 fi

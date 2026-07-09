@@ -2,10 +2,13 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { schemaValidQuiet } from '../../src/core/schema.js';
+import { claudeJsonSchema } from '../../src/providers/claude.js';
 import { providerRun } from '../../src/providers/provider.js';
 import { DISABLED_STREAM_KNOBS, resolveRunnerBinaries } from '../../src/providers/registry.js';
 import type { ProviderRuntime } from '../../src/providers/runtime.js';
 import { Scratch } from '../../src/runtime/scratch.js';
+import type { Role } from '../../src/types.js';
 import { BASE_STREAM_KNOBS, fixtureMatrix } from '../helpers/test-context.js';
 import {
   argvRecords,
@@ -23,6 +26,13 @@ import {
 const CRITIC_SKILL = path.join(SKILLS_DIR, 'plan-critic', 'SKILL.md');
 const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json');
 const CREATOR_SKILL = path.join(SKILLS_DIR, 'plan-creator', 'SKILL.md');
+const CREATOR_CLARIFY_SCHEMA = path.join(SKILLS_DIR, 'plan-creator', 'clarify.schema.json');
+const CREATOR_UPDATE_SCHEMA = path.join(SKILLS_DIR, 'plan-creator', 'update.schema.json');
+const CREATOR_UPDATE_META_SCHEMA = path.join(SKILLS_DIR, 'plan-creator', 'update-meta.schema.json');
+const REVIEWER_SKILL = path.join(SKILLS_DIR, 'plan-fix-reviewer', 'SKILL.md');
+const REVIEWER_SCHEMA = path.join(SKILLS_DIR, 'plan-fix-reviewer', 'review.schema.json');
+const JUDGE_SKILL = path.join(SKILLS_DIR, 'plan-judge', 'SKILL.md');
+const JUDGE_SCHEMA = path.join(SKILLS_DIR, 'plan-judge', 'readiness.schema.json');
 const TOOLS = 'Read,Grep,Glob';
 const DISALLOWED = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
 
@@ -127,7 +137,7 @@ describe('claude argv contract', () => {
         '--model',
         'claude-sonnet-4-6',
         '--json-schema',
-        strippedFile(CRITIC_SCHEMA),
+        claudeJsonSchema(CRITIC_SCHEMA),
         '--effort',
         'xhigh',
         '--tools',
@@ -277,6 +287,262 @@ describe('claude argv contract', () => {
     expect(status).toBe(0);
     const record = argvRecords(argvLog)[0] ?? [];
     expect(permissionModeFromArgv(record)).toBe('plan');
+  });
+});
+
+interface ClaudeSchemaContract {
+  readonly name: string;
+  readonly role: Role;
+  readonly skillFile: string;
+  readonly schemaFile: string;
+  readonly payload: unknown;
+}
+
+const CLAUDE_SCHEMA_CONTRACTS: readonly ClaudeSchemaContract[] = [
+  {
+    name: 'clarification',
+    role: 'creator',
+    skillFile: CREATOR_SKILL,
+    schemaFile: CREATOR_CLARIFY_SCHEMA,
+    payload: { questions: [] },
+  },
+  {
+    name: 'creator update',
+    role: 'creator',
+    skillFile: CREATOR_SKILL,
+    schemaFile: CREATOR_UPDATE_SCHEMA,
+    payload: {
+      plan_version: 1,
+      plan_markdown: '# Updated plan',
+      issues: [],
+      applied: [],
+      rejected_append: [],
+    },
+  },
+  {
+    name: 'creator update metadata',
+    role: 'creator',
+    skillFile: CREATOR_SKILL,
+    schemaFile: CREATOR_UPDATE_META_SCHEMA,
+    payload: { plan_version: 1, issues: [], applied: [], rejected_append: [] },
+  },
+  {
+    name: 'critique',
+    role: 'critic',
+    skillFile: CRITIC_SKILL,
+    schemaFile: CRITIC_SCHEMA,
+    payload: { plan_version: 0, summary: 'Ready', issues: [] },
+  },
+  {
+    name: 'fix review',
+    role: 'reviewer',
+    skillFile: REVIEWER_SKILL,
+    schemaFile: REVIEWER_SCHEMA,
+    payload: { approval: 'accept', concerns: [] },
+  },
+  {
+    name: 'readiness judgment',
+    role: 'judge',
+    skillFile: JUDGE_SKILL,
+    schemaFile: JUDGE_SCHEMA,
+    payload: { ready: true, rationale: 'Ready' },
+  },
+];
+
+describe('claude structured schema contracts', () => {
+  for (const contract of CLAUDE_SCHEMA_CONTRACTS) {
+    it(`projects and consumes the ${contract.name} contract`, async () => {
+      const result = path.join(tmp, `${contract.name.replaceAll(' ', '-')}.result.json`);
+      const out = path.join(tmp, `${contract.name.replaceAll(' ', '-')}.out.json`);
+      const argvLog = path.join(tmp, `${contract.name.replaceAll(' ', '-')}.argv`);
+      writeFileSync(result, `${JSON.stringify(contract.payload, null, 2)}\n`);
+      const matrix = fixtureMatrix();
+      matrix[contract.role] = {
+        runner: 'claude',
+        model: 'claude-sonnet-4-6',
+        reasoning: 'high',
+      };
+
+      const status = await withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CLAUDE_JSON_RESULT: result,
+          FAKE_CLAUDE_ARGV_LOG: argvLog,
+          FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
+        },
+        () =>
+          providerRun(
+            makeRuntime({ matrix }),
+            contract.role,
+            'json',
+            out,
+            contract.skillFile,
+            contract.schemaFile,
+            TOOLS,
+            DISALLOWED,
+            'Return the minimal valid result.\n',
+          ),
+      );
+
+      expect(status).toBe(0);
+      expect(schemaValidQuiet(out, contract.schemaFile)).toBe(true);
+      const argv = argvRecords(argvLog)[0] ?? [];
+      expect(argv[argv.indexOf('--json-schema') + 1]).toBe(claudeJsonSchema(contract.schemaFile));
+    });
+  }
+});
+
+describe('claude schema rejection', () => {
+  it('fails fast, preserves a resumed session, and keeps normal logs metadata-only', async () => {
+    const argvLog = path.join(tmp, 'claude.argv');
+    const skillFile = path.join(tmp, 'skill.md');
+    const promptMarker = 'PROMPT-PLAN-PLANT-4d5237';
+    const sourceMarker = 'SOURCE-BODY-PLANT-9d0d3e';
+    const toolMarker = 'TOOL-ARGUMENT-PLANT-cf5a14';
+    const credentialMarker = 'CREDENTIAL-TOKEN-PLANT-e81b7c';
+    const stderrMarker = 'STDERR-DETAIL-PLANT-663f8a';
+    writeFileSync(skillFile, `Inspect ${sourceMarker}.\n`);
+    const providerRuntime = makeRuntime({ sessionMode: 1 });
+    const sessionContents = '00000000-0000-4000-8000-00000000dead\n\n';
+    writeFileSync(providerRuntime.creatorSessionFile, sessionContents);
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_ARGV_LOG: argvLog,
+        FAKE_CLAUDE_SCHEMA_REJECT: '1',
+        FAKE_CLAUDE_SCHEMA_REJECT_DETAIL: stderrMarker,
+        FAKE_CLAUDE_SCHEMA_REJECT_STATUS: '17',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'json',
+          path.join(tmp, 'out.json'),
+          skillFile,
+          CREATOR_UPDATE_SCHEMA,
+          `${TOOLS},${toolMarker}`,
+          DISALLOWED,
+          `${promptMarker}\n${credentialMarker}\n`,
+        ),
+    );
+
+    expect(status).toBe(17);
+    expect(argvRecords(argvLog)).toHaveLength(1);
+    expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe(sessionContents);
+    const text = capture.text();
+    expect(text).toContain(
+      'creator/claude call failed (status=17, stderr_lines=1): schema-incompatible',
+    );
+    expect(text).not.toContain('retry 1/3');
+    expect(text).not.toContain('failed after');
+    expect(text).not.toContain('session resume failed');
+    for (const marker of [promptMarker, sourceMarker, toolMarker, credentialMarker, stderrMarker]) {
+      expect(text).not.toContain(marker);
+    }
+  });
+
+  it('removes a newly allocated session after rejection', async () => {
+    const argvLog = path.join(tmp, 'claude.argv');
+    const providerRuntime = makeRuntime({ sessionMode: 1 });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_ARGV_LOG: argvLog,
+        FAKE_CLAUDE_SCHEMA_REJECT: '1',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'json',
+          path.join(tmp, 'out.json'),
+          CREATOR_SKILL,
+          CREATOR_UPDATE_SCHEMA,
+          TOOLS,
+          DISALLOWED,
+          'Update.\n',
+        ),
+    );
+
+    expect(status).toBe(1);
+    expect(argvRecords(argvLog)).toHaveLength(1);
+    expect(argvRecords(argvLog)[0]).toContain('--session-id');
+    expect(existsSync(providerRuntime.creatorSessionFile)).toBe(false);
+  });
+
+  it('keeps raw schema diagnostics in the opt-in artifact only', async () => {
+    const diagnosticsDir = path.join(tmp, 'diagnostics');
+    const matrix = fixtureMatrix();
+    matrix.critic = { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'high' };
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_SCHEMA_REJECT: '1',
+      },
+      () =>
+        providerRun(
+          makeRuntime({ matrix, diagnosticsDir }),
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          TOOLS,
+          DISALLOWED,
+          'Critique.\n',
+        ),
+    );
+
+    expect(status).toBe(1);
+    const files = readdirSync(diagnosticsDir);
+    expect(files).toHaveLength(1);
+    const artifact = readFileSync(path.join(diagnosticsDir, files[0] ?? ''), 'utf8');
+    expect(artifact).toContain('--json-schema is not a valid JSON Schema');
+    expect(artifact).toContain(
+      'no schema with key or ref "https://json-schema.org/draft/2019-09/schema"',
+    );
+    expect(capture.text()).toContain('schema-incompatible');
+    expect(capture.text()).not.toContain('no schema with key or ref');
+    expect(capture.text()).not.toContain('https://json-schema.org/draft/2019-09/schema');
+  });
+
+  it('still retries ordinary transient Claude JSON failures', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    const attempts = path.join(tmp, 'attempts');
+    emptyCritique(critique);
+    const matrix = fixtureMatrix();
+    matrix.critic = { runner: 'claude', model: 'claude-sonnet-4-6', reasoning: 'high' };
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_JSON_RESULT: critique,
+        FAKE_CLAUDE_ATTEMPTS: attempts,
+        FAKE_CLAUDE_FAILS: '2',
+        FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
+      },
+      () =>
+        providerRun(
+          makeRuntime({ matrix }),
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          TOOLS,
+          DISALLOWED,
+          'Critique.\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(readFileSync(attempts, 'utf8')).toBe('3');
+    expect(capture.text()).toContain('WARNING: claude call failed; retry 1/3');
+    expect(capture.text()).not.toContain('schema-incompatible');
   });
 });
 
@@ -863,6 +1129,7 @@ describe('cursor adapter', () => {
     expect(prompt).toContain('## Tool constraints');
     expect(prompt).toContain(`Use only these tools when inspecting the codebase: ${TOOLS}.`);
     expect(prompt).toContain('## JSON schema');
+    expect(prompt).toContain(strippedFile(CRITIC_SCHEMA));
     expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
     expect(readFileSync(out, 'utf8')).toBe(strippedFile(critique));
 
@@ -930,6 +1197,47 @@ describe('cursor adapter', () => {
     expect(records[1]).not.toContain('--resume');
     expect(readFileSync(out, 'utf8')).toBe(readFileSync(created, 'utf8'));
     expect(readFileSync(providerRuntime.creatorSessionFile, 'utf8')).toBe('cursor-session-fixture');
+  });
+
+  it('retains transient retries for cursor calls', async () => {
+    const result = path.join(tmp, 'cursor.json');
+    emptyCritique(result);
+    const attempts = path.join(tmp, 'cursor.attempts');
+    const argvLog = path.join(tmp, 'cursor.argv');
+    const out = path.join(tmp, 'out.json');
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 2, retryDelaySeconds: 0 },
+      matrix: {
+        ...fixtureMatrix(),
+        creator: { runner: 'cursor', model: 'composer-2.5', reasoning: '' },
+      },
+    });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CURSOR_JSON_RESULT: result,
+        FAKE_CURSOR_ATTEMPTS: attempts,
+        FAKE_CURSOR_FAILS: '2',
+        FAKE_CURSOR_ARGV_LOG: argvLog,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'creator',
+          'json',
+          out,
+          CREATOR_SKILL,
+          CRITIC_SCHEMA,
+          TOOLS,
+          DISALLOWED,
+          'Retry.\\n',
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(readFileSync(attempts, 'utf8')).toBe('3');
+    expect(argvRecords(argvLog)).toHaveLength(3);
   });
 });
 

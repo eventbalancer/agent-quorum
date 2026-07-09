@@ -6,7 +6,7 @@ describe('runWithRetries', () => {
     let calls = 0;
     const status = await runWithRetries('probe', { retryCount: 3, retryDelaySeconds: 0 }, () => {
       calls += 1;
-      return 0;
+      return { status: 0, retryable: true };
     });
     expect(status).toBe(0);
     expect(calls).toBe(1);
@@ -16,7 +16,7 @@ describe('runWithRetries', () => {
     let calls = 0;
     const status = await runWithRetries('probe', { retryCount: 2, retryDelaySeconds: 0 }, () => {
       calls += 1;
-      return 7;
+      return { status: 7, retryable: true };
     });
     expect(status).toBe(7);
     expect(calls).toBe(3);
@@ -26,7 +26,7 @@ describe('runWithRetries', () => {
     let calls = 0;
     const status = await runWithRetries('probe', { retryCount: 2, retryDelaySeconds: 0 }, () => {
       calls += 1;
-      return calls < 2 ? 1 : 0;
+      return { status: calls < 2 ? 1 : 0, retryable: true };
     });
     expect(status).toBe(0);
     expect(calls).toBe(2);
@@ -36,9 +36,19 @@ describe('runWithRetries', () => {
     let calls = 0;
     const status = await runWithRetries('probe', { retryCount: 0, retryDelaySeconds: 0 }, () => {
       calls += 1;
-      return 9;
+      return { status: 9, retryable: true };
     });
     expect(status).toBe(9);
+    expect(calls).toBe(1);
+  });
+
+  it('returns a non-retryable status without another attempt', async () => {
+    let calls = 0;
+    const status = await runWithRetries('probe', { retryCount: 3, retryDelaySeconds: 0 }, () => {
+      calls += 1;
+      return { status: 8, retryable: false };
+    });
+    expect(status).toBe(8);
     expect(calls).toBe(1);
   });
 });
