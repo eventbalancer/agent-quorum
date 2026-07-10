@@ -21,10 +21,18 @@ import {
   type RetentionPolicy,
   type RunRecord,
 } from './core/run-store.js';
-import type { Quality, RunOverrides } from './types.js';
+import type { FinalReadiness, Quality, RunFinalStatus, RunOverrides } from './types.js';
 
 export { ExitCode } from './exit-codes.js';
-export type { Quality, Role, RunMode, RunOverrides, Runner } from './types.js';
+export type {
+  FinalReadiness,
+  Quality,
+  Role,
+  RunFinalStatus,
+  RunMode,
+  RunOverrides,
+  Runner,
+} from './types.js';
 export type { DeepPartial, OperatorConfig, ResolvedConfig, Secrets } from './core/config.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
 export {
@@ -93,6 +101,12 @@ export interface RunResult {
   health?: RunHealth;
   splitDecision?: string;
   packageDir?: string;
+  status?: RunFinalStatus;
+  reason?: string;
+  structuralStatus?: RunFinalStatus;
+  structuralReason?: string;
+  readiness?: FinalReadiness;
+  readinessPath?: string;
 }
 
 export interface CommandResult {
@@ -176,6 +190,12 @@ function toRunResult(outcome: RunOutcome): RunResult {
       : {}),
     ...(report.splitDecision !== undefined ? { splitDecision: report.splitDecision } : {}),
     ...(report.packageDir !== undefined ? { packageDir: report.packageDir } : {}),
+    ...(report.status !== undefined ? { status: report.status } : {}),
+    ...(report.reason !== undefined ? { reason: report.reason } : {}),
+    ...(report.structuralStatus !== undefined ? { structuralStatus: report.structuralStatus } : {}),
+    ...(report.structuralReason !== undefined ? { structuralReason: report.structuralReason } : {}),
+    ...(report.readiness !== undefined ? { readiness: report.readiness } : {}),
+    ...(report.readinessPath !== undefined ? { readinessPath: report.readinessPath } : {}),
   };
 }
 

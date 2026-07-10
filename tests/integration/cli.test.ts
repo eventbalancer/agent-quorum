@@ -21,6 +21,7 @@ import {
   writeStructuredPlanFile,
 } from '../helpers/harness.js';
 import { startTelegramStub, type TelegramStub } from '../helpers/telegram-stub.js';
+import { readRunRecords } from '../../src/core/run-store.js';
 
 let tmp: string;
 let fake: string;
@@ -128,6 +129,87 @@ describe('exit-code matrix', () => {
       expect(message).toContain('iterations: 0');
       expect(message).toContain(`summary: ${canonicalWorkPath('summary.md')}`);
       expect(message).not.toContain(path.join(tmp, 'input.md'));
+    } finally {
+      await stub.close();
+    }
+  }, 60_000);
+
+  it('reports a negative final Judge verdict consistently through CLI and Telegram', async () => {
+    const stub: TelegramStub = await startTelegramStub();
+    try {
+      const rationale = 'missing rollout acceptance gate';
+      const verdict = path.join(tmp, 'judge-not-ready.json');
+      writeFileSync(verdict, `${JSON.stringify({ ready: false, rationale })}\n`);
+      const result = await runCliAsync(
+        [
+          'plan',
+          '--quality',
+          'balanced',
+          '--iters',
+          '1',
+          path.join(tmp, 'input.md'),
+          '--no-fix',
+          '--no-translate',
+        ],
+        telegramEnv(stub, {
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CLAUDE_JSON_RESULT: verdict,
+        }),
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('FINAL JUDGE: not-ready');
+      expect(result.stderr).toContain('FINAL: needs-review');
+      const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
+      expect(summary).toContain('readiness=not-ready');
+      expect(summary).toContain(`final_judge_rationale: ${rationale}`);
+      expect(summary).toContain('- FINAL: needs-review');
+      expect(readRunRecords(path.join(tmp, 'state'))[0]).toMatchObject({
+        finalReason: `Final Judge: ${rationale}`,
+        finalReadiness: { rationale },
+      });
+      const message = stub.sent[0] ?? '';
+      expect(message).toContain('status: needs-review');
+      expect(message).toContain('structural: clean');
+      expect(message).toContain('readiness: not-ready');
+      expect(message).toContain(`readiness rationale: ${rationale}`);
+    } finally {
+      await stub.close();
+    }
+  }, 60_000);
+
+  it('reports unknown final readiness after invalid Judge output', async () => {
+    const stub: TelegramStub = await startTelegramStub();
+    try {
+      const invalid = path.join(tmp, 'judge-invalid.json');
+      writeFileSync(invalid, '{"ready":true}\n');
+      const result = await runCliAsync(
+        [
+          'plan',
+          '--quality',
+          'balanced',
+          '--iters',
+          '1',
+          path.join(tmp, 'input.md'),
+          '--no-fix',
+          '--no-translate',
+        ],
+        telegramEnv(stub, {
+          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CLAUDE_JSON_RESULT: invalid,
+        }),
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('FINAL JUDGE: unknown');
+      expect(result.stderr).toContain('FINAL: needs-review');
+      expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain(
+        'final_judge: evaluated=false, readiness=unknown',
+      );
+      const message = stub.sent[0] ?? '';
+      expect(message).toContain('status: needs-review');
+      expect(message).toContain('readiness: unknown');
+      expect(message).not.toContain('readiness: ready');
     } finally {
       await stub.close();
     }

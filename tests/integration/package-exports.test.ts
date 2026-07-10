@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ let tempDir: string;
 
 interface ConsumerRunResult {
   status: number | null;
+  stdout: string;
   stderr: string;
 }
 
@@ -17,7 +18,7 @@ interface ConsumerRunResult {
 // tempDir/node_modules.
 function runConsumer(args: string[]): ConsumerRunResult {
   const result = spawnSync(process.execPath, args, { cwd: tempDir, encoding: 'utf8' });
-  return { status: result.status, stderr: result.stderr };
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
 beforeAll(() => {
@@ -47,7 +48,7 @@ describe('package exports (ESM + CJS consumability)', () => {
       "const pkg = require.resolve('agent-quorum/package.json');" +
       "if (!pkg.endsWith('package.json')) throw new Error('package.json not resolved');";
     const result = runConsumer(['-e', script]);
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   });
 
   it('import() loads the same build from ESM', () => {
@@ -56,6 +57,32 @@ describe('package exports (ESM + CJS consumability)', () => {
       "if (typeof aq.runPlanLoop !== 'function') throw new Error('runPlanLoop missing');" +
       "if (typeof aq.addIntervention !== 'function') throw new Error('addIntervention missing');";
     const result = runConsumer(['--input-type=module', '-e', script]);
-    expect(result.status, result.stderr).toBe(0);
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+  });
+
+  it('publishes additive final readiness types without narrowing legacy run records', () => {
+    const consumer = path.join(tempDir, 'consumer.ts');
+    writeFileSync(
+      consumer,
+      "import type { FinalReadiness, RunFinalStatus, RunRecord } from 'agent-quorum';\n" +
+        "const status: RunFinalStatus = 'needs-review';\n" +
+        "const readiness: FinalReadiness = { evaluated: false, ready: null, rationale: 'unknown', planSha256: 'a'.repeat(64) };\n" +
+        "const legacy: Pick<RunRecord, 'finalStatus'> = { finalStatus: 'legacy-status' };\n" +
+        'void [status, readiness, legacy];\n',
+    );
+    const result = runConsumer([
+      path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
+      '--noEmit',
+      '--strict',
+      '--skipLibCheck',
+      '--target',
+      'ES2022',
+      '--module',
+      'NodeNext',
+      '--moduleResolution',
+      'NodeNext',
+      consumer,
+    ]);
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   });
 });

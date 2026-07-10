@@ -1,8 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runJudge } from '../../src/stages/plan/judge.js';
+import {
+  FINAL_JUDGE_METADATA,
+  judgePrompt,
+  runFinalJudge,
+  runJudge,
+} from '../../src/stages/plan/judge.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { skillPaths } from '../../src/core/run-context.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
@@ -63,6 +69,12 @@ describe('runJudge', () => {
     expect(result).toEqual({ ready: true, rationale: 'looks good' });
   });
 
+  it('labels the intermediate critique as current context', () => {
+    const prompt = judgePrompt(planFile, critiqueFile);
+    expect(prompt).toContain('scope: intermediate');
+    expect(prompt).toContain('critique_context: current critique for this plan revision');
+  });
+
   it('returns not-ready on non-zero provider status', async () => {
     mockProviderRun.mockResolvedValue(1);
 
@@ -97,5 +109,99 @@ describe('runJudge', () => {
     const ctxWithRealSkills = { ...ctx, skills };
     const result = await runJudge(ctxWithRealSkills, 0, planFile, critiqueFile, outFile);
     expect(result).toEqual({ ready: false, rationale: '' });
+  });
+});
+
+describe('runFinalJudge', () => {
+  function mockFinalOutput(output: unknown, status = 0): void {
+    mockProviderRun.mockImplementation(
+      (_provider, _role, _mode, file, _skill, _schema, _tools, _disallowed, _prompt, options) => {
+        if (status !== 0) {
+          return Promise.resolve(status);
+        }
+        writeFileSync(file, typeof output === 'string' ? output : JSON.stringify(output));
+        const valid = options?.validateOutput?.(file) ?? true;
+        return Promise.resolve(valid ? 0 : 1);
+      },
+    );
+  }
+
+  it('binds a valid verdict to the exact final-plan bytes', async () => {
+    mockFinalOutput({ ready: true, rationale: 'implementation ready' });
+    const ctx = makeContext();
+    ctx.lastCritiqueIter = 0;
+
+    const result = await runFinalJudge(ctx, planFile);
+
+    const digest = createHash('sha256').update(readFileSync(planFile)).digest('hex');
+    expect(result.readiness).toEqual({
+      evaluated: true,
+      ready: true,
+      rationale: 'implementation ready',
+      planSha256: digest,
+    });
+    expect(result.metadataPath).toBe(path.join(work, FINAL_JUDGE_METADATA));
+    expect(readFileSync(path.join(work, 'judge.final.json'), 'utf8')).toBe(
+      readFileSync(path.join(work, 'judge.final.raw'), 'utf8'),
+    );
+    expect(JSON.parse(readFileSync(result.metadataPath, 'utf8'))).toEqual({
+      canonical_plan: 'plan.final.md',
+      plan_sha256: digest,
+      evaluated: true,
+      ready: true,
+      rationale: 'implementation ready',
+      verdict_artifact: 'judge.final.json',
+    });
+    const prompt = mockProviderRun.mock.calls[0]?.[8] ?? '';
+    expect(prompt).toContain('scope: final');
+    expect(prompt).toContain('critique_context: advisory');
+    expect(prompt).toContain(`plan_sha256: ${digest}`);
+  });
+
+  it('uses a deterministic fallback for an empty negative rationale', async () => {
+    mockFinalOutput({ ready: false, rationale: '' });
+
+    const result = await runFinalJudge(makeContext(), planFile);
+
+    expect(result.readiness).toMatchObject({
+      evaluated: true,
+      ready: false,
+      rationale: 'Final Judge returned ready=false without a rationale.',
+    });
+  });
+
+  it.each([1, 124])(
+    'reports unknown readiness for exhausted provider status %s',
+    async (status) => {
+      writeFileSync(path.join(work, 'judge.final.raw'), 'stale output');
+      mockFinalOutput({}, status);
+
+      const result = await runFinalJudge(makeContext(), planFile);
+
+      expect(result.readiness).toMatchObject({
+        evaluated: false,
+        ready: null,
+        rationale: 'Final Judge did not produce a valid verdict after provider retries.',
+      });
+      expect(existsSync(path.join(work, 'judge.final.json'))).toBe(false);
+      expect(existsSync(path.join(work, 'judge.final.raw'))).toBe(false);
+    },
+  );
+
+  it('reports unknown readiness and preserves invalid raw output', async () => {
+    mockFinalOutput({ ready: true });
+    const ctx = { ...makeContext(), skills: skillPaths(REPO_ROOT) };
+
+    const result = await runFinalJudge(ctx, planFile);
+
+    expect(result.readiness.evaluated).toBe(false);
+    expect(result.readiness.ready).toBeNull();
+    expect(existsSync(path.join(work, 'judge.final.raw'))).toBe(true);
+    expect(existsSync(path.join(work, 'judge.final.json'))).toBe(false);
+    expect(JSON.parse(readFileSync(result.metadataPath, 'utf8'))).toMatchObject({
+      evaluated: false,
+      ready: null,
+      verdict_artifact: null,
+    });
   });
 });

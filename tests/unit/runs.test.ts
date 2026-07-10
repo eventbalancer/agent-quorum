@@ -14,7 +14,7 @@ let tmp: string;
 let stateDir: string;
 let savedStateDir: string | undefined;
 
-function seed(name: string, withLog: boolean): string {
+function seed(name: string, withLog: boolean, withReadiness = false): string {
   const workDir = path.join(tmp, 'plans', `loop-${name}`);
   mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
@@ -40,6 +40,18 @@ function seed(name: string, withLog: boolean): string {
     state: 'finished',
     exitCode: 0,
     endedAt: '2026-06-13T01:00:00Z',
+    ...(withReadiness
+      ? {
+          finalStatus: 'needs-review' as const,
+          structuralStatus: 'clean' as const,
+          finalReadiness: {
+            evaluated: true,
+            ready: false,
+            rationale: 'missing acceptance gate',
+            planSha256: 'a'.repeat(64),
+          },
+        }
+      : {}),
   });
   return workDir;
 }
@@ -85,6 +97,16 @@ describe('runShowCli', () => {
     const sink = collect();
     expect(runShowCli(['--help'], sink.out)).toBe(0);
     expect(sink.text()).toContain('agent-quorum show');
+  });
+
+  it('prints final readiness facts for a completed Judge-enabled run', () => {
+    seed('judged', true, true);
+    const sink = collect();
+    expect(runShowCli(['judged'], sink.out)).toBe(0);
+    expect(sink.text()).toContain('final:   needs-review');
+    expect(sink.text()).toContain('structural: clean');
+    expect(sink.text()).toContain('readiness: not-ready');
+    expect(sink.text()).toContain('rationale: missing acceptance gate');
   });
 
   it('throws HaltError(2) when nothing resolves', () => {

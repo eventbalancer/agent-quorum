@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HaltError } from '../runtime/halt.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
+import { readinessLabel } from '../types.js';
 import { pruneRuns, resolveRunState, type RetentionPolicy } from '../core/run-store.js';
 import { LOGS_USAGE, PRUNE_USAGE, SHOW_USAGE } from './help.js';
 import { systemProbes } from './probes.js';
@@ -127,6 +128,13 @@ export function runShowCli(args: readonly string[], out: Writer = stdout): numbe
     lines.push(
       `run ${resolved.runId} (${resolved.name}) — ${resolveRunState(resolved, systemProbes)}`,
     );
+    if (resolved.finalReadiness !== undefined) {
+      const readiness = resolved.finalReadiness;
+      lines.push(`  final:   ${resolved.finalStatus ?? 'unknown'}`);
+      lines.push(`  structural: ${resolved.structuralStatus ?? 'unknown'}`);
+      lines.push(`  readiness: ${readinessLabel(readiness.ready)}`);
+      lines.push(`  rationale: ${readiness.rationale}`);
+    }
   }
   lines.push(`  workdir: ${workDir}`);
   lines.push(`  plan:    ${planFile} [${presence(planFile)}]`);

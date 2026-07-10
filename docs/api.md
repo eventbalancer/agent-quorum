@@ -16,6 +16,8 @@ import {
   type LaunchPlanLoopOptions,
   type RunResult,
   type RunHealth,
+  type RunFinalStatus,
+  type FinalReadiness,
   type LaunchResult,
   type CommandResult,
   type InterventionTarget,
@@ -82,6 +84,12 @@ const result = await runPlanLoop({
 //   health: { critic: 3, addressed: 2, new: 1, invalid: 0, validAddressedPct: 66 },
 //   splitDecision: 'no-split',          // 'split' | 'no-split', present every run
 //   packageDir: undefined,              // '/abs/path/loop-my-plan/plan.package' only when split
+//   status: 'clean',
+//   reason: '',
+//   structuralStatus: 'clean',
+//   structuralReason: '',
+//   readiness: { evaluated: true, ready: true, rationale: 'Ready.', planSha256: '…' },
+//   readinessPath: '/abs/path/loop-my-plan/judge.final.meta.json',
 // }
 ```
 
@@ -97,6 +105,17 @@ policy fired and a `plan.package/` was emitted. Both are additive —
 `finalPlanPath` is never replaced by a directory-only result, so existing
 callers are unaffected. `runId` and `name` identify the run (the same id the
 start surfaces report); they are additive on `RunResult`/`LaunchResult`.
+Completed runs add `status`/`reason` and the independent
+`structuralStatus`/`structuralReason`. A non-blocked `balanced` or `thorough`
+run also returns `readiness` and `readinessPath`. `readiness.ready` is `true` or
+`false` for a schema-valid final verdict; it is `null` with `evaluated: false`
+when the provider retry policy ends without a valid verdict. The SHA-256 binds
+that result to the exact bytes of `plan.final.md`. Negative and unknown
+readiness both return exit code 0 with `status: 'needs-review'`. Quick and
+structurally blocked runs omit the readiness fields. The durable `RunRecord`
+stores the same facts as `finalStatus`/`finalReason`,
+`structuralStatus`/`structuralReason`, and `finalReadiness`. `LaunchResult`
+remains unchanged because detachment occurs before completion.
 Artifacts land in the resolved workdir; for `home`/`workDir` the precedence is
 option > environment variable > default (`~/.agent-quorum` / `<home>/runs/loop-<name>`).
 Structured `config`/`secrets` resolve in the override tier (override > env >

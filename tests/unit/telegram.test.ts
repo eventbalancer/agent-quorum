@@ -70,6 +70,49 @@ describe('Telegram completion notification rendering', () => {
     expect(message).toContain('reason: 2 stale line reference(s) remain after fix-pass');
   });
 
+  it('renders final Judge readiness separately from structural status', () => {
+    const message = renderTelegramCompletionNotification({
+      inputPath: '/tmp/private/review-plan.md',
+      exitCode: 0,
+      status: 'needs-review',
+      reason: 'Final Judge: missing rollout acceptance gate',
+      structuralStatus: 'clean',
+      readiness: {
+        evaluated: true,
+        ready: false,
+        rationale: 'missing rollout acceptance gate',
+        planSha256: 'a'.repeat(64),
+      },
+      iterations: 2,
+    });
+
+    expect(message).toContain('status: needs-review');
+    expect(message).toContain('structural: clean');
+    expect(message).toContain('readiness: not-ready');
+    expect(message).toContain('readiness rationale: missing rollout acceptance gate');
+  });
+
+  it('renders final Judge approval on a clean success', () => {
+    const message = renderTelegramCompletionNotification({
+      inputPath: '/tmp/private/ready-plan.md',
+      exitCode: 0,
+      status: 'clean',
+      structuralStatus: 'clean',
+      readiness: {
+        evaluated: true,
+        ready: true,
+        rationale: 'implementation ready',
+        planSha256: 'a'.repeat(64),
+      },
+      iterations: 1,
+    });
+
+    expect(message).toContain('status: clean');
+    expect(message).toContain('structural: clean');
+    expect(message).toContain('readiness: ready');
+    expect(message).toContain('readiness rationale: implementation ready');
+  });
+
   it('renders a blocked failure with summary details', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/broken.md',

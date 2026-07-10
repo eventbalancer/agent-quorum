@@ -53,7 +53,8 @@ pnpm run run:cli -- intervene --last "prefer an additive migration"
 When the loop converges it writes, under the run's workdir:
 
 - `plan.final.md` — the converged plan; always the entry point.
-- `summary.md` — one-page run summary (iterations, health, artifact paths).
+- `summary.md` — one-page run summary (iterations, health, structural status,
+  final readiness, and artifact paths).
 - `plan.package/` — present only when the split policy fires.
 
 ## API walkthrough

@@ -535,7 +535,9 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('converged at v0 (judge verdict: implementation-ready)');
+    expect(capture.text()).toContain(
+      'converged at v0 (intermediate judge verdict: implementation-ready)',
+    );
     expect(JSON.parse(readFileSync(path.join(work, 'judge.v0.json'), 'utf8'))).toEqual({
       ready: true,
       rationale: 'implementation-ready',
@@ -578,7 +580,7 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).not.toContain('— judge (');
+    expect(capture.text()).not.toContain('— intermediate judge (');
   });
 
   it('creator prompt receives operator interventions and migrates them', async () => {

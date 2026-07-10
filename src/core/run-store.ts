@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { HaltError } from '../runtime/halt.js';
+import type { FinalReadiness, RunFinalStatus } from '../types.js';
 
 export type RunState = 'running' | 'finished' | 'failed' | 'blocked';
 
@@ -32,12 +33,26 @@ export interface RunRecord {
   readonly endedAt?: string;
   readonly exitCode?: number;
   readonly finalStatus?: string;
+  readonly finalReason?: string;
+  readonly structuralStatus?: RunFinalStatus;
+  readonly structuralReason?: string;
+  readonly finalReadiness?: FinalReadiness;
 }
 
 export type RunRecordDraft = Omit<RunRecord, 'runId'>;
 
 export type RunRecordPatch = Partial<
-  Pick<RunRecord, 'state' | 'endedAt' | 'exitCode' | 'finalStatus'>
+  Pick<
+    RunRecord,
+    | 'state'
+    | 'endedAt'
+    | 'exitCode'
+    | 'finalStatus'
+    | 'finalReason'
+    | 'structuralStatus'
+    | 'structuralReason'
+    | 'finalReadiness'
+  >
 >;
 
 export interface WriteRunRecordOptions {

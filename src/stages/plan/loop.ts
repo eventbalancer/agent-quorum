@@ -136,20 +136,22 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       const { blockers, majors } = openBlockerMajor(critiqueJson);
       if (blockers === 0 && majors === 0) {
         log(
-          `iter=${iter} — judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
+          `iter=${iter} — intermediate judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
         );
         const judgeFile = path.join(ctx.work, `judge.v${iter}.json`);
         const verdict = await runJudge(ctx, iter, plan, critique, judgeFile);
         log(
-          `  → judge ready=${verdict.ready}${verdict.rationale !== '' ? ` (${verdict.rationale})` : ''}`,
+          `  → intermediate judge ready=${verdict.ready}${verdict.rationale !== '' ? ` (${verdict.rationale})` : ''}`,
         );
         if (verdict.ready) {
-          log(`converged at v${iter} (judge verdict: implementation-ready)`);
+          log(`converged at v${iter} (intermediate judge verdict: implementation-ready)`);
           copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
           break;
         }
       } else {
-        log(`iter=${iter} — judge skipped (${blockers} blocker / ${majors} major open)`);
+        log(
+          `iter=${iter} — intermediate judge skipped (${blockers} blocker / ${majors} major open)`,
+        );
       }
     }
 

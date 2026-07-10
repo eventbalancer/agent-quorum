@@ -104,7 +104,16 @@ describe('run records', () => {
     finalizeRunRecord(stateDir, written.runId, {
       state: 'finished',
       exitCode: 0,
-      finalStatus: 'clean',
+      finalStatus: 'needs-review',
+      finalReason: 'Final Judge: missing gate',
+      structuralStatus: 'clean',
+      structuralReason: '',
+      finalReadiness: {
+        evaluated: true,
+        ready: false,
+        rationale: 'missing gate',
+        planSha256: 'a'.repeat(64),
+      },
       endedAt: '2026-06-13T01:00:00Z',
     });
 
@@ -114,7 +123,9 @@ describe('run records', () => {
     expect(read?.runId).toBe(written.runId);
     expect(read?.state).toBe('finished');
     expect(read?.exitCode).toBe(0);
-    expect(read?.finalStatus).toBe('clean');
+    expect(read?.finalStatus).toBe('needs-review');
+    expect(read?.structuralStatus).toBe('clean');
+    expect(read?.finalReadiness?.ready).toBe(false);
     expect(read?.workDir).toBe(written.workDir);
     expect(read?.logPath).toBe(written.logPath);
   });

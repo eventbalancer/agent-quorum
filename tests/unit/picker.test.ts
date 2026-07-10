@@ -161,6 +161,25 @@ describe('renderListing', () => {
     expect(plain.includes(ESC)).toBe(false);
     expect(renderListing(candidates, { color: true }).includes(ESC)).toBe(true);
   });
+
+  it('adds final readiness facts for terminal Judge-enabled runs', () => {
+    const written = writeRunRecord(stateDir, draft({ name: 'judged' }));
+    finalizeRunRecord(stateDir, written.runId, {
+      state: 'finished',
+      exitCode: 0,
+      finalStatus: 'needs-review',
+      structuralStatus: 'clean',
+      finalReadiness: {
+        evaluated: true,
+        ready: false,
+        rationale: 'missing gate',
+        planSha256: 'a'.repeat(64),
+      },
+    });
+
+    const plain = renderListing(listCandidates(), { color: false });
+    expect(plain).toContain('[finished]  final=needs-review readiness=not-ready');
+  });
 });
 
 describe('pickInteractive', () => {

@@ -140,6 +140,16 @@ describe('role skill split-package contract', () => {
   });
 });
 
+describe('Judge final-readiness contract', () => {
+  it('distinguishes canonical final evaluation from intermediate evidence', () => {
+    const text = skillText(skills.judgeSkill);
+    expect(text).toContain('scope: intermediate | final');
+    expect(text).toContain('authoritative post-fix canonical artifact');
+    expect(text).toContain('advisory only');
+    expect(text).toContain('do not quote or reproduce plan text');
+  });
+});
+
 describe('execute skill package-aware workflow', () => {
   const executeSkill = path.join(REPO_ROOT, '.agents', 'skills', 'execute', 'SKILL.md');
 
