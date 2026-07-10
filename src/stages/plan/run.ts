@@ -53,6 +53,7 @@ import { markOperatorInterventionsMigrated } from './interventions.js';
 import { resolveWatchdogKnobs } from '../../core/knobs.js';
 import { resolveRunnerBinaries } from '../../providers/registry.js';
 import { runIterationLoop } from './loop.js';
+import { runFinalJudge } from './judge.js';
 import { preflightRunners } from './preflight.js';
 import {
   emitPlanPackage,
@@ -70,7 +71,12 @@ import {
 } from './plan-shape.js';
 import { prepareResume } from './resume.js';
 import { skillPaths, type RunContext } from '../../core/run-context.js';
-import { buildRunReport, writeSummary, type RunReport } from './summary.js';
+import {
+  buildRunReport,
+  writeSummary,
+  type RunReport,
+  type RunReportFinalFacts,
+} from './summary.js';
 import {
   telegramNotifyCompletion,
   type TelegramCompletionNotification,
@@ -83,7 +89,7 @@ import {
   validateFinalPlan,
   type FindingsCounts,
 } from './validate-plan.js';
-import type { RunMode, RunOverrides } from '../../types.js';
+import type { FinalReadiness, RunFinalStatus, RunMode, RunOverrides } from '../../types.js';
 
 export const RUN_USAGE =
   'usage: agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] <plan.md>\n' +
@@ -279,8 +285,6 @@ interface SplitPackageResult {
   readonly packageHealth?: PackageHealth;
 }
 
-type FinalStatus = 'clean' | 'needs-review' | 'blocked';
-
 interface ResolveFinalStatusParams {
   readonly finalTitle: 0 | 1;
   readonly shape: PlanShapeHealth;
@@ -289,7 +293,7 @@ interface ResolveFinalStatusParams {
 }
 
 interface FinalStatusResult {
-  readonly status: FinalStatus;
+  readonly status: RunFinalStatus;
   readonly reason: string;
 }
 
@@ -373,7 +377,7 @@ function hasPackageReferencesNeedingReview(packageHealth: PackageHealth): boolea
   );
 }
 
-function resolveFinalStatus({
+function resolveStructuralStatus({
   finalTitle,
   shape,
   findings,
@@ -417,6 +421,42 @@ function resolveFinalStatus({
   }
 
   return { status: 'clean', reason: '' };
+}
+
+function resolveCompletionStatus(
+  structural: FinalStatusResult,
+  readiness: FinalReadiness | undefined,
+): FinalStatusResult {
+  if (structural.status === 'blocked') {
+    return structural;
+  }
+  const reasons: string[] = [];
+  if (structural.status === 'needs-review') {
+    reasons.push(structural.reason);
+  }
+  if (readiness !== undefined && (!readiness.evaluated || readiness.ready === false)) {
+    reasons.push(`Final Judge: ${readiness.rationale}`);
+  }
+  if (reasons.length === 0) {
+    return { status: 'clean', reason: '' };
+  }
+  return { status: 'needs-review', reason: reasons.join('; ') };
+}
+
+function resolveFinalFacts(
+  structural: FinalStatusResult,
+  readiness: FinalReadiness | undefined,
+  readinessPath: string | undefined,
+): RunReportFinalFacts {
+  const final = resolveCompletionStatus(structural, readiness);
+  return {
+    status: final.status,
+    reason: final.reason,
+    structuralStatus: structural.status,
+    structuralReason: structural.reason,
+    ...(readiness !== undefined ? { readiness } : {}),
+    ...(readinessPath !== undefined ? { readinessPath } : {}),
+  };
 }
 
 // A malformed forwarded value fails the run before any provider work rather than being dropped.
@@ -553,7 +593,7 @@ export async function runPlanLoopCli(
   const forwardedRunId = process.env.AGENT_QUORUM_RUN_ID;
   const startedAt = nowUtcStamp();
   let runId = '';
-  const finalizeRun = (state: RunState, exitCode: number, finalStatus?: string): void => {
+  const finalizeRun = (state: RunState, exitCode: number, facts?: RunReportFinalFacts): void => {
     if (runId === '') {
       return;
     }
@@ -561,7 +601,15 @@ export async function runPlanLoopCli(
       state,
       exitCode,
       endedAt: nowUtcStamp(),
-      ...(finalStatus !== undefined ? { finalStatus } : {}),
+      ...(facts !== undefined
+        ? {
+            finalStatus: facts.status,
+            finalReason: facts.reason,
+            structuralStatus: facts.structuralStatus,
+            structuralReason: facts.structuralReason,
+            ...(facts.readiness !== undefined ? { finalReadiness: facts.readiness } : {}),
+          }
+        : {}),
     });
   };
 
@@ -801,18 +849,51 @@ export async function runPlanLoopCli(
       const finalTitle = planHasTitleHeading(finalPlan) ? 1 : 0;
       const findings = readFindingsCounts(path.join(work, 'findings.json'));
       const packageHealth = splitPackage.packageHealth;
-      const final = resolveFinalStatus({
+      const structural = resolveStructuralStatus({
         finalTitle,
         shape,
         findings,
         ...(packageHealth !== undefined ? { packageHealth } : {}),
       });
-      const finalStatus = final.status;
-      const finalReason = final.reason;
-      if (finalStatus === 'clean') {
-        log('FINAL: clean — plan.final.md is structurally complete with no stale references');
+      if (structural.status === 'clean') {
+        log('STRUCTURAL: clean — plan.final.md is complete with no stale references');
       } else {
-        err(`FINAL: ${finalStatus} — ${finalReason}`);
+        err(`STRUCTURAL: ${structural.status} — ${structural.reason}`);
+      }
+
+      let readiness: FinalReadiness | undefined;
+      let readinessPath: string | undefined;
+      if (structural.status !== 'blocked' && qualityKnobs.judge === 1) {
+        log(
+          `final Judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
+        );
+        const judged = await runFinalJudge(ctx, finalPlan);
+        readiness = judged.readiness;
+        readinessPath = judged.metadataPath;
+        if (!readiness.evaluated) {
+          err(
+            `FINAL JUDGE: unknown — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`,
+          );
+        } else if (readiness.ready) {
+          log(`FINAL JUDGE: ready — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`);
+        } else {
+          err(
+            `FINAL JUDGE: not-ready — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`,
+          );
+        }
+      } else if (structural.status === 'blocked' && qualityKnobs.judge === 1) {
+        log('final Judge skipped — structural status is blocked');
+      }
+
+      const finalFacts = resolveFinalFacts(structural, readiness, readinessPath);
+      if (finalFacts.status === 'clean') {
+        log(
+          readiness === undefined
+            ? 'FINAL: clean — plan.final.md is structurally complete with no stale references'
+            : 'FINAL: clean — canonical plan is structurally clean and Judge-approved',
+        );
+      } else {
+        err(`FINAL: ${finalFacts.status} — ${finalFacts.reason}`);
       }
 
       const translateFile = path.join(work, `plan.final.${settings.locale}.md`);
@@ -828,8 +909,7 @@ export async function runPlanLoopCli(
         finalStale: findings.stale,
         finalAmbiguous: findings.ambiguous,
         finalUnresolved: findings.unresolved,
-        finalStatus,
-        finalReason,
+        finalFacts,
         splitDecision: splitPackage.splitDecision.split ? 'split' : 'no-split',
         splitRationale: splitPackage.splitDecision.rationale,
         packagePhaseCount: splitPackage.packagePhaseCount,
@@ -838,13 +918,16 @@ export async function runPlanLoopCli(
       });
 
       log(`done. summary: ${path.join(work, 'summary.md')}`);
-      const report = { ...buildRunReport(ctx, iter), runId, name };
-      const exitCode = finalStatus === 'blocked' ? 6 : 0;
-      finalizeRun(finalStatus === 'blocked' ? 'blocked' : 'finished', exitCode, finalStatus);
+      const report = {
+        ...buildRunReport(ctx, iter, finalFacts),
+        runId,
+        name,
+      };
+      const exitCode = finalFacts.status === 'blocked' ? 6 : 0;
+      finalizeRun(finalFacts.status === 'blocked' ? 'blocked' : 'finished', exitCode, finalFacts);
       await notifyCompletion({
+        ...finalFacts,
         exitCode,
-        status: finalStatus,
-        reason: finalReason,
         iterations: iter,
         ...(report.summaryPath !== undefined ? { summaryPath: report.summaryPath } : {}),
       });

@@ -98,6 +98,10 @@ export interface ProviderAttemptOutcome {
   readonly failureReason: ProviderFailureReason | undefined;
 }
 
+export interface ProviderRunOptions {
+  readonly validateOutput?: (outFile: string) => boolean;
+}
+
 export type ProviderInvoke = (input: ProviderCallInput) => Promise<ProviderAttemptOutcome>;
 
 // Keyed by Runner via `satisfies`, so an omitted adapter is a compile error
@@ -208,6 +212,7 @@ export async function providerRun(
   tools: string,
   disallowedTools: string,
   promptText: string,
+  options: ProviderRunOptions = {},
 ): Promise<number> {
   const runner = providerRuntime.matrix[role].runner;
   return runWithRetries(`${runner} call`, providerRuntime.retry, async () => {
@@ -224,6 +229,9 @@ export async function providerRun(
     );
     const isClaudeSchemaRejection =
       runner === 'claude' && mode === 'json' && outcome.failureReason === 'schema-incompatible';
+    if (outcome.status === 0 && options.validateOutput !== undefined) {
+      return { status: options.validateOutput(outFile) ? 0 : 1, retryable: true };
+    }
     return { status: outcome.status, retryable: !isClaudeSchemaRejection };
   });
 }

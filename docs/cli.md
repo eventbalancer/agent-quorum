@@ -88,19 +88,26 @@ the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
 keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
-`--quality` also controls the judge readiness gate: `balanced` and `thorough`
-enable a judge call after each critic pass when no blocker or major issues are
-open; if the judge returns `ready: true`, the loop exits early with that plan
-revision as `plan.final.md`. `quick` skips the judge entirely.
+`--quality` also controls Judge readiness. `balanced` and `thorough` enable an
+intermediate Judge call after a critic pass with no open blocker or major issue;
+`ready: true` can end the loop early, but that evidence remains intermediate.
+After the fix pass, every non-blocked run at those quality levels evaluates the
+exact canonical `plan.final.md` again. `quick` skips Judge entirely.
 
 After the fix pass and before the single `FINAL:` status, a deterministic split
 policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
 `AGENT_QUORUM_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records
 `plan.split.json` and, when it fires, emits and validates a `plan.package/`.
 `summary.md` adds a `split_decision` line and, when a package is present,
-`package_dir`, `package_documents`, and `package_validation` lines. The final
-status folds plan shape, references, and package health into one `FINAL:` log;
-a broken package or an empty-Work-Plan forced split blocks the run (exit 6).
+`package_dir`, `package_documents`, and `package_validation` lines. Structural
+status is reported independently from final readiness. A broken plan/package
+blocks the run (exit 6) before final Judge; otherwise `ready: false` or an
+unknown verdict after provider retries produces `needs-review` with exit 0.
+`judge.final.meta.json` binds the reported result to the SHA-256 of the exact
+canonical plan, while `judge.final.json` exists only for a schema-valid verdict.
+The summary records `structural_status` and optional `structural_reason`; a
+Judge-enabled run also records `final_judge`, `final_judge_rationale`, and
+`final_judge_metadata`.
 
 Before the loop starts, every runner the effective config selects is
 preflighted: installation on `PATH`, then an authentication probe
@@ -112,17 +119,18 @@ subcommand, timeout) only warns and never blocks the run.
 
 When Telegram credentials are configured, the core run sends one best-effort
 completion notification after success or failure. Exit code 0 is reported as
-success, including `needs-review`; non-zero exits report failure with the exit
-code and a compact reason. Notification delivery failures are logged as a
-warning and do not change the run exit code. `status`, `intervene`, and
-launch-parent failures do not send completion notifications; a detached launch
-run notifies from its child core run.
+success, including negative or unknown-readiness `needs-review`; Judge-enabled
+notifications include structural status, readiness, and rationale. Non-zero
+exits report failure with the exit code and a compact reason. Notification
+delivery failures are logged as a warning and do not change the run exit code.
+`status`, `intervene`, and launch-parent failures do not send completion
+notifications; a detached launch run notifies from its child core run.
 
 Exit codes:
 
 | Code | Meaning                                                                            |
 | ---- | ---------------------------------------------------------------------------------- |
-| 0    | converged — clean or needs-review (see `summary.md`)                               |
+| 0    | completed — clean or needs-review, including negative/unknown readiness            |
 | 1    | usage error or failed preflight                                                    |
 | 3    | schema-invalid critique / update / update metadata                                 |
 | 4    | empty or shape-broken creator output (incl. claude plan-mode stub); resume failure |
@@ -173,6 +181,8 @@ artifacts, interventions, the last log event, and follow/stop hints.
 With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same
 scriptable listing (`name [state] <shortId> … workdir`) and never blocks.
+Finished Judge-enabled entries append their overall final status and final
+readiness; `show` prints the structural status and rationale as separate facts.
 Discovery aggregates across all **known stores** — the ambient
 `AGENT_QUORUM_STATE_DIR`/`AGENT_QUORUM_PLANS_DIR`-derived store, the default
 `<home>/state`, and the project-local `<cwd>/.agents/plans/.runs` self-planning

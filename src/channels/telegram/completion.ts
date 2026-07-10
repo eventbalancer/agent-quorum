@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { log } from '../../runtime/log.js';
+import { readinessLabel, type FinalReadiness, type RunFinalStatus } from '../../types.js';
 import { telegramConfigured, type TelegramRuntime } from './config.js';
 import { telegramSend } from './send.js';
 
@@ -13,6 +14,8 @@ export interface TelegramCompletionNotification {
   readonly iterations?: number;
   readonly summaryPath?: string;
   readonly workDir?: string;
+  readonly structuralStatus?: RunFinalStatus;
+  readonly readiness?: FinalReadiness;
 }
 
 function compactCompletionReason(reason: string | undefined): string | undefined {
@@ -37,6 +40,14 @@ export function renderTelegramCompletionNotification(
 
   if (notification.status !== undefined && notification.status !== '') {
     lines.push(`status: ${notification.status}`);
+  }
+  if (notification.readiness !== undefined) {
+    if (notification.structuralStatus !== undefined) {
+      lines.push(`structural: ${notification.structuralStatus}`);
+    }
+    const readiness = notification.readiness;
+    lines.push(`readiness: ${readinessLabel(readiness.ready)}`);
+    lines.push(`readiness rationale: ${readiness.rationale}`);
   }
   if (isSuccess && notification.iterations !== undefined) {
     lines.push(`iterations: ${notification.iterations}`);

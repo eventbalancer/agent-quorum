@@ -71,11 +71,14 @@ describe('stale artifact archive', () => {
     writeFileSync(path.join(work, 'plan.revision.v1.md'), '# R1\n');
     writeFileSync(path.join(work, 'plan.final.md'), '# Final\n');
     writeFileSync(path.join(work, 'summary.md'), '# Summary\n');
+    writeFileSync(path.join(work, 'judge.final.raw'), '{}\n');
+    writeFileSync(path.join(work, 'judge.final.json'), '{}\n');
+    writeFileSync(path.join(work, 'judge.final.meta.json'), '{}\n');
 
     const state: ResumeState = { startIter: 1, archivedCount: 0, archiveDir: '' };
     archiveResumeStale(work, state, 1);
 
-    expect(state.archivedCount).toBe(7);
+    expect(state.archivedCount).toBe(10);
     expect(state.archiveDir.startsWith(path.join(work, 'stale.'))).toBe(true);
     expect(existsSync(path.join(work, 'plan.v0.md'))).toBe(true);
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
@@ -91,6 +94,9 @@ describe('stale artifact archive', () => {
     const archived = readdirSync(state.archiveDir).sort();
     expect(archived).toContain('plan.v2.md');
     expect(archived).toContain('plan.final.md');
+    expect(archived).toContain('judge.final.raw');
+    expect(archived).toContain('judge.final.json');
+    expect(archived).toContain('judge.final.meta.json');
   });
 
   it('archives package artifacts alongside plan.final.md', () => {

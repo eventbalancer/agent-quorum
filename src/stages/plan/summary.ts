@@ -7,6 +7,7 @@ import { operatorInterventionsState } from './interventions.js';
 import { PACKAGE_DIR_NAME, SPLIT_DECISION_FILE, type PackageHealth } from './plan-package.js';
 import { planDocumentShapeHealth } from './plan-shape.js';
 import type { RunContext } from '../../core/run-context.js';
+import { readinessLabel, type FinalReadiness, type RunFinalStatus } from '../../types.js';
 
 function jsonArrayLength(file: string, key: string): number {
   try {
@@ -34,8 +35,7 @@ export interface SummaryInput {
   readonly finalStale: number;
   readonly finalAmbiguous: number;
   readonly finalUnresolved: number;
-  readonly finalStatus: string;
-  readonly finalReason: string;
+  readonly finalFacts: RunReportFinalFacts;
   readonly splitDecision: string;
   readonly splitRationale: string;
   readonly packagePhaseCount: number;
@@ -63,6 +63,21 @@ export interface RunReport {
   readonly health?: CritiqueHealth;
   readonly splitDecision?: string;
   readonly packageDir?: string;
+  readonly status?: RunFinalStatus;
+  readonly reason?: string;
+  readonly structuralStatus?: RunFinalStatus;
+  readonly structuralReason?: string;
+  readonly readiness?: FinalReadiness;
+  readonly readinessPath?: string;
+}
+
+export interface RunReportFinalFacts {
+  readonly status: RunFinalStatus;
+  readonly reason: string;
+  readonly structuralStatus: RunFinalStatus;
+  readonly structuralReason: string;
+  readonly readiness?: FinalReadiness;
+  readonly readinessPath?: string;
 }
 
 function readSplitDecision(work: string): string | undefined {
@@ -79,7 +94,11 @@ function readSplitDecision(work: string): string | undefined {
   }
 }
 
-export function buildRunReport(ctx: RunContext, iter: number): RunReport {
+export function buildRunReport(
+  ctx: RunContext,
+  iter: number,
+  facts?: RunReportFinalFacts,
+): RunReport {
   const finalPlan = path.join(ctx.work, 'plan.final.md');
   const summaryFile = path.join(ctx.work, 'summary.md');
   const packageDir = path.join(ctx.work, PACKAGE_DIR_NAME);
@@ -93,6 +112,16 @@ export function buildRunReport(ctx: RunContext, iter: number): RunReport {
     ...(health !== undefined ? { health } : {}),
     ...(splitDecision !== undefined ? { splitDecision } : {}),
     ...(existsSync(packageDir) ? { packageDir } : {}),
+    ...(facts !== undefined
+      ? {
+          status: facts.status,
+          reason: facts.reason,
+          structuralStatus: facts.structuralStatus,
+          structuralReason: facts.structuralReason,
+          ...(facts.readiness !== undefined ? { readiness: facts.readiness } : {}),
+          ...(facts.readinessPath !== undefined ? { readinessPath: facts.readinessPath } : {}),
+        }
+      : {}),
   };
 }
 
@@ -138,6 +167,20 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   lines.push(
     `- final_references: stale=${input.finalStale}, ambiguous=${input.finalAmbiguous}, unresolved=${input.finalUnresolved}`,
   );
+  const facts = input.finalFacts;
+  lines.push(`- structural_status: ${facts.structuralStatus}`);
+  if (facts.structuralReason !== '') {
+    lines.push(`- structural_reason: ${facts.structuralReason}`);
+  }
+  if (facts.readiness !== undefined) {
+    lines.push(
+      `- final_judge: evaluated=${String(facts.readiness.evaluated)}, readiness=${readinessLabel(facts.readiness.ready)}, plan_sha256=${facts.readiness.planSha256}`,
+    );
+    lines.push(`- final_judge_rationale: ${facts.readiness.rationale}`);
+    if (facts.readinessPath !== undefined) {
+      lines.push(`- final_judge_metadata: \`${facts.readinessPath}\``);
+    }
+  }
   lines.push(`- split_decision: ${input.splitDecision} — ${input.splitRationale}`);
   if (input.packageDir !== undefined) {
     lines.push(`- package_dir: \`${input.packageDir}\``);
@@ -151,10 +194,10 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
       );
     }
   }
-  if (input.finalStatus === 'clean') {
+  if (facts.status === 'clean') {
     lines.push('- FINAL: clean');
   } else {
-    lines.push(`- FINAL: ${input.finalStatus} — ${input.finalReason}`);
+    lines.push(`- FINAL: ${facts.status} — ${facts.reason}`);
   }
   lines.push('');
   if (ctx.mode === 'prompt') {

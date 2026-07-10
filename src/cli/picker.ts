@@ -9,6 +9,7 @@ import {
 } from '../core/run-store.js';
 import { knownStateDirs, resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
+import { readinessLabel } from '../types.js';
 import { systemProbes } from './probes.js';
 
 export interface RunCandidate {
@@ -68,7 +69,12 @@ function timeField(candidate: RunCandidate): string {
 function formatLine(candidate: RunCandidate, index: number, color: boolean): string {
   const record = candidate.record;
   const meta = dim(`${shortRunId(record.runId)}  ${timeField(candidate)}`, color);
-  return `  ${index}) ${record.name}  [${candidate.state}]  ${meta}  ${record.workDir}`;
+  const readiness = record.finalReadiness;
+  const finalFacts =
+    readiness === undefined
+      ? ''
+      : `  final=${record.finalStatus ?? 'unknown'} readiness=${readinessLabel(readiness.ready)}`;
+  return `  ${index}) ${record.name}  [${candidate.state}]${finalFacts}  ${meta}  ${record.workDir}`;
 }
 
 export function renderListing(

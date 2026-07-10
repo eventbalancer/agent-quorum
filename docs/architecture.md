@@ -5,14 +5,14 @@
 Six roles drive the loop, each resolved to a provider through the per-user
 config store (`override > env > store > default` per field):
 
-| Role       | Purpose                                                                | Mode                    |
-| ---------- | ---------------------------------------------------------------------- | ----------------------- |
-| critic     | finds issues in the current plan                                       | JSON (critique schema)  |
-| creator    | creates plan.v0 and applies critique verdicts                          | markdown + JSON         |
-| fixer      | proposes/applies reference fixes after convergence                     | markdown                |
-| reviewer   | reviews the fixer's proposal                                           | JSON (review schema)    |
-| translator | renders the localized companion plan                                   | markdown                |
-| judge      | evaluates plan readiness after critic (balanced/thorough quality only) | JSON (readiness schema) |
+| Role       | Purpose                                                                       | Mode                    |
+| ---------- | ----------------------------------------------------------------------------- | ----------------------- |
+| critic     | finds issues in the current plan                                              | JSON (critique schema)  |
+| creator    | creates plan.v0 and applies critique verdicts                                 | markdown + JSON         |
+| fixer      | proposes/applies reference fixes after convergence                            | markdown                |
+| reviewer   | reviews the fixer's proposal                                                  | JSON (review schema)    |
+| translator | renders the localized companion plan                                          | markdown                |
+| judge      | evaluates intermediate and canonical final readiness (balanced/thorough only) | JSON (readiness schema) |
 
 Three provider adapters share one entry point (`providerRun`) that owns the
 single retry wrapper:
@@ -69,13 +69,14 @@ disallowed tools.
 
 Per iteration: critic → sanitize → schema-validate (exit 3) → health metrics →
 converge on zero issues; for `balanced`/`thorough` quality with no open
-blocker/major issues, a judge call exits early when it returns `ready: true`;
+blocker/major issues, an intermediate judge call exits early when it returns `ready: true`;
 otherwise creator update → converge on zero accepted blockers/majors, on a
 `diff` below `diffThreshold`, or at `iters` (the last revision becomes final).
 Quality shapes the topology: `quick` runs the creator one-shot (plan + metadata
 in one JSON call, with a split-call fallback), `balanced` splits markdown and
-metadata and enables the judge readiness gate, `thorough` additionally disables
-provider sessions.
+metadata and enables both judge gates, `thorough` additionally disables provider
+sessions. Intermediate `judge.vN.json` evidence is historical and is never used
+as the final verdict.
 
 Post-convergence: the reference validator mines `file:line` tokens out of code
 spans, resolves them against an in-process workspace snapshot, and writes
@@ -84,11 +85,16 @@ keeps the converged plan). A deterministic split policy then evaluates the
 post-fix `plan.final.md` and records `plan.split.json` on every run; when the
 policy fires (size signal exceeded or a structural threshold met), the
 orchestrator emits a self-contained `plan.package/` derived from the post-fix
-plan and validates it into `package-findings.json`. The single final status
-folds plan shape, references, and package health together (clean /
-needs-review / blocked) and emits exactly one `FINAL:` log before the translate
-pass; when a locale is requested, the non-fatal translate pass renders
-`plan.final.<locale>.md`; `summary.md` closes the run.
+plan and validates it into `package-findings.json`. Shape, reference, and package
+health first resolve an independent structural status. A structurally blocked
+run exits 6 without final Judge evaluation. Every other `balanced`/`thorough`
+run then evaluates the exact post-fix `plan.final.md`; schema-invalid output is
+retried inside the configured provider policy. A negative or unavailable final
+verdict preserves the plan and resolves the overall status to `needs-review`
+with exit 0. `quick` remains exempt. Metadata-only `STRUCTURAL`, `FINAL JUDGE`,
+and one overall `FINAL:` log precede the translate pass; when a locale is
+requested, the non-fatal translate pass renders `plan.final.<locale>.md`, and
+`summary.md` closes the run.
 
 The package is a deterministic projection of the post-fix `plan.final.md`: its
 `plan.md` is a byte-for-byte copy and its phase docs are slices, so no role ever
@@ -114,7 +120,10 @@ normalized to the same contract by the packaged role skills.
 `plan.vN.md`, `critique.vN.json`, `update.vN.json`, `update-meta.vN.json`,
 `plan.revision.vN.md`, `*.raw` normalization sidecars, `plan.final.md`,
 `plan.final.before-fix.md`, `fix-proposal.md`, `fix-review.json`,
-`fix-applied.md`, optional `plan.final.<locale>.md`, `findings.json`,
+`fix-applied.md`, intermediate `judge.vN.json`, final `judge.final.raw`,
+schema-valid `judge.final.json`, and `judge.final.meta.json` (canonical plan,
+byte-level SHA-256 binding, evaluation state, verdict, rationale, and verdict
+artifact), optional `plan.final.<locale>.md`, `findings.json`,
 `plan.split.json` (split decision + rationale + signals, every run),
 `package-findings.json` (package `file:line` findings, only when split;
 never overwrites `findings.json`), the `plan.package/` directory (only when the
@@ -125,8 +134,8 @@ split policy fires: `README.md`, `plan.md`, `run.md`, `journal.md`,
 `clarify-answers.jsonl`, `clarify.offset`, `clarify.done`, `prompt.md`,
 `run.meta.tsv`, `run.log`, the opt-in `diagnostics/<seq>-<role>-<provider>.log`
 artifacts (only when `AGENT_QUORUM_PROVIDER_DIAGNOSTICS=1`), `creator.session-id`,
-and `stale.<timestamp>/` archives on resume (which now also archive `plan.split.json`,
-`package-findings.json`, and `plan.package/`). A registry copy of
+and `stale.<timestamp>/` archives on resume (which also archive final Judge,
+split, findings, and package artifacts). A registry copy of
 `run.meta.tsv` lives in `<state-dir>/<pid>.tsv` while the run is alive.
 `clarify.offset` stores the run's cursor into the shared Telegram clarification
 journal, not a raw Telegram bot offset.

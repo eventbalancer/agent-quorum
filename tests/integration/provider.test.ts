@@ -932,6 +932,76 @@ describe('codex argv and retries', () => {
     expect(capture.text()).toContain('WARNING: codex call failed; retry 1/3');
   });
 
+  it('retries successful transport when output validation rejects the artifact', async () => {
+    const invalid = path.join(tmp, 'invalid.json');
+    writeFileSync(invalid, '{"unexpected":true}\n');
+    const valid = path.join(tmp, 'valid.json');
+    emptyCritique(valid);
+    const calls = path.join(tmp, 'output.calls');
+    const out = path.join(tmp, 'out.json');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT_CALLS: calls,
+        FAKE_CODEX_OUTPUT_1: invalid,
+        FAKE_CODEX_OUTPUT_2: valid,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          out,
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+          { validateOutput: (file) => schemaValidQuiet(file, CRITIC_SCHEMA) },
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(schemaValidQuiet(out, CRITIC_SCHEMA)).toBe(true);
+  });
+
+  it('returns failure when output validation exhausts the retry policy', async () => {
+    const invalid = path.join(tmp, 'invalid.json');
+    writeFileSync(invalid, '{"unexpected":true}\n');
+    const calls = path.join(tmp, 'output.calls');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: invalid,
+        FAKE_CODEX_OUTPUT_CALLS: calls,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+          { validateOutput: (file) => schemaValidQuiet(file, CRITIC_SCHEMA) },
+        ),
+    );
+
+    expect(status).toBe(1);
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(capture.text()).toContain('codex call failed after 2 attempt(s)');
+  });
+
   it('returns the last failure status when retries are exhausted', async () => {
     const critique = path.join(tmp, 'critique.json');
     emptyCritique(critique);

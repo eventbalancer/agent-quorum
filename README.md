@@ -30,12 +30,15 @@ the critic finds nothing left to fix — the point of **convergence** — at whi
 reference validator and an optional fix pass clean up the final plan. If the
 converged plan is large or has many phases, agent-quorum performs a **split**:
 it emits a self-contained `plan.package/` directory so a weaker model can
-execute one phase at a time.
+execute one phase at a time. For balanced and thorough runs, a **judge** then
+evaluates the exact canonical final plan and records whether it is ready for
+implementation.
 
-Five roles drive that loop: the **creator** drafts and revises, the **critic**
+Six roles drive that loop: the **creator** drafts and revises, the **critic**
 finds issues, the **fixer** proposes reference fixes after convergence, the
 **reviewer** checks the fixer's proposal, and the **translator** renders a
-localized companion plan when you ask for one.
+localized companion plan when you ask for one. The **judge** evaluates both
+intermediate convergence candidates and the canonical final plan.
 
 ```text
 prompt.md
@@ -53,6 +56,7 @@ creator ──► plan.v0.md
                 ▼
 reference validator ──► fix pass ──► plan.final.md
                                            │
+                                           │  final judge (balanced/thorough)
                                            │  split policy (large/complex) ──► plan.package/
                                            │  locale pass (when requested)
                                            │
@@ -60,14 +64,14 @@ reference validator ──► fix pass ──► plan.final.md
                               plan.final.<locale>.md
 ```
 
-Those five roles map onto three providers (`codex`, `claude`, `cursor-agent`)
+Those six roles map onto three providers (`codex`, `claude`, `cursor-agent`)
 through a single declarative config, and every provider call runs in its own
 process group under a byte-idle / semantic-idle / wall-clock watchdog.
 
 ## Glossary
 
-- **role** — one job in the loop (creator, critic, fixer, reviewer, translator),
-  each bound to a provider and a prompt skill.
+- **role** — one job in the loop (creator, critic, fixer, reviewer, translator,
+  judge), each bound to a provider and a prompt skill.
 - **runner** — the provider CLI a role calls: `codex`, `claude`, or `cursor`.
 - **quality** — a preset (`quick`, `balanced`, `thorough`) that selects the
   role-call topology, per-role reasoning, and how aggressively provider sessions
@@ -102,7 +106,8 @@ filename) and its durable run record under `~/.agent-quorum/state/`. The files
 you care about are:
 
 - `plan.final.md` — the converged plan; always the entry point.
-- `summary.md` — a one-page run summary (iterations, health, artifact paths).
+- `summary.md` — a one-page run summary (iterations, health, structural status,
+  final readiness, and artifact paths).
 - `plan.package/` — present only when the split policy fires; a self-contained
   directory (index, master plan, per-phase docs, journal, runbook, debt ledger)
   for phase-by-phase execution.
@@ -148,7 +153,8 @@ if (result.exitCode === ExitCode.Ok) {
 
 The API returns results — only the CLI calls `process.exit`. `runPlanLoop`
 returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
-`iterations`, `health`) built from the same data as `summary.md`. See
+`iterations`, `health`, final/structural status, and readiness) built from the
+same data as `summary.md`. See
 [`docs/api.md`](docs/api.md) for the full surface, including CommonJS use.
 
 ## Configuration
