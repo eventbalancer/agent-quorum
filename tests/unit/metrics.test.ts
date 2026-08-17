@@ -58,9 +58,10 @@ describe('critique_health', () => {
 
   it('excludes duplicate_of issues from all totals (AC-2)', () => {
     writeCritique(path.join(work, 'critique.v0.json'), [{ id: 'C1', addresses: null }]);
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), `${JSON.stringify({ id: 'r1' })}\n`);
     const current = path.join(tmp, 'ac2.json');
     writeCritique(current, [
-      { id: 'C1', addresses: 'v0.C1', duplicate_of: 'r1' },
+      { id: 'C1', addresses: 'v0.C1', duplicate_of: 'r1', severity: 'nit' },
       { id: 'C2', addresses: null, duplicate_of: null },
       { id: 'C3', addresses: 'v0.C1', duplicate_of: null },
     ]);
@@ -72,6 +73,16 @@ describe('critique_health', () => {
       unanchored: 2,
       pct: 50,
     });
+  });
+
+  it('counts missing or non-nit duplicate lineage as actionable', () => {
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), `${JSON.stringify({ id: 'r1' })}\n`);
+    const current = path.join(tmp, 'invalid-duplicates.json');
+    writeCritique(current, [
+      { id: 'C1', addresses: null, duplicate_of: 'missing', severity: 'nit' },
+      { id: 'C2', addresses: null, duplicate_of: 'r1', severity: 'major' },
+    ]);
+    expect(critiqueHealth(work, schema, 0, current).total).toBe(2);
   });
 
   it('reports unanchored=0 when evidence contains file:line anchors (AC-3a)', () => {

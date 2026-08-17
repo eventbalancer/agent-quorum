@@ -79,6 +79,9 @@ if [[ "$prompt" == "-" ]]; then
   prompt="$(cat)"
 fi
 printf '%s' "$prompt" > "${FAKE_CODEX_PROMPT:?}"
+if [[ -n "${FAKE_CODEX_PROMPT_LOG:-}" ]]; then
+  { printf '%s' "$prompt"; printf '\0'; } >> "$FAKE_CODEX_PROMPT_LOG"
+fi
 output="${FAKE_CODEX_OUTPUT:-}"
 if [[ -n "${FAKE_CODEX_OUTPUT_CALLS:-}" ]]; then
   calls=0

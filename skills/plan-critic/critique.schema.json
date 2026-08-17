@@ -15,6 +15,75 @@
       "maxLength": 700,
       "description": "Brief overall verdict on the plan. Target ~2–3 sentences and at most ~500 characters; 700 is a hard cap with headroom, not a goal. Do not enumerate issues."
     },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["considered_context", "invariant_assessments", "scope_coverage", "issue_budget", "scan_complete", "unresolved_coverage"],
+      "properties": {
+        "considered_context": {
+          "type": "array",
+          "description": "The six mandatory retained categories assessed for this exact plan version. The vocabulary is closed; an unavailable/empty category is still considered when its explicit marker was assessed.",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "original-scope",
+              "authoritative-system-facts",
+              "operator-decisions",
+              "material-findings",
+              "active-invariants",
+              "quality-and-limits"
+            ]
+          }
+        },
+        "invariant_assessments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["invariant_id", "complete", "occurrences"],
+            "properties": {
+              "invariant_id": { "type": "string" },
+              "complete": { "type": "boolean" },
+              "occurrences": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["occurrence_id", "disposition", "evidence_refs"],
+                  "properties": {
+                    "occurrence_id": { "type": "string" },
+                    "disposition": { "enum": ["satisfied", "violated", "not-applicable", "unresolved"] },
+                    "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "scope_coverage": {
+          "type": "array",
+          "description": "Scope categories actually checked: original-scope for the original prompt, direct-plan-scope for a self-contained direct plan, or declared-scope as the compatibility token for separately declared scope. Omit an unproved category and report it as unresolved.",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["original-scope", "declared-scope", "direct-plan-scope"]
+          }
+        },
+        "issue_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limit", "used", "exhausted"],
+          "properties": {
+            "limit": { "type": "integer", "minimum": 1 },
+            "used": { "type": "integer", "minimum": 0 },
+            "exhausted": { "type": "boolean" }
+          }
+        },
+        "scan_complete": { "type": "boolean" },
+        "unresolved_coverage": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "issues": {
       "type": "array",
       "description": "Structured list of issues. An empty array means the plan is accepted.",
@@ -67,6 +136,12 @@
             "type": "string",
             "description": "A quote from the plan or a path:line reference. Without evidence the issue is dropped by the validator as a hallucination."
           },
+          "evidence_refs": { "$ref": "#/$defs/evidenceRefs" },
+          "invariant_id": { "type": ["string", "null"] },
+          "introduced_by_revision": {
+            "type": ["string", "null"],
+            "pattern": "^plan\\.v[0-9]+\\.md$"
+          },
           "suggested_fix": {
             "type": "string",
             "description": "What exactly to change in the plan. An action, not a wish."
@@ -81,6 +156,28 @@
             "type": ["string", "null"],
             "description": "Id of the rejected-log.jsonl entry on a repeat. Null if not a repeat. When non-null the severity must be nit."
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "enum": ["file-line", "plan-section", "phase-gate", "command", "repository", "topology"] },
+          "value": { "type": "string" },
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "section": { "type": "string" },
+          "phase": { "type": "string" },
+          "gate": { "type": "string" },
+          "command": { "type": "string" },
+          "repository": { "type": "string" },
+          "topology_id": { "type": "string" }
         }
       }
     }

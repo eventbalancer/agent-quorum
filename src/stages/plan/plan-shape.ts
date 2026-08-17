@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
+import type { RunFinalStatus } from '../../types.js';
 
 export const PLAN_DOCUMENT_REQUIRED_SECTIONS = [
   'At a Glance',
@@ -146,6 +147,32 @@ export function planHasFrontmatter(file: string): boolean {
   }
 
   return inner.slice(phasesIdx + 1).some((l) => YAML_LIST_ITEM_PATTERN.test(l));
+}
+
+export function planFrontmatterStatus(file: string): RunFinalStatus | undefined {
+  const lines = fileLines(file);
+  const span = leadingFrontmatterSpan(lines);
+  if (span === 0) {
+    return undefined;
+  }
+  const statusLine = lines.slice(1, span - 1).find((line) => STATUS_PATTERN.test(line));
+  const match = statusLine === undefined ? null : STATUS_PATTERN.exec(statusLine);
+  const value = match?.[1];
+  return value === 'clean' || value === 'needs-review' || value === 'blocked' ? value : undefined;
+}
+
+export function setPlanFrontmatterStatus(file: string, status: RunFinalStatus): void {
+  const lines = fileLines(file);
+  const span = leadingFrontmatterSpan(lines);
+  if (span === 0) {
+    return;
+  }
+  const statusIndex = lines.slice(1, span - 1).findIndex((line) => line.startsWith('status:'));
+  if (statusIndex < 0) {
+    return;
+  }
+  lines[statusIndex + 1] = `status: ${status}`;
+  writeFileSync(file, lines.join('\n'));
 }
 
 export interface PlanShapeHealth {

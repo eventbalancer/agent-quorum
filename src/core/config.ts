@@ -196,6 +196,7 @@ export interface OperatorSettings {
 export interface OperatorRole {
   runner: Runner;
   model: string;
+  inputTokenLimit?: number;
   tools?: ToolField;
   disallowedTools?: ToolField;
   createTools?: ToolField;
@@ -317,7 +318,17 @@ export interface ResolvedConfig {
   telegram: ResolvedTelegram;
   providers: ResolvedProviders;
   status: OperatorStatus;
+  inputLimits: RoleInputLimits;
 }
+
+export type InputLimitSource = 'operator' | 'model-registry' | 'unknown';
+
+export interface RoleInputLimit {
+  readonly tokens: number | null;
+  readonly source: InputLimitSource;
+}
+
+export type RoleInputLimits = Record<Role, RoleInputLimit>;
 
 export type ConfigLayer = 'override' | 'env' | 'store' | 'default';
 
@@ -641,10 +652,56 @@ function resolveMatrix(
   return matrix as RoleMatrix;
 }
 
+const SAFE_MODEL_INPUT_TOKENS: Readonly<Record<string, number>> = {
+  'gpt-5.5': 64_000,
+  'claude-opus-4-8': 64_000,
+  'claude-sonnet-4-6': 64_000,
+  'composer-2.5': 64_000,
+};
+
+function resolveInputLimits(
+  prov: Map<string, ConfigLayer>,
+  matrix: RoleMatrix,
+  ov: DeepPartial<OperatorRoles> | undefined,
+  store: DeepPartial<OperatorRoles> | undefined,
+  env: NodeJS.ProcessEnv,
+): RoleInputLimits {
+  const limits: Partial<RoleInputLimits> = {};
+  for (const role of PLAN_ROLES) {
+    const upper = role.toUpperCase();
+    const configured = [
+      ['override', rawScalar(ov?.[role]?.inputTokenLimit)],
+      ['env', env[`AGENT_QUORUM_${upper}_INPUT_TOKEN_LIMIT`]],
+      ['store', rawScalar(store?.[role]?.inputTokenLimit)],
+    ] as const;
+    const selected = configured.find(([, raw]) => present(raw));
+    if (selected !== undefined) {
+      const [layer, raw] = selected;
+      const tokens = Number(raw);
+      if (!Number.isInteger(tokens) || tokens <= 0) {
+        halt(`agent-quorum config: roles.${role}.inputTokenLimit must be a positive integer`);
+      }
+      prov.set(`roles.${role}.inputTokenLimit`, layer);
+      limits[role] = { tokens, source: 'operator' };
+      continue;
+    }
+    const registered = SAFE_MODEL_INPUT_TOKENS[matrix[role].model];
+    if (registered !== undefined) {
+      prov.set(`roles.${role}.inputTokenLimit`, 'default');
+      limits[role] = { tokens: registered, source: 'model-registry' };
+    } else {
+      limits[role] = { tokens: null, source: 'unknown' };
+    }
+  }
+  return limits as RoleInputLimits;
+}
+
+type ToolPermissionField = Exclude<keyof OperatorRole, 'runner' | 'model' | 'inputTokenLimit'>;
+
 function resolveToolField(
   prov: Map<string, ConfigLayer>,
   role: Role,
-  field: keyof OperatorRole,
+  field: ToolPermissionField,
   ov: DeepPartial<OperatorRoles> | undefined,
   store: DeepPartial<OperatorRoles> | undefined,
   def: OperatorRoles,
@@ -804,6 +861,7 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfigResult {
 
   const settings = resolveSettings(prov, cli, ov.settings, store.settings, env, def.settings);
   const matrix = resolveMatrix(prov, settings.quality, ov.roles, store.roles, env, def.roles);
+  const inputLimits = resolveInputLimits(prov, matrix, ov.roles, store.roles, env);
   const permissions = resolvePermissions(prov, ov.roles, store.roles, def.roles);
 
   const streamEntries = STREAM_RUNNERS.map((runner) => {
@@ -918,6 +976,7 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfigResult {
       telegram,
       providers,
       status,
+      inputLimits,
     },
     provenance: prov,
   };

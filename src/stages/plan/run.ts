@@ -57,7 +57,9 @@ import { runFinalJudge } from './judge.js';
 import { preflightRunners } from './preflight.js';
 import {
   emitPlanPackage,
+  carrySystemCoverageIntoPackage,
   evaluateSplitDecision,
+  PACKAGE_DIR_NAME,
   parsePlanStructure,
   SPLIT_DECISION_FILE,
   validatePlanPackage,
@@ -66,11 +68,29 @@ import {
 } from './plan-package.js';
 import {
   planDocumentShapeHealth,
+  planFrontmatterStatus,
   planHasTitleHeading,
+  setPlanFrontmatterStatus,
   type PlanShapeHealth,
 } from './plan-shape.js';
 import { prepareResume } from './resume.js';
 import { skillPaths, type RunContext } from '../../core/run-context.js';
+import {
+  CANONICAL_PROOF_HASH_MISMATCH,
+  classifyTerminal,
+  convergenceReport,
+  CRITIC_ISSUE_BUDGET,
+  createConvergenceState,
+  fileSha256,
+  recordSystemCheck,
+  writeConvergenceState,
+} from '../../core/convergence.js';
+import {
+  buildSystemContext,
+  validateSystemCoverage,
+  writeSystemCheck,
+  writeSystemContext,
+} from '../../core/system-context.js';
 import {
   buildRunReport,
   writeSummary,
@@ -288,6 +308,7 @@ interface SplitPackageResult {
 interface ResolveFinalStatusParams {
   readonly finalTitle: 0 | 1;
   readonly shape: PlanShapeHealth;
+  readonly declaredStatus?: RunFinalStatus;
   readonly findings: FindingsCounts;
   readonly packageHealth?: PackageHealth;
 }
@@ -349,7 +370,10 @@ function emitAndValidateSplitPackage(ctx: RunContext, finalPlan: string): SplitP
   }
 
   const packagePhaseCount = emitted.paths.phases.length;
-  const packageHealth = validatePlanPackage(ctx.provider.projectRoot, emitted.paths.dir);
+  carrySystemCoverageIntoPackage(emitted.paths, ctx.convergence.relationshipIds);
+  const packageHealth = validatePlanPackage(ctx.provider.projectRoot, emitted.paths.dir, {
+    relationshipIds: ctx.convergence.relationshipIds,
+  });
   log(`split: emitted plan.package/ with ${packagePhaseCount} phase doc(s)`);
   return {
     splitDecision,
@@ -365,7 +389,8 @@ function isPackageBroken(packageHealth: PackageHealth): boolean {
     packageHealth.missingFiles > 0 ||
     packageHealth.missingHeadings > 0 ||
     packageHealth.brokenCrossRefs > 0 ||
-    packageHealth.forbiddenShell > 0
+    packageHealth.forbiddenShell > 0 ||
+    (packageHealth.systemCoverageMissing ?? 0) > 0
   );
 }
 
@@ -380,6 +405,7 @@ function hasPackageReferencesNeedingReview(packageHealth: PackageHealth): boolea
 function resolveStructuralStatus({
   finalTitle,
   shape,
+  declaredStatus,
   findings,
   packageHealth,
 }: ResolveFinalStatusParams): FinalStatusResult {
@@ -395,7 +421,21 @@ function resolveStructuralStatus({
       status: 'blocked',
       reason: packageHealth.emptyWorkPlan
         ? 'plan.package not emitted: forced split over an empty/absent Work Plan'
-        : `plan.package broken (missing_files=${packageHealth.missingFiles} missing_headings=${packageHealth.missingHeadings} broken_cross_refs=${packageHealth.brokenCrossRefs} forbidden_shell=${packageHealth.forbiddenShell})`,
+        : `plan.package broken (missing_files=${packageHealth.missingFiles} missing_headings=${packageHealth.missingHeadings} broken_cross_refs=${packageHealth.brokenCrossRefs} forbidden_shell=${packageHealth.forbiddenShell} system_coverage_missing=${packageHealth.systemCoverageMissing ?? 0})`,
+    };
+  }
+
+  if (declaredStatus === 'blocked') {
+    return {
+      status: 'needs-review',
+      reason: 'plan frontmatter declares a blocking STOP condition that requires review',
+    };
+  }
+
+  if (declaredStatus === 'needs-review') {
+    return {
+      status: 'needs-review',
+      reason: 'plan frontmatter declares unresolved review work',
     };
   }
 
@@ -426,6 +466,8 @@ function resolveStructuralStatus({
 function resolveCompletionStatus(
   structural: FinalStatusResult,
   readiness: FinalReadiness | undefined,
+  convergenceSatisfied: boolean,
+  convergenceReason: string,
 ): FinalStatusResult {
   if (structural.status === 'blocked') {
     return structural;
@@ -435,7 +477,10 @@ function resolveCompletionStatus(
     reasons.push(structural.reason);
   }
   if (readiness !== undefined && (!readiness.evaluated || readiness.ready === false)) {
-    reasons.push(`Final Judge: ${readiness.rationale}`);
+    reasons.push(`Final Judge: ${readiness.evaluated ? 'not-ready' : 'unavailable'}`);
+  }
+  if (!convergenceSatisfied) {
+    reasons.push(`Convergence proof: ${convergenceReason}`);
   }
   if (reasons.length === 0) {
     return { status: 'clean', reason: '' };
@@ -443,12 +488,91 @@ function resolveCompletionStatus(
   return { status: 'needs-review', reason: reasons.join('; ') };
 }
 
+const FINAL_JUDGE_PROOF_MARKERS = new Set([
+  'final-judge:unavailable',
+  'final-judge:not-ready',
+  'final-judge:coverage-unproved',
+]);
+
+function recordFinalJudgeProof(
+  ctx: RunContext,
+  readiness: FinalReadiness | undefined,
+  coverageProved: boolean,
+): void {
+  ctx.convergence.unresolvedCoverage = ctx.convergence.unresolvedCoverage.filter(
+    (id) => !FINAL_JUDGE_PROOF_MARKERS.has(id),
+  );
+  const unresolved =
+    readiness?.evaluated !== true
+      ? 'final-judge:unavailable'
+      : readiness.ready !== true
+        ? 'final-judge:not-ready'
+        : !coverageProved
+          ? 'final-judge:coverage-unproved'
+          : undefined;
+  if (unresolved !== undefined) {
+    ctx.convergence.unresolvedCoverage.push(unresolved);
+  }
+}
+
+function refreshFinalSystemCheck(ctx: RunContext, finalPlan: string) {
+  const check = validateSystemCoverage(ctx.systemContext, finalPlan, ctx.convergence.planVersion);
+  writeSystemCheck(ctx.work, check, 'system-check.final.json');
+  recordSystemCheck(ctx.convergence, check);
+  return check;
+}
+
+function recordCanonicalProofHashBinding(
+  ctx: RunContext,
+  finalPlan: string,
+  systemCheck: { readonly planSha256: string },
+  readiness: FinalReadiness | undefined,
+  candidateUnchanged = true,
+): boolean {
+  const canonicalPlanSha256 = fileSha256(finalPlan);
+  const mismatch =
+    !candidateUnchanged ||
+    systemCheck.planSha256 !== canonicalPlanSha256 ||
+    (readiness !== undefined && readiness.planSha256 !== canonicalPlanSha256);
+  if (mismatch && !ctx.convergence.unresolvedCoverage.includes(CANONICAL_PROOF_HASH_MISMATCH)) {
+    ctx.convergence.unresolvedCoverage.push(CANONICAL_PROOF_HASH_MISMATCH);
+  }
+  ctx.convergence.canonicalPlanSha256 = canonicalPlanSha256;
+  return mismatch;
+}
+
+function finalStatusLogDetails(facts: RunReportFinalFacts): string {
+  const readiness =
+    facts.readiness === undefined
+      ? 'not-required'
+      : !facts.readiness.evaluated
+        ? 'unknown'
+        : facts.readiness.ready
+          ? 'ready'
+          : 'not-ready';
+  return [
+    `structural=${facts.structuralStatus}`,
+    `readiness=${readiness}`,
+    `convergence_satisfied=${String(facts.convergence?.satisfied ?? false)}`,
+    `exhausted_limits=${facts.convergence?.exhaustedLimits.length ?? 0}`,
+    `unresolved_coverage=${facts.convergence?.unresolvedCoverage.length ?? 0}`,
+  ].join(' ');
+}
+
 function resolveFinalFacts(
   structural: FinalStatusResult,
   readiness: FinalReadiness | undefined,
   readinessPath: string | undefined,
+  convergenceSatisfied: boolean,
+  convergenceReason: string,
+  convergence: ReturnType<typeof convergenceReport>,
 ): RunReportFinalFacts {
-  const final = resolveCompletionStatus(structural, readiness);
+  const final = resolveCompletionStatus(
+    structural,
+    readiness,
+    convergenceSatisfied,
+    convergenceReason,
+  );
   return {
     status: final.status,
     reason: final.reason,
@@ -456,6 +580,7 @@ function resolveFinalFacts(
     structuralReason: structural.reason,
     ...(readiness !== undefined ? { readiness } : {}),
     ...(readinessPath !== undefined ? { readinessPath } : {}),
+    convergence,
   };
 }
 
@@ -608,6 +733,7 @@ export async function runPlanLoopCli(
             structuralStatus: facts.structuralStatus,
             structuralReason: facts.structuralReason,
             ...(facts.readiness !== undefined ? { finalReadiness: facts.readiness } : {}),
+            ...(facts.convergence !== undefined ? { finalConvergence: facts.convergence } : {}),
           }
         : {}),
     });
@@ -658,6 +784,9 @@ export async function runPlanLoopCli(
       creatorOneShot: String(qualityKnobs.creatorOneShot),
       previousCritiques: qualityKnobs.previousCritiques,
       topology: qualityKnobs.topology,
+      completenessPromise: qualityKnobs.completenessPromise,
+      issueCap: CRITIC_ISSUE_BUDGET,
+      inputLimits: resolved.inputLimits,
       maxIters: settings.maxIters,
       fixPass: String(settings.fixPass),
       diffThreshold: settings.diffThreshold,
@@ -747,6 +876,24 @@ export async function runPlanLoopCli(
     const scratch = Scratch.create(base);
     const creatorSessionFile = path.join(work, 'creator.session-id');
 
+    const systemContext = buildSystemContext({
+      projectRoot: projectRoot(),
+      mode: parsed.mode,
+      inputFile: inputPath,
+    });
+    const convergence = createConvergenceState({
+      quality: settings.quality,
+      matrix: qualityKnobs,
+      mode: parsed.mode,
+      sourceDigest: fileSha256(inputPath),
+      authoritativeDigest: systemContext.digest,
+      relationshipIds: systemContext.crossRepository
+        ? systemContext.relationships.map((relationship) => relationship.id)
+        : [],
+      maxIters: settings.maxIters,
+    });
+    const resuming = process.env.AGENT_QUORUM_RESUME === '1';
+
     const ctx: RunContext = {
       work,
       mode: parsed.mode,
@@ -782,6 +929,8 @@ export async function runPlanLoopCli(
       },
       lastCritiqueIter: -1,
       resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
+      convergence,
+      systemContext,
     };
 
     const cleanup = () => {
@@ -791,6 +940,14 @@ export async function runPlanLoopCli(
     installSignalTeardown(cleanup);
 
     try {
+      let startIter = 0;
+      if (resuming) {
+        startIter = prepareResume(ctx);
+      } else {
+        writeConvergenceState(work, convergence);
+      }
+      writeSystemContext(work, systemContext);
+
       if (qualityKnobs.sessionMode === 1) {
         rmSync(creatorSessionFile, { force: true });
       }
@@ -824,10 +981,6 @@ export async function runPlanLoopCli(
         }
       }
 
-      let startIter = 0;
-      if (process.env.AGENT_QUORUM_RESUME === '1') {
-        startIter = prepareResume(ctx);
-      }
       if (startIter > 0) {
         log(`resuming from v${startIter}`);
       }
@@ -843,18 +996,29 @@ export async function runPlanLoopCli(
         log('fix-pass: disabled via --no-fix');
       }
 
-      const splitPackage = emitAndValidateSplitPackage(ctx, finalPlan);
+      const translateFile = path.join(work, `plan.final.${settings.locale}.md`);
+      let finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
 
-      const shape = planDocumentShapeHealth(finalPlan);
-      const finalTitle = planHasTitleHeading(finalPlan) ? 1 : 0;
       const findings = readFindingsCounts(path.join(work, 'findings.json'));
-      const packageHealth = splitPackage.packageHealth;
-      const structural = resolveStructuralStatus({
-        finalTitle,
-        shape,
-        findings,
-        ...(packageHealth !== undefined ? { packageHealth } : {}),
-      });
+      let splitPackage = emitAndValidateSplitPackage(ctx, finalPlan);
+      let packageHealth = splitPackage.packageHealth;
+      const currentStructuralStatus = (): FinalStatusResult => {
+        const declaredStatus = planFrontmatterStatus(finalPlan);
+        return resolveStructuralStatus({
+          finalTitle: planHasTitleHeading(finalPlan) ? 1 : 0,
+          shape: planDocumentShapeHealth(finalPlan),
+          ...(declaredStatus !== undefined ? { declaredStatus } : {}),
+          findings,
+          ...(packageHealth !== undefined ? { packageHealth } : {}),
+        });
+      };
+      let structural = currentStructuralStatus();
+      const rebuildCanonicalPackage = (): void => {
+        rmSync(path.join(work, PACKAGE_DIR_NAME), { recursive: true, force: true });
+        splitPackage = emitAndValidateSplitPackage(ctx, finalPlan);
+        packageHealth = splitPackage.packageHealth;
+        structural = currentStructuralStatus();
+      };
       if (structural.status === 'clean') {
         log('STRUCTURAL: clean — plan.final.md is complete with no stale references');
       } else {
@@ -863,6 +1027,8 @@ export async function runPlanLoopCli(
 
       let readiness: FinalReadiness | undefined;
       let readinessPath: string | undefined;
+      let judgeCoverageProved = false;
+      let judgeCandidateUnchanged = true;
       if (structural.status !== 'blocked' && qualityKnobs.judge === 1) {
         log(
           `final Judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
@@ -870,22 +1036,163 @@ export async function runPlanLoopCli(
         const judged = await runFinalJudge(ctx, finalPlan);
         readiness = judged.readiness;
         readinessPath = judged.metadataPath;
+        judgeCoverageProved = judged.coverageProved;
+        judgeCandidateUnchanged = judged.candidateUnchanged;
         if (!readiness.evaluated) {
-          err(
-            `FINAL JUDGE: unknown — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`,
-          );
+          err(`FINAL JUDGE: unknown (plan_sha256=${readiness.planSha256})`);
         } else if (readiness.ready) {
-          log(`FINAL JUDGE: ready — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`);
-        } else {
-          err(
-            `FINAL JUDGE: not-ready — ${readiness.rationale} (plan_sha256=${readiness.planSha256})`,
+          log(
+            `FINAL JUDGE: ready (coverage_proved=${String(judgeCoverageProved)}, plan_sha256=${readiness.planSha256})`,
           );
+        } else {
+          err(`FINAL JUDGE: not-ready (plan_sha256=${readiness.planSha256})`);
         }
       } else if (structural.status === 'blocked' && qualityKnobs.judge === 1) {
         log('final Judge skipped — structural status is blocked');
       }
 
-      const finalFacts = resolveFinalFacts(structural, readiness, readinessPath);
+      if (qualityKnobs.judge === 1) {
+        recordFinalJudgeProof(ctx, readiness, judgeCoverageProved);
+      }
+      const initialProofHashMismatch = recordCanonicalProofHashBinding(
+        ctx,
+        finalPlan,
+        finalSystemCheck,
+        readiness,
+        judgeCandidateUnchanged,
+      );
+      judgeCandidateUnchanged = true;
+      if (initialProofHashMismatch) {
+        finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+        rebuildCanonicalPackage();
+      }
+      classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+      writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
+
+      let finalFacts = resolveFinalFacts(
+        structural,
+        readiness,
+        readinessPath,
+        ctx.convergence.satisfied,
+        ctx.convergence.stopReason,
+        convergenceReport(work, ctx.convergence),
+      );
+      if (finalFacts.status === 'needs-review') {
+        const beforeStatusProjection = readFileSync(finalPlan, 'utf8');
+        setPlanFrontmatterStatus(finalPlan, 'needs-review');
+        const statusChanged = readFileSync(finalPlan, 'utf8') !== beforeStatusProjection;
+        if (statusChanged) {
+          finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+        }
+        if (statusChanged && structural.status !== 'blocked' && qualityKnobs.judge === 1) {
+          log('final Judge re-evaluation after canonical needs-review status projection');
+          const previousReady = readiness?.ready;
+          const previousCoverageProved = judgeCoverageProved;
+          const judged = await runFinalJudge(ctx, finalPlan);
+          readiness = judged.readiness;
+          readinessPath = judged.metadataPath;
+          judgeCoverageProved = judged.coverageProved;
+          judgeCandidateUnchanged = judged.candidateUnchanged;
+          if (previousReady !== readiness.ready || previousCoverageProved !== judgeCoverageProved) {
+            if (!ctx.convergence.unresolvedCoverage.includes('final-judge:inconsistent-verdict')) {
+              ctx.convergence.unresolvedCoverage.push('final-judge:inconsistent-verdict');
+            }
+          }
+          recordFinalJudgeProof(ctx, readiness, judgeCoverageProved);
+          const projectedProofHashMismatch = recordCanonicalProofHashBinding(
+            ctx,
+            finalPlan,
+            finalSystemCheck,
+            readiness,
+            judgeCandidateUnchanged,
+          );
+          judgeCandidateUnchanged = true;
+          if (projectedProofHashMismatch) {
+            setPlanFrontmatterStatus(finalPlan, 'needs-review');
+            finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+            rebuildCanonicalPackage();
+          }
+        }
+        recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
+        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
+        finalFacts = resolveFinalFacts(
+          structural,
+          readiness,
+          readinessPath,
+          ctx.convergence.satisfied,
+          ctx.convergence.stopReason,
+          convergenceReport(work, ctx.convergence),
+        );
+        if (splitPackage.packageDir !== undefined) {
+          copyFileSync(finalPlan, path.join(splitPackage.packageDir, 'plan.md'));
+        }
+      }
+
+      writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
+
+      if (settings.translatePass === 1) {
+        await runTranslatePass(ctx, finalPlan, translateFile);
+      } else {
+        log('translate-pass: disabled (locale=en)');
+      }
+      const lateProofHashMismatch = recordCanonicalProofHashBinding(
+        ctx,
+        finalPlan,
+        finalSystemCheck,
+        readiness,
+      );
+      if (
+        lateProofHashMismatch ||
+        ctx.convergence.unresolvedCoverage.includes(CANONICAL_PROOF_HASH_MISMATCH)
+      ) {
+        const beforeStatusProjection = readFileSync(finalPlan, 'utf8');
+        setPlanFrontmatterStatus(finalPlan, 'needs-review');
+        const statusChanged = readFileSync(finalPlan, 'utf8') !== beforeStatusProjection;
+        if (lateProofHashMismatch || statusChanged) {
+          finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+        }
+        if (lateProofHashMismatch) {
+          rebuildCanonicalPackage();
+        }
+        recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
+        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        if (splitPackage.packageDir !== undefined) {
+          copyFileSync(finalPlan, path.join(splitPackage.packageDir, 'plan.md'));
+        }
+      }
+      writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
+
+      const persistedProofHashMismatch = recordCanonicalProofHashBinding(
+        ctx,
+        finalPlan,
+        finalSystemCheck,
+        readiness,
+      );
+      if (
+        persistedProofHashMismatch ||
+        (ctx.convergence.unresolvedCoverage.includes(CANONICAL_PROOF_HASH_MISMATCH) &&
+          planFrontmatterStatus(finalPlan) !== 'needs-review')
+      ) {
+        setPlanFrontmatterStatus(finalPlan, 'needs-review');
+        finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+        rebuildCanonicalPackage();
+        recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
+        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        if (splitPackage.packageDir !== undefined) {
+          copyFileSync(finalPlan, path.join(splitPackage.packageDir, 'plan.md'));
+        }
+        writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
+      }
+      finalFacts = resolveFinalFacts(
+        structural,
+        readiness,
+        readinessPath,
+        ctx.convergence.satisfied,
+        ctx.convergence.stopReason,
+        convergenceReport(work, ctx.convergence),
+      );
+
       if (finalFacts.status === 'clean') {
         log(
           readiness === undefined
@@ -893,14 +1200,7 @@ export async function runPlanLoopCli(
             : 'FINAL: clean — canonical plan is structurally clean and Judge-approved',
         );
       } else {
-        err(`FINAL: ${finalFacts.status} — ${finalFacts.reason}`);
-      }
-
-      const translateFile = path.join(work, `plan.final.${settings.locale}.md`);
-      if (settings.translatePass === 1) {
-        await runTranslatePass(ctx, finalPlan, translateFile);
-      } else {
-        log('translate-pass: disabled (locale=en)');
+        err(`FINAL: ${finalFacts.status} — ${finalStatusLogDetails(finalFacts)}`);
       }
 
       writeSummary(ctx, {
@@ -920,6 +1220,7 @@ export async function runPlanLoopCli(
       log(`done. summary: ${path.join(work, 'summary.md')}`);
       const report = {
         ...buildRunReport(ctx, iter, finalFacts),
+        convergence: convergenceReport(work, ctx.convergence),
         runId,
         name,
       };

@@ -12,10 +12,12 @@ the result is complete or that the file references it cites are real.
 agent-quorum closes that gap. Instead of prompting one agent once, it runs a
 panel of agents in an iterative **plan → critique → update** loop: one drafts a
 plan, another tears it apart, the draft is revised against that critique, and
-the cycle repeats until the criticism runs out. The output is a plan that has
-survived adversarial review, has every `file:line` reference checked against
-your workspace, and is schema-validated at every step — produced without any
-agent ever being granted a tool that can write to disk.
+the cycle repeats until the exact revision satisfies a complete convergence
+proof or a material bound stops it. A clean output has survived adversarial
+review, has every `file:line` reference checked against your workspace, and is
+schema-validated at every step — produced without any agent ever being granted
+a tool that can write to disk. An incomplete proof keeps the latest usable plan
+and marks the result `needs-review`.
 
 Use it when you want a thorough, self-reviewed plan rather than a first draft,
 and you would rather have several agents disagree their way to a good answer
@@ -25,17 +27,17 @@ than trust a single pass.
 
 You hand agent-quorum a prompt or a rough plan. A **creator** writes the first
 draft. A **critic** then reviews it and reports concrete issues; the creator
-revises the draft to address them. That review-and-revise cycle repeats until
-the critic finds nothing left to fix — the point of **convergence** — at which a
-reference validator and an optional fix pass clean up the final plan. If the
-converged plan is large or has many phases, agent-quorum performs a **split**:
-it emits a self-contained `plan.package/` directory so a weaker model can
-execute one phase at a time. For balanced and thorough runs, a **judge** then
-evaluates the exact canonical final plan and records whether it is ready for
-implementation.
+revises the draft to address them. A clean result requires more than an empty
+issue list: the exact revision must have an independent, complete review; its
+invariants and authoritative system relationships must be covered; required
+Judge evidence must agree; and no material limit may be exhausted. If that proof
+cannot be completed, agent-quorum still keeps the latest usable plan but marks
+it `needs-review`. A reference validator and optional fix pass repair pointed
+reference defects, and large or multi-phase plans can be emitted as a
+self-contained `plan.package/` for phase-by-phase execution.
 
 Six roles drive that loop: the **creator** drafts and revises, the **critic**
-finds issues, the **fixer** proposes reference fixes after convergence, the
+finds issues, the **fixer** proposes reference fixes after the bounded loop, the
 **reviewer** checks the fixer's proposal, and the **translator** renders a
 localized companion plan when you ask for one. The **judge** evaluates both
 intermediate convergence candidates and the canonical final plan.
@@ -51,17 +53,15 @@ creator ──► plan.v0.md
     ╭───────────┴───────────╮
     │  critic   → critique  │
     │  creator  → revision  │ ◄── operator interventions
-    │  …until convergence   │
+    │  …until proof/bound   │
     ╰───────────┬───────────╯
                 ▼
 reference validator ──► fix pass ──► plan.final.md
                                            │
-                                           │  final judge (balanced/thorough)
-                                           │  split policy (large/complex) ──► plan.package/
-                                           │  locale pass (when requested)
-                                           │
-                                           ▼
-                              plan.final.<locale>.md
+                                           ├── deterministic system check
+                                           ├── final judge (balanced/thorough)
+                                           ├── split policy (large/complex) ──► plan.package/
+                                           └── locale pass ──► plan.final.<locale>.md
 ```
 
 Those six roles map onto three providers (`codex`, `claude`, `cursor-agent`)
@@ -74,12 +74,14 @@ process group under a byte-idle / semantic-idle / wall-clock watchdog.
   judge), each bound to a provider and a prompt skill.
 - **runner** — the provider CLI a role calls: `codex`, `claude`, or `cursor`.
 - **quality** — a preset (`quick`, `balanced`, `thorough`) that selects the
-  role-call topology, per-role reasoning, and how aggressively provider sessions
-  are reused.
-- **convergence** — the point where the critic finds no remaining blocking
-  issues, so the loop stops and finalizes the plan.
-- **split** — emitting the converged plan as a multi-file `plan.package/` when it
-  is large or has enough phases, so it can be executed one phase at a time.
+  role-call topology and promises best-effort, cumulative, or exhaustive
+  in-scope coverage.
+- **convergence** — proof that the current revision was independently reviewed,
+  its scan promise and invariant occurrences are complete, deterministic system
+  relationships pass, and no material bound is exhausted.
+- **split** — emitting the latest canonical plan as a multi-file `plan.package/`
+  when it is large or has enough phases, so even a `needs-review` result remains
+  usable one phase at a time.
 
 ## Quickstart
 
@@ -105,7 +107,11 @@ By default the run writes its functional artifacts to
 filename) and its durable run record under `~/.agent-quorum/state/`. The files
 you care about are:
 
-- `plan.final.md` — the converged plan; always the entry point.
+- `plan.final.md` — the latest usable canonical plan; always the entry point and
+  marked `needs-review` when convergence cannot be proved.
+- `convergence.final.json` / `system-check.final.json` — the canonical proof and
+  deterministic relationship verdict, SHA-256-bound to the delivered plan
+  bytes.
 - `summary.md` — a one-page run summary (iterations, health, structural status,
   final readiness, and artifact paths).
 - `plan.package/` — present only when the split policy fires; a self-contained
@@ -146,7 +152,7 @@ completion notifications for core runs.
 import { runPlanLoop, getRunStatus, addIntervention, ExitCode } from 'agent-quorum';
 
 const result = await runPlanLoop({ input: 'my-plan.md', iters: 3, quality: 'balanced' });
-if (result.exitCode === ExitCode.Ok) {
+if (result.exitCode === ExitCode.Ok && result.status === 'clean') {
   console.log(`converged in ${result.iterations} iterations: ${result.finalPlanPath}`);
 }
 ```

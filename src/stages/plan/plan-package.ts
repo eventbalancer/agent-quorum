@@ -158,10 +158,12 @@ export interface PackageHealth {
   readonly brokenCrossRefs: number;
   readonly forbiddenShell: number;
   readonly references: FindingsCounts;
+  readonly systemCoverageMissing?: number;
 }
 
 export interface ValidatePlanPackageOptions {
   readonly findingsFile?: string;
+  readonly relationshipIds?: readonly string[];
 }
 
 export function resolveSplitMode(value: string | undefined): SplitMode {
@@ -1011,6 +1013,75 @@ export function emitPlanPackage(
   };
 }
 
+function coverageRows(planFile: string, relationshipIds: readonly string[]): string[] {
+  const wanted = new Set(relationshipIds);
+  return readFileSync(planFile, 'utf8')
+    .split('\n')
+    .filter((line) => {
+      const cells = parseTableRow(line);
+      return cells.length >= 7 && wanted.has(cells[0] ?? '');
+    });
+}
+
+function phaseMatchesCoverageReference(phaseFile: string, reference: string): boolean {
+  const content = readFileSync(phaseFile, 'utf8');
+  const heading = /^# Phase\s+(P\d+)\s+-\s+(.+)$/m.exec(content);
+  if (heading === null) {
+    return false;
+  }
+  const normalized = reference.trim().toLowerCase();
+  const id = (heading[1] ?? '').toLowerCase();
+  const name = (heading[2] ?? '').trim().toLowerCase();
+  return (
+    (id !== '' && new RegExp(`\\b${id}\\b`, 'i').test(reference)) ||
+    (name !== '' && (normalized === name || normalized.includes(name)))
+  );
+}
+
+export function carrySystemCoverageIntoPackage(
+  paths: PackagePaths,
+  relationshipIds: readonly string[],
+): void {
+  if (relationshipIds.length === 0) {
+    return;
+  }
+  const rows = coverageRows(paths.plan, relationshipIds);
+  const header = [
+    '',
+    '## System Coverage',
+    '',
+    '| Relationship ID | Type | Producer/authority | Consumer/executor | Implementation phase | Release stage/gate | Evidence |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+  ];
+  for (const phaseFile of paths.phases) {
+    const applicable = rows.filter((row) => {
+      const cells = parseTableRow(row);
+      return (
+        phaseMatchesCoverageReference(phaseFile, cells[4] ?? '') ||
+        phaseMatchesCoverageReference(phaseFile, cells[5] ?? '')
+      );
+    });
+    if (applicable.length > 0) {
+      writeFileSync(
+        phaseFile,
+        `${readFileSync(phaseFile, 'utf8').replace(/\n*$/, '')}\n${[...header, ...applicable, ''].join('\n')}`,
+      );
+    }
+  }
+  writeFileSync(
+    paths.run,
+    `${readFileSync(paths.run, 'utf8').replace(/\n*$/, '')}\n${[
+      '',
+      '## Ordered Release Gates',
+      '',
+      'Execute these authoritative relationship gates in the master-plan order. Do not advance a consumer or deployment before its prerequisite relationship is satisfied.',
+      ...header.slice(2),
+      ...rows,
+      '',
+    ].join('\n')}`,
+  );
+}
+
 function packageMarkdownFiles(packageDir: string): string[] {
   return readdirSync(packageDir)
     .filter((name) => name.endsWith('.md'))
@@ -1151,13 +1222,66 @@ export function validatePlanPackage(
   );
   const ok =
     missingFiles === 0 && missingHeadings === 0 && brokenCrossRefs === 0 && forbiddenShell === 0;
+  const relationshipIds = options.relationshipIds ?? [];
+  let systemCoverageMissing = 0;
+  if (relationshipIds.length > 0) {
+    const run = readOptionalPackageMarkdown(packageDir, 'run.md');
+    const plan = readOptionalPackageMarkdown(packageDir, 'plan.md');
+    const rows = new Map<string, string[]>();
+    for (const line of plan.split('\n')) {
+      const id = parseTableRow(line)[0] ?? '';
+      if (relationshipIds.includes(id)) {
+        rows.set(id, [...(rows.get(id) ?? []), line]);
+      }
+    }
+    for (const id of relationshipIds) {
+      const matchingRows = rows.get(id) ?? [];
+      if (matchingRows.length !== 1) {
+        systemCoverageMissing += 1;
+        continue;
+      }
+      const row = matchingRows[0] ?? '';
+      const cells = parseTableRow(row);
+      const notApplicable = cells.some((cell) => /not[- ]applicable/i.test(cell));
+      if (!run.split('\n').includes(row)) {
+        systemCoverageMissing += 1;
+      }
+      if (notApplicable) {
+        continue;
+      }
+      const implementationMatches = phaseFiles.filter((file) =>
+        phaseMatchesCoverageReference(file, cells[4] ?? ''),
+      );
+      const releaseMatches = phaseFiles.filter((file) =>
+        phaseMatchesCoverageReference(file, cells[5] ?? ''),
+      );
+      if (implementationMatches.length === 0) {
+        systemCoverageMissing += 1;
+      }
+      const allowed = new Set([...implementationMatches, ...releaseMatches]);
+      for (const phaseFile of phaseFiles) {
+        const contains = readFileSync(phaseFile, 'utf8').split('\n').includes(row);
+        if (contains !== allowed.has(phaseFile)) {
+          systemCoverageMissing += 1;
+        }
+      }
+    }
+    const canonicalPlan = path.join(path.dirname(packageDir), 'plan.final.md');
+    if (
+      existsSync(canonicalPlan) &&
+      !readFileSync(canonicalPlan).equals(readFileSync(path.join(packageDir, 'plan.md')))
+    ) {
+      systemCoverageMissing += 1;
+    }
+  }
   return {
-    ok,
+    ok: ok && systemCoverageMissing === 0,
     emptyWorkPlan: false,
     missingFiles,
     missingHeadings,
     brokenCrossRefs,
     forbiddenShell,
     references,
+    ...(relationshipIds.length > 0 ? { systemCoverageMissing } : {}),
   };
 }

@@ -15,11 +15,18 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../helpers/cli.js';
 import { pgidOf } from '../../src/runtime/proc.js';
+import {
+  createConvergenceState,
+  fileSha256,
+  writeConvergenceState,
+} from '../../src/core/convergence.js';
+import { qualityMatrix } from '../../src/core/quality.js';
 import { writeStoreConfig, writeFakeBin, writeStructuredPlanFile } from '../helpers/harness.js';
 
 let tmp: string;
 let fake: string;
 const launchedPids: number[] = [];
+const RUN_INPUT_BODY_SENTINEL = 'RUN_INPUT_BODY_MUST_NOT_REACH_LOG_8c2f31';
 
 function isAlive(pid: number): boolean {
   try {
@@ -53,12 +60,36 @@ interface LaunchedRun {
   codexPid: number;
 }
 
+function statusIssue(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    addresses: null,
+    severity: 'minor',
+    category: 'testability',
+    claim: `${id} claim`,
+    evidence: '',
+    evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+    suggested_fix: 'fix',
+    confidence: 1,
+    duplicate_of: null,
+    ...overrides,
+  };
+}
+
+function writeStatusCritique(file: string, version: number, issues: unknown[]): void {
+  writeFileSync(
+    file,
+    `${JSON.stringify({ plan_version: version, summary: `v${version}`, issues }, null, 2)}\n`,
+  );
+}
+
 async function launchHangingRun(
   name: string,
   envOverrides: Record<string, string | undefined> = {},
 ): Promise<LaunchedRun> {
   const input = path.join(tmp, `${name}.md`);
   writeStructuredPlanFile(input, `Run ${name}`);
+  appendFileSync(input, `\n${RUN_INPUT_BODY_SENTINEL}\n`);
   const pidBase = path.join(tmp, `${name}.codex.pid`);
   const result = runCli(
     ['launch', '--quality', 'quick', '--iters', '1', input, '--no-fix', '--no-translate'],
@@ -236,6 +267,157 @@ describe('status provider-neutral hints', () => {
     expect(stall.status).toBe(0);
     expect(stall.stdout).toContain('(watchdog terminated a recent cursor call, see run.log)');
     expect(stall.stdout).not.toContain('recent claude call');
+
+    process.kill(run.pid, 'SIGTERM');
+    await sleep(1500);
+    expect(isAlive(run.grandchildPid)).toBe(false);
+  }, 120_000);
+});
+
+describe('status convergence proof', () => {
+  it('reports rich iteration health and never infers convergence from a final artifact', async () => {
+    const run = await launchHangingRun('proof-status');
+    const statusEnv = {
+      AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+      AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+      AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+      AGENT_QUORUM_STATUS_SCAN_PS: '0',
+    };
+
+    for (let version = 0; version <= 2; version += 1) {
+      writeStructuredPlanFile(path.join(run.work, `plan.v${version}.md`), `Plan ${version}`);
+    }
+    writeFileSync(path.join(run.work, 'rejected-log.jsonl'), `${JSON.stringify({ id: 'r1' })}\n`);
+    writeStatusCritique(path.join(run.work, 'critique.v0.json'), 0, [
+      statusIssue('C1'),
+      statusIssue('C2'),
+      statusIssue('C3'),
+    ]);
+    writeStatusCritique(path.join(run.work, 'critique.v1.json'), 1, [statusIssue('C1')]);
+    writeFileSync(
+      path.join(run.work, 'update.v0.json'),
+      `${JSON.stringify({ issues: [{ id: 'C3', verdict: 'reject_hallucinated' }] })}\n`,
+    );
+    writeStatusCritique(path.join(run.work, 'critique.v2.json'), 2, [
+      statusIssue('C1'),
+      statusIssue('C2', { addresses: 'v1.C1' }),
+      statusIssue('C3', { addresses: 'v0.C3' }),
+      statusIssue('C4', { addresses: 'v0.C2' }),
+      statusIssue('C5', { introduced_by_revision: 'plan.v2.md' }),
+      statusIssue('C6', { severity: 'nit', duplicate_of: 'r1' }),
+      statusIssue('C7', {
+        addresses: 'v9.C1',
+        evidence_refs: [{ kind: 'repository', value: 'source.ts:2' }],
+      }),
+    ]);
+
+    const convergence = createConvergenceState({
+      quality: 'balanced',
+      matrix: qualityMatrix('balanced'),
+      mode: 'prompt',
+      sourceDigest: 'source',
+      authoritativeDigest: 'system',
+      relationshipIds: ['R-fixture'],
+      maxIters: 3,
+    });
+    convergence.planVersion = 2;
+    convergence.contextDeliveries.push({
+      role: 'critic',
+      stage: 'review',
+      planVersion: 2,
+      mandatoryBytes: 120,
+      optionalBytes: 30,
+      totalInputBytes: 150,
+      inputTokenLimit: null,
+      inputLimitSource: 'unknown',
+      reductions: [],
+      omittedCategories: ['resolved-minor-history'],
+    });
+    convergence.invariants = [
+      {
+        id: 'I-active',
+        sourceFinding: 'I-active',
+        statement: 'Active fixture invariant',
+        status: 'active',
+        occurrences: [
+          {
+            id: 'O-active',
+            dimension: 'repository',
+            subject: 'fixture',
+            disposition: 'unresolved',
+            evidenceRefs: [],
+          },
+        ],
+      },
+      {
+        id: 'I-resolved',
+        sourceFinding: 'I-resolved',
+        statement: 'Resolved fixture invariant',
+        status: 'resolved',
+        lastReviewedPlanVersion: 2,
+        occurrences: [
+          {
+            id: 'O-resolved',
+            dimension: 'repository',
+            subject: 'fixture',
+            disposition: 'satisfied',
+            evidenceRefs: [],
+          },
+        ],
+      },
+    ];
+    convergence.unresolvedCoverage = ['I-active'];
+    convergence.stopReason = 'unresolved-coverage:I-active';
+    writeConvergenceState(run.work, convergence);
+    writeFileSync(
+      path.join(run.work, 'system-check.v2.json'),
+      `${JSON.stringify({ relationships: [{ id: 'R-fixture', disposition: 'covered' }] })}\n`,
+    );
+    writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Final plan', {
+      status: 'needs-review',
+    });
+    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+
+    const status = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain(
+      'lineage={"new":1,"refinement":1,"reopened":1,"recurring":1,"revision-regression":1,"rejected-duplicate":1,"invalid-lineage":1}',
+    );
+    expect(status.stdout).toContain(
+      'grounding={"grounded":6,"malformed":0,"format-mismatch":1,"unanchored":0}',
+    );
+    expect(status.stdout).toContain('retained=120B+30B');
+    expect(status.stdout).toContain('invariants=1/1/1');
+    expect(status.stdout).toContain('relationships=1/1');
+    expect(status.stdout).toContain('omitted=resolved-minor-history');
+    expect(status.stdout).toContain('status=needs-review (proof not satisfied)');
+    expect(status.stdout).not.toContain('✓ converged');
+    expect(readFileSync(run.log, 'utf8')).not.toContain(RUN_INPUT_BODY_SENTINEL);
+
+    writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Clean final');
+    convergence.invariants = [];
+    convergence.unresolvedCoverage = [];
+    convergence.satisfied = true;
+    convergence.stopReason = 'proof-satisfied';
+    convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
+    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    appendFileSync(path.join(run.work, 'plan.final.md'), '\nSame-version mutation\n');
+    const staleProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
+    expect(staleProof.status).toBe(0);
+    expect(staleProof.stdout).toContain('status=needs-review (proof not satisfied)');
+    expect(staleProof.stdout).not.toContain('✓ converged');
+
+    convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
+    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    const exactProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
+    expect(exactProof.status).toBe(0);
+    expect(exactProof.stdout).toContain('✓ converged (proof satisfied; final status clean)');
+
+    writeFileSync(path.join(run.work, 'critique.v3.json'), '{"interrupted":');
+    const interrupted = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
+    expect(interrupted.status).toBe(0);
+    expect(interrupted.stdout).toContain('proof: lineage=unavailable grounding=unavailable');
+    expect(interrupted.stdout).toContain('✓ converged (proof satisfied; final status clean)');
 
     process.kill(run.pid, 'SIGTERM');
     await sleep(1500);

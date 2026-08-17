@@ -108,7 +108,7 @@ describe('iteration loop', () => {
     writeAcceptUpdate(update, 1, next);
     const ctx = makeContext({ maxIters: 1, diffThreshold: 0 });
 
-    await withEnvAsync(
+    const result = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
@@ -119,7 +119,8 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('hit MAX_ITERS=1 without convergence');
+    expect(result.converged).toBe(false);
+    expect(capture.text()).toContain('hit MAX_ITERS=1 without proof');
     expect(JSON.parse(readFileSync(path.join(work, 'update.v0.json'), 'utf8'))).toEqual(
       JSON.parse(readFileSync(update, 'utf8')),
     );
@@ -128,10 +129,12 @@ describe('iteration loop', () => {
     );
   });
 
-  it('stable-diff break uses the stable revision', async () => {
+  it('stable-diff telemetry still requires a current-revision review', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, SINGLE_ISSUE);
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty);
     const update = path.join(tmp, 'update.json');
     writeAcceptUpdate(update, 1, path.join(tmp, 'input.md'));
     const ctx = makeContext({ maxIters: 2 });
@@ -140,19 +143,23 @@ describe('iteration loop', () => {
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_JSON_RESULT: update,
       },
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('stable-diff at v1');
+    expect(capture.text()).toContain('stable-diff telemetry at v1');
+    expect(capture.text()).toContain('proof-satisfied at v1');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
     );
   });
 
-  it('full topology mode includes ecosystem.yaml', async () => {
+  it('thorough critic receives structured topology only through retained context', async () => {
     seedWork();
     writeFileSync(
       path.join(tmp, 'ecosystem.yaml'),
@@ -173,11 +180,17 @@ describe('iteration loop', () => {
     );
 
     const prompt = readFileSync(promptCapture, 'utf8');
-    expect(prompt).toContain('## Repo topology (ecosystem.yaml)');
-    expect(prompt).toContain('name: fixture-ecosystem');
+    expect(prompt).toContain('### Authoritative system facts');
+    expect(prompt).toContain('declared_scope: unavailable');
+    expect(prompt).not.toContain('name: fixture-ecosystem');
+    expect(prompt.split('### Authoritative system facts')).toHaveLength(2);
+    const skill = readFileSync(path.join(REPO_ROOT, 'skills', 'plan-critic', 'SKILL.md'), 'utf8');
+    expect(prompt.split('## Repo topology (ecosystem.yaml)')).toHaveLength(
+      skill.split('## Repo topology (ecosystem.yaml)').length,
+    );
   });
 
-  it('compact topology mode uses summary', async () => {
+  it('quick critic receives compact history and structured topology from one surface', async () => {
     seedWork();
     writeFileSync(
       path.join(tmp, 'ecosystem.yaml'),
@@ -198,12 +211,14 @@ describe('iteration loop', () => {
     );
 
     const prompt = readFileSync(promptCapture, 'utf8');
-    expect(prompt).toContain('## Repo topology summary');
-    const skill = readFileSync(path.join(REPO_ROOT, 'skills', 'plan-critic', 'SKILL.md'), 'utf8');
-    const headingCount = (text: string) =>
-      text.split('## Repo topology (ecosystem.yaml)').length - 1;
-    expect(headingCount(prompt)).toBe(headingCount(skill));
+    expect(prompt).toContain('### Authoritative system facts');
+    expect(prompt).toContain('## Quality-adjusted retained history');
     expect(prompt).not.toContain('name: fixture-ecosystem');
+    expect(prompt.split('### Authoritative system facts')).toHaveLength(2);
+    const skill = readFileSync(path.join(REPO_ROOT, 'skills', 'plan-critic', 'SKILL.md'), 'utf8');
+    expect(prompt.split('## Repo topology summary')).toHaveLength(
+      skill.split('## Repo topology summary').length,
+    );
   });
 
   it('critic prompt receives operator interventions', async () => {
@@ -234,6 +249,7 @@ describe('iteration loop', () => {
     const prompt = readFileSync(promptCapture, 'utf8');
     expect(prompt).toContain('## Operator interventions');
     expect(prompt).toContain('critic must check identity-aware convergence');
+    expect(prompt.split('critic must check identity-aware convergence')).toHaveLength(2);
   });
 
   it('consumes Claude critic output with a draft-07 schema', async () => {
@@ -271,6 +287,19 @@ describe('iteration loop', () => {
     writeCritique(critique, SINGLE_ISSUE);
     const revision = path.join(tmp, 'revision.md');
     writeStructuredPlanFile(revision, 'Split Revision');
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty);
+    const judge = path.join(tmp, 'judge.json');
+    writeFileSync(
+      judge,
+      JSON.stringify({
+        ready: true,
+        rationale: 'current revision is implementation-ready',
+        coverage_complete: true,
+        unresolved_occurrence_ids: [],
+        invariant_assessments: [],
+      }),
+    );
     const meta = path.join(tmp, 'meta.json');
     writeFileSync(
       meta,
@@ -287,6 +316,15 @@ describe('iteration loop', () => {
             },
           ],
           applied: ['C1'],
+          systemic_dispositions: [
+            {
+              issue_id: 'C1',
+              scope: 'local',
+              rationale: 'Fixture evidence confines the correction to the named plan phase.',
+              evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+              invariant: null,
+            },
+          ],
           rejected_append: [],
         },
         null,
@@ -299,15 +337,21 @@ describe('iteration loop', () => {
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_MARKDOWN_RESULT: revision,
         FAKE_CLAUDE_JSON_RESULT: meta,
+        FAKE_CLAUDE_JSON_CALLS: path.join(tmp, 'claude.calls'),
+        FAKE_CLAUDE_JSON_RESULT_1: meta,
+        FAKE_CLAUDE_JSON_RESULT_2: judge,
         FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('converged at v1 (no accepted blockers/majors)');
+    expect(capture.text()).toContain('proof-satisfied at v1');
     expect(readFileSync(path.join(work, 'plan.revision.v0.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
@@ -331,6 +375,8 @@ describe('iteration loop', () => {
     );
     const revision = path.join(tmp, 'revision.md');
     writeStructuredPlanFile(revision, 'Fallback Revision');
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty);
     const meta = path.join(tmp, 'meta.json');
     writeFileSync(
       meta,
@@ -347,6 +393,15 @@ describe('iteration loop', () => {
             },
           ],
           applied: ['C1'],
+          systemic_dispositions: [
+            {
+              issue_id: 'C1',
+              scope: 'local',
+              rationale: 'Fixture evidence confines the correction to the named plan phase.',
+              evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+              invariant: null,
+            },
+          ],
           rejected_append: [],
         },
         null,
@@ -359,6 +414,9 @@ describe('iteration loop', () => {
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_JSON_CALLS: path.join(tmp, 'claude.json.calls'),
         FAKE_CLAUDE_JSON_RESULT: invalidOneShot,
@@ -371,7 +429,7 @@ describe('iteration loop', () => {
     expect(capture.text()).toContain(
       'WARNING: one-shot creator update failed; falling back to split update',
     );
-    expect(capture.text()).toContain('converged at v1 (no accepted blockers/majors)');
+    expect(capture.text()).toContain('proof-satisfied at v1');
     expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
@@ -383,6 +441,8 @@ describe('iteration loop', () => {
     writeCritique(critique, SINGLE_ISSUE);
     const revision = path.join(tmp, 'schema-fallback-revision.md');
     writeStructuredPlanFile(revision, 'Schema Fallback Revision');
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty);
     const meta = path.join(tmp, 'schema-fallback-meta.json');
     writeFileSync(
       meta,
@@ -399,6 +459,15 @@ describe('iteration loop', () => {
             },
           ],
           applied: ['C1'],
+          systemic_dispositions: [
+            {
+              issue_id: 'C1',
+              scope: 'local',
+              rationale: 'Fixture evidence confines the correction to the named plan phase.',
+              evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+              invariant: null,
+            },
+          ],
           rejected_append: [],
         },
         null,
@@ -416,6 +485,9 @@ describe('iteration loop', () => {
       {
         PATH: fakePath(),
         FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
         FAKE_CLAUDE_ARGV_LOG: argvLog,
         FAKE_CLAUDE_JSON_RESULT: meta,
@@ -459,6 +531,7 @@ describe('iteration loop', () => {
 
   it('all-duplicate critique converges without creator update (AC-1)', async () => {
     seedWork();
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), `${JSON.stringify({ id: 'r1' })}\n`);
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, ALL_DUPLICATE_ISSUES);
     const ctx = makeContext({ maxIters: 2 });
@@ -472,11 +545,37 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('converged at v0 (critic returned no issues)');
+    expect(capture.text()).toContain('proof-satisfied at v0');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
     );
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
+  });
+
+  it('does not let an invalid duplicate marker suppress a material issue', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, [
+      { ...ALL_DUPLICATE_ISSUES[0], severity: 'major', duplicate_of: 'missing' },
+    ]);
+    const next = path.join(tmp, 'next.md');
+    writeStructuredPlanFile(next, 'Next');
+    const update = path.join(tmp, 'update.json');
+    writeAcceptUpdate(update, 1, next);
+    const ctx = makeContext({ maxIters: 1 });
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_RESULT: update,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(capture.text()).not.toContain('proof-satisfied at v0');
+    expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
   });
 
   it('health log includes unanchored count for non-duplicate issues (FR-2)', async () => {
@@ -521,7 +620,16 @@ describe('iteration loop', () => {
       },
     ]);
     const judgeResult = path.join(tmp, 'judge-result.json');
-    writeFileSync(judgeResult, JSON.stringify({ ready: true, rationale: 'implementation-ready' }));
+    writeFileSync(
+      judgeResult,
+      JSON.stringify({
+        ready: true,
+        rationale: 'implementation-ready',
+        coverage_complete: true,
+        unresolved_occurrence_ids: [],
+        invariant_assessments: [],
+      }),
+    );
     const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
 
     await withEnvAsync(
@@ -535,17 +643,43 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain(
-      'converged at v0 (intermediate judge verdict: implementation-ready)',
-    );
-    expect(JSON.parse(readFileSync(path.join(work, 'judge.v0.json'), 'utf8'))).toEqual({
+    expect(capture.text()).toContain('proof-satisfied at v0');
+    expect(capture.text()).not.toContain('implementation-ready');
+    expect(JSON.parse(readFileSync(path.join(work, 'judge.v0.json'), 'utf8'))).toMatchObject({
       ready: true,
       rationale: 'implementation-ready',
+      coverage_complete: true,
     });
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
     );
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
+  });
+
+  it('invalidates a stale Judge approval when the current critique skips Judge', async () => {
+    seedWork();
+    const critiqueFile = path.join(tmp, 'critique.json');
+    writeCritique(critiqueFile, SINGLE_ISSUE);
+    const invalidUpdate = path.join(tmp, 'invalid-update.json');
+    writeFileSync(invalidUpdate, '');
+    const ctx = makeContext({ quality: 'balanced', maxIters: 1 });
+    ctx.convergence.judgeApprovedPlanVersion = 0;
+
+    await expect(
+      withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CODEX_OUTPUT: critiqueFile,
+          FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+          FAKE_CLAUDE_JSON_RESULT: invalidUpdate,
+        },
+        () => runIterationLoop(ctx, 0),
+      ),
+    ).rejects.toThrow();
+
+    expect(capture.text()).toContain('intermediate judge skipped');
+    expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
+    expect(capture.text()).not.toContain('proof-satisfied at v0');
   });
 
   it('judge is absent from log when quality is quick (AC-6)', async () => {
@@ -615,6 +749,7 @@ describe('iteration loop', () => {
     const prompt = readFileSync(claudePrompt, 'utf8');
     expect(prompt).toContain('## Operator interventions');
     expect(prompt).toContain('creator must preserve published-version hydration');
+    expect(prompt.split('creator must preserve published-version hydration')).toHaveLength(2);
     const migrations = readFileSync(
       path.join(work, 'operator-intervention-migrations.jsonl'),
       'utf8',

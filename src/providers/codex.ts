@@ -1,7 +1,9 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { isJsonObject, type JsonValue } from '../core/json.js';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err } from '../runtime/log.js';
 import { spawnDetached, waitForExit } from '../runtime/exec.js';
+import { normalizeCodexJsonValue, projectCodexJsonSchema } from './codex-schema.js';
 import { StreamLogFilter } from './stream-log.js';
 import { runLivenessHeartbeat } from './heartbeat.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
@@ -58,54 +60,80 @@ export async function codexRun(
   const heartbeatSeconds = providerRuntime.livenessHeartbeatSeconds;
   rmSync(outPath, { force: true });
 
-  const child = spawnDetached(
-    providerRuntime.binaries.codex,
-    codexArgs(model, reasoning, schemaPath, outPath, prompt),
-    {
-      cwd: providerRuntime.projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
-  let pending = '';
-  child.stdout?.on('data', (chunk: Buffer) => {
-    if (diagnosticSink !== undefined) {
-      diagnosticSink.write(chunk);
-    }
-    pending += chunk.toString();
-    for (;;) {
-      const newlineIndex = pending.indexOf('\n');
-      if (newlineIndex === -1) {
-        break;
+  const canonicalSchema = JSON.parse(readFileSync(schemaPath, 'utf8')) as JsonValue;
+  if (!isJsonObject(canonicalSchema)) {
+    throw new TypeError('Codex JSON schema must be an object');
+  }
+  const projection = projectCodexJsonSchema(canonicalSchema);
+  const projectedSchemaPath = projection.changed ? providerRuntime.scratch.file() : schemaPath;
+  if (projection.changed) {
+    writeFileSync(projectedSchemaPath, `${JSON.stringify(projection.schema, null, 2)}\n`);
+  }
+
+  try {
+    const child = spawnDetached(
+      providerRuntime.binaries.codex,
+      codexArgs(model, reasoning, projectedSchemaPath, outPath, prompt),
+      {
+        cwd: providerRuntime.projectRoot,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
+    let pending = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (diagnosticSink !== undefined) {
+        diagnosticSink.write(chunk);
       }
-      writeFilterLines(filter, pending.slice(0, newlineIndex));
-      pending = pending.slice(newlineIndex + 1);
+      pending += chunk.toString();
+      for (;;) {
+        const newlineIndex = pending.indexOf('\n');
+        if (newlineIndex === -1) {
+          break;
+        }
+        writeFilterLines(filter, pending.slice(0, newlineIndex));
+        pending = pending.slice(newlineIndex + 1);
+      }
+    });
+
+    const heartbeat =
+      heartbeatSeconds > 0
+        ? runLivenessHeartbeat(child, traceContext, heartbeatSeconds)
+        : Promise.resolve();
+
+    // Always drain so the child never blocks on a full stderr buffer.
+    const stderr = new ProviderStderr(traceContext, diagnosticSink);
+    const stderrDrained = drainStderr(child.stderr, stderr);
+
+    const status = await waitForExit(child);
+    await heartbeat;
+    if (pending !== '') {
+      writeFilterLines(filter, pending);
     }
-  });
+    await stderrDrained;
+    stderr.failureSummary(status);
 
-  const heartbeat =
-    heartbeatSeconds > 0
-      ? runLivenessHeartbeat(child, traceContext, heartbeatSeconds)
-      : Promise.resolve();
-
-  // Always drain so the child never blocks on a full stderr buffer.
-  const stderr = new ProviderStderr(traceContext, diagnosticSink);
-  const stderrDrained = drainStderr(child.stderr, stderr);
-
-  const status = await waitForExit(child);
-  await heartbeat;
-  if (pending !== '') {
-    writeFilterLines(filter, pending);
+    if (status !== 0) {
+      return status;
+    }
+    if (!nonEmptyFile(outPath)) {
+      err('codex produced empty output');
+      return 4;
+    }
+    if (projection.changed) {
+      try {
+        const output = JSON.parse(readFileSync(outPath, 'utf8')) as JsonValue;
+        const normalized = normalizeCodexJsonValue(output, canonicalSchema);
+        writeFileSync(outPath, `${JSON.stringify(normalized, null, 2)}\n`);
+      } catch {
+        err('codex produced invalid structured JSON');
+        return 4;
+      }
+    }
+    return 0;
+  } finally {
+    if (projection.changed) {
+      rmSync(projectedSchemaPath, { force: true });
+    }
   }
-  await stderrDrained;
-  stderr.failureSummary(status);
-
-  if (status !== 0) {
-    return status;
-  }
-  if (!nonEmptyFile(outPath)) {
-    err('codex produced empty output');
-    return 4;
-  }
-  return 0;
 }

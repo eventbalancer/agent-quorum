@@ -6,10 +6,7 @@ import { err, log } from '../../runtime/log.js';
 import { providerRun } from '../../providers/provider.js';
 import type { ProviderRuntime } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import {
-  markOperatorInterventionsMigrated,
-  operatorInterventionsContext,
-} from './interventions.js';
+import { markOperatorInterventionsMigrated } from './interventions.js';
 import {
   normalizePlanDocument,
   requirePlanDocumentShape,
@@ -18,6 +15,7 @@ import {
 import { validateSchema } from '../../core/schema.js';
 import { validateFinalPlan } from './validate-plan.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
+import { retainedRolePrompt } from './retained-context.js';
 
 function fixPassAcceptPlanCandidate(candidate: string, label: string): boolean {
   normalizePlanDocument(candidate);
@@ -32,6 +30,29 @@ function fixPassAcceptPlanCandidate(candidate: string, label: string): boolean {
   }
   err(`fix-pass: ${label} failed the plan-shape gate`);
   return false;
+}
+
+function reviewCoversActiveInvariants(ctx: RunContext, review: JsonObject): boolean {
+  if (review.coverage_complete !== true) {
+    return false;
+  }
+  if (
+    !Array.isArray(review.unresolved_occurrence_ids) ||
+    review.unresolved_occurrence_ids.length > 0
+  ) {
+    return false;
+  }
+  const assessments = Array.isArray(review.invariant_assessments)
+    ? review.invariant_assessments.filter(isJsonObject)
+    : [];
+  return ctx.convergence.invariants.every((invariant) => {
+    const assessment = assessments.find((entry) => entry.invariant_id === invariant.id);
+    return (
+      assessment?.satisfied === true &&
+      Array.isArray(assessment.unresolved_occurrence_ids) &&
+      assessment.unresolved_occurrence_ids.length === 0
+    );
+  });
 }
 
 // The fix pass overrides the claude wall/semantic timeouts and the retry count
@@ -54,9 +75,67 @@ function fixPassRuntime(ctx: RunContext): ProviderRuntime {
   };
 }
 
+interface AppliedCandidateReviewInput {
+  readonly ctx: RunContext;
+  readonly runtime: ProviderRuntime;
+  readonly beforeFix: string;
+  readonly finalPlan: string;
+  readonly findingsFile: string;
+  readonly proposalReviewFile: string;
+}
+
+async function appliedCandidateIsApproved(input: AppliedCandidateReviewInput): Promise<boolean> {
+  const appliedReviewFile = path.join(input.ctx.work, 'fix-applied-review.json');
+  const appliedReviewBase =
+    `## Original plan\n${readStripped(input.beforeFix)}\n\n` +
+    `## Applied fix\n${readStripped(input.finalPlan)}\n\n` +
+    `## Findings\n${readStripped(input.findingsFile)}\n\n` +
+    `## Proposal review\n${readStripped(input.proposalReviewFile)}\n\n` +
+    'Review the exact applied candidate. Assess every active invariant and occurrence. Return ONLY JSON conforming to the schema.';
+  const appliedReviewPrompt = retainedRolePrompt({
+    ctx: input.ctx,
+    role: 'reviewer',
+    stage: 'fix-applied-review',
+    planVersion: input.ctx.convergence.planVersion,
+    skillFile: input.ctx.skills.reviewerSkill,
+    schemaFile: input.ctx.skills.reviewerSchema,
+    basePrompt: appliedReviewBase,
+    persistVersionedState: false,
+  });
+  log(`fix-pass: step 4 — ${input.runtime.matrix.reviewer.runner} review exact applied candidate`);
+  const appliedReviewStatus = await providerRun(
+    input.runtime,
+    'reviewer',
+    'json',
+    appliedReviewFile,
+    input.ctx.skills.reviewerSkill,
+    input.ctx.skills.reviewerSchema,
+    input.ctx.permissions.reviewer.tools,
+    input.ctx.permissions.reviewer.disallowedTools,
+    appliedReviewPrompt,
+  );
+  if (appliedReviewStatus !== 0 || !nonEmptyFile(appliedReviewFile)) {
+    return false;
+  }
+  if (!validateSchema(appliedReviewFile, input.ctx.skills.reviewerSchema)) {
+    return false;
+  }
+  const parsed = JSON.parse(readFileSync(appliedReviewFile, 'utf8')) as JsonValue;
+  const review = isJsonObject(parsed) ? parsed : {};
+  const concerns = Array.isArray(review.concerns) ? review.concerns.filter(isJsonObject) : [];
+  const hasMaterialConcern = concerns.some(
+    (concern) => concern.severity === 'blocker' || concern.severity === 'major',
+  );
+  return (
+    review.approval !== 'reject' &&
+    !hasMaterialConcern &&
+    reviewCoversActiveInvariants(input.ctx, review)
+  );
+}
+
 export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<void> {
   const findingsFile = path.join(ctx.work, 'findings.json');
-  const rt = fixPassRuntime(ctx);
+  const runtime = fixPassRuntime(ctx);
 
   if (!existsSync(findingsFile)) {
     log('fix-pass: no findings.json — skipping');
@@ -73,35 +152,42 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
     /* unreadable findings behave as zero */
   }
   const lengthOf = (value: JsonValue | undefined) => (Array.isArray(value) ? value.length : 0);
-  const nStale = lengthOf(findings.stale_lines);
-  const nAmb = lengthOf(findings.ambiguous);
-  const nUnres = lengthOf(findings.unresolved);
-  const total = nStale + nAmb + nUnres;
-  if (total === 0) {
+  const staleCount = lengthOf(findings.stale_lines);
+  const ambiguousCount = lengthOf(findings.ambiguous);
+  const unresolvedCount = lengthOf(findings.unresolved);
+  const findingsCount = staleCount + ambiguousCount + unresolvedCount;
+  if (findingsCount === 0) {
     log('fix-pass: 0 findings — skipping');
     return;
   }
   log(
-    `fix-pass: ${total} findings (stale_lines=${nStale}, ambiguous=${nAmb}, unresolved=${nUnres})`,
+    `fix-pass: ${findingsCount} findings (stale_lines=${staleCount}, ambiguous=${ambiguousCount}, unresolved=${unresolvedCount})`,
   );
 
   const beforeFix = path.join(ctx.work, 'plan.final.before-fix.md');
   copyFileSync(finalPlan, beforeFix);
 
   const proposalFile = path.join(ctx.work, 'fix-proposal.md');
-  log(`fix-pass: step 1 — ${rt.matrix.fixer.runner} propose (${rt.matrix.fixer.model})`);
-  const fixerInterventions = operatorInterventionsContext(ctx.work, 'fixer');
-  const fixerIvBlock = fixerInterventions !== '' ? `\n${fixerInterventions}` : '';
-  const proposePrompt =
+  log(`fix-pass: step 1 — ${runtime.matrix.fixer.runner} propose (${runtime.matrix.fixer.model})`);
+  const proposeBasePrompt =
     `## Plan\n${readStripped(finalPlan)}\n` +
-    `${fixerIvBlock}\n` +
     '\n' +
     `## Findings\n${readStripped(findingsFile)}\n` +
     '\n' +
     '(Propose mode: output the full revised plan as plain markdown. No JSON, no fences.)';
+  const proposePrompt = retainedRolePrompt({
+    ctx,
+    role: 'fixer',
+    stage: 'fix-proposal',
+    planVersion: ctx.convergence.planVersion,
+    skillFile: ctx.skills.fixerSkill,
+    schemaFile: '',
+    basePrompt: proposeBasePrompt,
+    persistVersionedState: false,
+  });
 
   const proposeStatus = await providerRun(
-    rt,
+    runtime,
     'fixer',
     'markdown',
     proposalFile,
@@ -113,36 +199,43 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
   );
   if (proposeStatus !== 0 || !nonEmptyFile(proposalFile)) {
     err(
-      `fix-pass: propose failed/timed out (status=${proposeStatus}) — keeping converged plan, fix-pass skipped`,
+      `fix-pass: propose failed/timed out (status=${proposeStatus}) — keeping pre-fix canonical plan, fix-pass skipped`,
     );
     copyFileSync(beforeFix, finalPlan);
     return;
   }
   log(`fix-pass:   → proposal_lines=${fileLineCount(proposalFile)}`);
   if (!fixPassAcceptPlanCandidate(proposalFile, 'proposal output')) {
-    err('fix-pass: keeping converged plan, fix-pass skipped');
+    err('fix-pass: keeping pre-fix canonical plan, fix-pass skipped');
     copyFileSync(beforeFix, finalPlan);
     return;
   }
 
   const reviewFile = path.join(ctx.work, 'fix-review.json');
   log(
-    `fix-pass: step 2 — ${rt.matrix.reviewer.runner} review (${rt.matrix.reviewer.model} reasoning=${rt.matrix.reviewer.reasoning})`,
+    `fix-pass: step 2 — ${runtime.matrix.reviewer.runner} review (${runtime.matrix.reviewer.model} reasoning=${runtime.matrix.reviewer.reasoning})`,
   );
-  const reviewerInterventions = operatorInterventionsContext(ctx.work, 'reviewer');
-  const reviewerIvBlock = reviewerInterventions !== '' ? `\n${reviewerInterventions}` : '';
-  const reviewPrompt =
+  const reviewBasePrompt =
     `## Original plan\n${readStripped(beforeFix)}\n` +
     '\n' +
     `## Proposed fix\n${readStripped(proposalFile)}\n` +
-    `${reviewerIvBlock}\n` +
     '\n' +
     `## Findings\n${readStripped(findingsFile)}\n` +
     '\n' +
     'Return ONLY JSON conforming to the schema. No prose, no markdown fences.';
+  const reviewPrompt = retainedRolePrompt({
+    ctx,
+    role: 'reviewer',
+    stage: 'fix-proposal-review',
+    planVersion: ctx.convergence.planVersion,
+    skillFile: ctx.skills.reviewerSkill,
+    schemaFile: ctx.skills.reviewerSchema,
+    basePrompt: reviewBasePrompt,
+    persistVersionedState: false,
+  });
 
   const reviewStatus = await providerRun(
-    rt,
+    runtime,
     'reviewer',
     'json',
     reviewFile,
@@ -154,13 +247,15 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
   );
   if (reviewStatus !== 0 || !nonEmptyFile(reviewFile)) {
     err(
-      `fix-pass: review failed/timed out (status=${reviewStatus}) — keeping converged plan, fix-pass skipped`,
+      `fix-pass: review failed/timed out (status=${reviewStatus}) — keeping pre-fix canonical plan, fix-pass skipped`,
     );
     copyFileSync(beforeFix, finalPlan);
     return;
   }
   if (!validateSchema(reviewFile, ctx.skills.reviewerSchema)) {
-    err('fix-pass: review schema validation failed — keeping converged plan, fix-pass skipped');
+    err(
+      'fix-pass: review schema validation failed — keeping pre-fix canonical plan, fix-pass skipped',
+    );
     copyFileSync(beforeFix, finalPlan);
     return;
   }
@@ -171,25 +266,31 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
   const approval =
     typeof approvalValue === 'string' ? approvalValue : JSON.stringify(approvalValue ?? null);
   const concerns = Array.isArray(reviewObj.concerns) ? reviewObj.concerns : [];
-  const nConcerns = concerns.length;
+  const concernCount = concerns.length;
   const severityCount = (severity: string) =>
     concerns.filter((concern) => isJsonObject(concern) && concern.severity === severity).length;
-  const nBlockers = severityCount('blocker');
-  const nMajors = severityCount('major');
+  const blockerCount = severityCount('blocker');
+  const majorCount = severityCount('major');
   log(
-    `fix-pass:   → approval=${approval} concerns=${nConcerns} (blocker=${nBlockers} major=${nMajors})`,
+    `fix-pass:   → approval=${approval} concerns=${concernCount} (blocker=${blockerCount} major=${majorCount})`,
   );
 
   let fixPassReplaced = false;
-  if (approval === 'accept' && nConcerns === 0) {
-    log('fix-pass: clean accept, using proposal as final plan');
+  let appliedCandidateNeedsReview = false;
+  if (approval === 'accept' && concernCount === 0) {
+    const invariantCoverageComplete = reviewCoversActiveInvariants(ctx, reviewObj);
+    log(
+      invariantCoverageComplete
+        ? 'fix-pass: clean accept, using proposal as final plan'
+        : 'fix-pass: proposal accepted without complete invariant coverage — reviewing exact candidate',
+    );
     copyFileSync(proposalFile, finalPlan);
     fixPassReplaced = true;
+    appliedCandidateNeedsReview = !invariantCoverageComplete;
   } else {
-    log(`fix-pass: step 3 — ${rt.matrix.fixer.runner} apply (${rt.matrix.fixer.model})`);
-    const applyPrompt =
+    log(`fix-pass: step 3 — ${runtime.matrix.fixer.runner} apply (${runtime.matrix.fixer.model})`);
+    const applyBasePrompt =
       `## Plan\n${readStripped(beforeFix)}\n` +
-      `${fixerIvBlock}\n` +
       '\n' +
       `## Findings\n${readStripped(findingsFile)}\n` +
       '\n' +
@@ -198,10 +299,20 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
       `## Review\n${readStripped(reviewFile)}\n` +
       '\n' +
       '(Apply mode: output the full final plan as plain markdown. Incorporate every blocker/major concern from Review; minor/nit only if you agree.)';
+    const applyPrompt = retainedRolePrompt({
+      ctx,
+      role: 'fixer',
+      stage: 'fix-apply',
+      planVersion: ctx.convergence.planVersion,
+      skillFile: ctx.skills.fixerSkill,
+      schemaFile: '',
+      basePrompt: applyBasePrompt,
+      persistVersionedState: false,
+    });
 
     const applyOut = path.join(ctx.work, 'fix-applied.md');
     const applyStatus = await providerRun(
-      rt,
+      runtime,
       'fixer',
       'markdown',
       applyOut,
@@ -212,17 +323,22 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
       applyPrompt,
     );
     if (applyStatus !== 0) {
-      err(`fix-pass: apply failed/timed out (status=${applyStatus}) — keeping converged plan`);
+      err(
+        `fix-pass: apply failed/timed out (status=${applyStatus}) — keeping pre-fix canonical plan`,
+      );
       copyFileSync(beforeFix, finalPlan);
       return;
     }
     if (!nonEmptyFile(applyOut)) {
-      if (nBlockers === 0 && nMajors === 0) {
+      if (blockerCount === 0 && majorCount === 0) {
         err('fix-pass: empty apply output — using validated proposal as final');
         copyFileSync(proposalFile, finalPlan);
         fixPassReplaced = true;
+        appliedCandidateNeedsReview = !reviewCoversActiveInvariants(ctx, reviewObj);
       } else {
-        err('fix-pass: empty apply output after blocker/major review — keeping converged plan');
+        err(
+          'fix-pass: empty apply output after blocker/major review — keeping pre-fix canonical plan',
+        );
         copyFileSync(beforeFix, finalPlan);
       }
     } else {
@@ -230,14 +346,33 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
       if (fixPassAcceptPlanCandidate(applyOut, 'apply output')) {
         copyFileSync(applyOut, finalPlan);
         fixPassReplaced = true;
-      } else if (nBlockers === 0 && nMajors === 0) {
+        appliedCandidateNeedsReview = true;
+      } else if (blockerCount === 0 && majorCount === 0) {
         err('fix-pass: apply output rejected — using validated proposal as final');
         copyFileSync(proposalFile, finalPlan);
         fixPassReplaced = true;
+        appliedCandidateNeedsReview = !reviewCoversActiveInvariants(ctx, reviewObj);
       } else {
-        err('fix-pass: apply output rejected after blocker/major review — keeping converged plan');
+        err(
+          'fix-pass: apply output rejected after blocker/major review — keeping pre-fix canonical plan',
+        );
         copyFileSync(beforeFix, finalPlan);
       }
+    }
+  }
+  if (fixPassReplaced && appliedCandidateNeedsReview) {
+    const accepted = await appliedCandidateIsApproved({
+      ctx,
+      runtime,
+      beforeFix,
+      finalPlan,
+      findingsFile,
+      proposalReviewFile: reviewFile,
+    });
+    if (!accepted) {
+      err('fix-pass: exact applied candidate was not independently approved — restoring backup');
+      copyFileSync(beforeFix, finalPlan);
+      fixPassReplaced = false;
     }
   }
   if (fixPassReplaced) {

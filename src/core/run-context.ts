@@ -6,6 +6,8 @@ import type { QualityMatrix } from './quality.js';
 import type { PassKnobs } from './knobs.js';
 import type { SplitPolicy } from './split-policy.js';
 import type { RunMode } from '../types.js';
+import type { ConvergenceState } from './convergence.js';
+import type { SystemContext } from './system-context.js';
 
 export interface SkillPaths {
   criticSkill: string;
@@ -69,6 +71,8 @@ export interface RunContext {
   split: SplitPolicy;
   lastCritiqueIter: number;
   resume: ResumeState;
+  convergence: ConvergenceState;
+  systemContext: SystemContext;
 }
 
 // Command-substitution capture semantics: file content with trailing newlines

@@ -29,11 +29,7 @@ function draft(name: string, workDir: string, startedAt: string): RunRecordDraft
   };
 }
 
-function seedFinishedRun(
-  name: string,
-  withLog: boolean,
-  startedAt = '2026-06-13T00:00:00Z',
-): string {
+function seedFinishedRun(name: string, withLog: boolean, startedAt = recentRunTimestamp()): string {
   const workDir = path.join(tmp, 'plans', `loop-${name}`);
   mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
@@ -45,9 +41,13 @@ function seedFinishedRun(
   finalizeRunRecord(stateDir, record.runId, {
     state: 'finished',
     exitCode: 0,
-    endedAt: '2026-06-13T01:00:00Z',
+    endedAt: startedAt,
   });
   return workDir;
+}
+
+function recentRunTimestamp(hoursAgo = 1): string {
+  return new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString();
 }
 
 function env(): Record<string, string | undefined> {
@@ -115,8 +115,8 @@ describe('intervene by selector (AC-7)', () => {
   });
 
   it('records against the most-recent run with --last', () => {
-    seedFinishedRun('older', true, '2026-06-13T00:00:00Z');
-    const recent = seedFinishedRun('newer', true, '2026-06-13T09:00:00Z');
+    seedFinishedRun('older', true, recentRunTimestamp(2));
+    const recent = seedFinishedRun('newer', true, recentRunTimestamp(1));
     const result = runCli(['intervene', '--last', 'review', 'this'], env());
     expect(result.status).toBe(0);
     expect(readFileSync(path.join(recent, 'operator-interventions.jsonl'), 'utf8')).toContain(
@@ -132,9 +132,9 @@ describe('intervene by selector (AC-7)', () => {
 
 describe('prune (AC-9)', () => {
   it('removes terminal records beyond --keep and reports; --dry-run removes none', () => {
-    seedFinishedRun('a', false, '2026-06-10T00:00:00Z');
-    seedFinishedRun('b', false, '2026-06-11T00:00:00Z');
-    seedFinishedRun('c', false, '2026-06-12T00:00:00Z');
+    seedFinishedRun('a', false, recentRunTimestamp(3));
+    seedFinishedRun('b', false, recentRunTimestamp(2));
+    seedFinishedRun('c', false, recentRunTimestamp(1));
 
     const dry = runCli(['prune', '--keep', '1', '--dry-run'], env());
     expect(dry.status).toBe(0);

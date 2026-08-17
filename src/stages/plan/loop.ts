@@ -5,13 +5,22 @@ import { fileLineCount } from '../../runtime/files.js';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { critiqueHealth, isCritiqueDuplicateIssue } from '../../core/metrics.js';
+import { convergenceHealth, critiqueDuplicateIsValid, critiqueHealth } from '../../core/metrics.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { runCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
 import { runJudge } from './judge.js';
 import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
 import type { RunContext } from '../../core/run-context.js';
+import {
+  addConvergenceLimit,
+  classifyTerminal,
+  recordCreatorUpdate,
+  recordCritique,
+  recordSystemCheck,
+  writeConvergenceState,
+} from '../../core/convergence.js';
+import { validateSystemCoverage, writeSystemCheck } from '../../core/system-context.js';
 
 function readJson(file: string): JsonValue {
   return JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
@@ -53,7 +62,12 @@ function changedLineCount(oldFile: string, newFile: string): number {
   return count;
 }
 
-function openBlockerMajor(critiqueJson: JsonValue): { blockers: number; majors: number } {
+interface MaterialIssueCounts {
+  readonly blockers: number;
+  readonly majors: number;
+}
+
+function openBlockerMajor(critiqueJson: JsonValue): MaterialIssueCounts {
   const issues =
     isJsonObject(critiqueJson) && Array.isArray(critiqueJson.issues) ? critiqueJson.issues : [];
   let blockers = 0;
@@ -74,8 +88,61 @@ function openBlockerMajor(critiqueJson: JsonValue): { blockers: number; majors: 
 
 const UNANCHORED_WARN_RATIO = 0.5;
 
+function logCritiqueHealth(ctx: RunContext, iteration: number, critiqueFile: string): void {
+  const health = critiqueHealth(ctx.work, ctx.skills.criticSchema, iteration, critiqueFile);
+  const convergence = convergenceHealth(
+    ctx.work,
+    ctx.skills.criticSchema,
+    iteration,
+    critiqueFile,
+    ctx.provider.projectRoot,
+  );
+  log(
+    `  → lineage=${JSON.stringify(convergence.lineage)} grounding=${JSON.stringify(convergence.grounding)}`,
+  );
+  if (health.total === 0) {
+    return;
+  }
+  log(
+    `  → addressed=${health.addressed} new=${health.newIssues} invalid=${health.invalid} unanchored=${health.unanchored} (${health.pct}% valid-addressed)`,
+  );
+  if (health.invalid > 0) {
+    log(`WARNING: critic returned ${health.invalid} invalid address reference(s)`);
+  }
+  if (health.pct < 30 && iteration >= 2) {
+    log('WARNING: critic is mostly finding new issues, not refining — possible drift');
+  }
+  if (health.unanchored > 0 && health.unanchored / health.total >= UNANCHORED_WARN_RATIO) {
+    log(
+      `WARNING: ${health.unanchored}/${health.total} issues lack file:line or section-anchor evidence — possible evidence drift`,
+    );
+  }
+}
+
+function appendRejectedEntries(work: string, iteration: number, updateJson: JsonValue): void {
+  const entries =
+    isJsonObject(updateJson) && Array.isArray(updateJson.rejected_append)
+      ? updateJson.rejected_append
+      : [];
+  const content = entries
+    .map((entry) => {
+      const object = isJsonObject(entry) ? entry : {};
+      return `${JSON.stringify({
+        iter: iteration,
+        id: object.id ?? null,
+        claim: object.claim ?? null,
+        reason: object.reason ?? null,
+      })}\n`;
+    })
+    .join('');
+  if (content !== '') {
+    appendFileSync(path.join(work, 'rejected-log.jsonl'), content);
+  }
+}
+
 export interface LoopResult {
-  iter: number;
+  readonly iter: number;
+  readonly converged: boolean;
 }
 
 export async function runIterationLoop(ctx: RunContext, startIter: number): Promise<LoopResult> {
@@ -98,9 +165,18 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     }
     ctx.lastCritiqueIter = iter;
     const critiqueJson = readJson(critique);
+    recordCritique(ctx.convergence, critiqueJson, iter, {
+      work: ctx.work,
+      projectRoot: ctx.provider.projectRoot,
+    });
+    const systemCheck = validateSystemCoverage(ctx.systemContext, plan, iter);
+    recordSystemCheck(ctx.convergence, systemCheck);
+    writeSystemCheck(ctx.work, systemCheck);
     const rawIssues =
       isJsonObject(critiqueJson) && Array.isArray(critiqueJson.issues) ? critiqueJson.issues : [];
-    const duplicateCount = rawIssues.filter(isCritiqueDuplicateIssue).length;
+    const duplicateCount = rawIssues.filter((issue) =>
+      critiqueDuplicateIsValid(issue, ctx.work),
+    ).length;
     const issuesCount = rawIssues.length - duplicateCount;
     if (duplicateCount > 0) {
       log(`  → ${issuesCount} actionable issues (${duplicateCount} duplicate)`);
@@ -108,29 +184,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       log(`  → ${issuesCount} issues`);
     }
 
-    const health = critiqueHealth(ctx.work, ctx.skills.criticSchema, iter, critique);
-    if (health.total > 0) {
-      log(
-        `  → addressed=${health.addressed} new=${health.newIssues} invalid=${health.invalid} unanchored=${health.unanchored} (${health.pct}% valid-addressed)`,
-      );
-      if (health.invalid > 0) {
-        log(`WARNING: critic returned ${health.invalid} invalid address reference(s)`);
-      }
-      if (health.pct < 30 && iter >= 2) {
-        log('WARNING: critic is mostly finding new issues, not refining — possible drift');
-      }
-      if (health.unanchored > 0 && health.unanchored / health.total >= UNANCHORED_WARN_RATIO) {
-        log(
-          `WARNING: ${health.unanchored}/${health.total} issues lack file:line or section-anchor evidence — possible evidence drift`,
-        );
-      }
-    }
-
-    if (issuesCount === 0) {
-      log(`converged at v${iter} (critic returned no issues)`);
-      copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
-      break;
-    }
+    logCritiqueHealth(ctx, iter, critique);
 
     if (ctx.quality.judge === 1) {
       const { blockers, majors } = openBlockerMajor(critiqueJson);
@@ -140,14 +194,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
         );
         const judgeFile = path.join(ctx.work, `judge.v${iter}.json`);
         const verdict = await runJudge(ctx, iter, plan, critique, judgeFile);
-        log(
-          `  → intermediate judge ready=${verdict.ready}${verdict.rationale !== '' ? ` (${verdict.rationale})` : ''}`,
-        );
-        if (verdict.ready) {
-          log(`converged at v${iter} (intermediate judge verdict: implementation-ready)`);
-          copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
-          break;
-        }
+        log(`  → intermediate judge ready=${verdict.ready}`);
       } else {
         log(
           `iter=${iter} — intermediate judge skipped (${blockers} blocker / ${majors} major open)`,
@@ -155,11 +202,28 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       }
     }
 
+    classifyTerminal(ctx.convergence, ctx.quality.judge === 1);
+    writeConvergenceState(ctx.work, ctx.convergence);
+    if (ctx.convergence.satisfied) {
+      log(`proof-satisfied at v${iter}`);
+      copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
+      break;
+    }
+    if (issuesCount === 0) {
+      log(`v${iter} is usable but convergence proof is incomplete`);
+      copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
+      break;
+    }
+
     log(`iter=${iter} — creator update (${matrix.creator.runner} ${matrix.creator.model})`);
     await runCreatorUpdate(ctx, iter, plan, critique, update, next);
     markOperatorInterventionsMigrated(ctx.work, 'creator', `plan.v${iter + 1}.md`);
 
     const updateJson = readJson(update);
+    recordCreatorUpdate(ctx.convergence, critiqueJson, updateJson, iter, {
+      work: ctx.work,
+      projectRoot: ctx.provider.projectRoot,
+    });
     const blockers = issueCount(
       updateJson,
       (issue) =>
@@ -193,47 +257,31 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       log(`WARNING: plan exceeds ${maxPlanLines} lines (${planLines})`);
     }
 
-    const rejectedEntries =
-      isJsonObject(updateJson) && Array.isArray(updateJson.rejected_append)
-        ? updateJson.rejected_append
-        : [];
-    let rejectedAppend = '';
-    for (const entry of rejectedEntries) {
-      const obj = isJsonObject(entry) ? entry : {};
-      rejectedAppend += `${JSON.stringify({
-        iter,
-        id: obj.id ?? null,
-        claim: obj.claim ?? null,
-        reason: obj.reason ?? null,
-      })}\n`;
-    }
-    if (rejectedAppend !== '') {
-      appendFileSync(path.join(ctx.work, 'rejected-log.jsonl'), rejectedAppend);
-    }
-
-    if (blockers === 0 && majors === 0) {
-      log(`converged at v${iter + 1} (no accepted blockers/majors)`);
-      copyFileSync(next, path.join(ctx.work, 'plan.final.md'));
-      iter += 1;
-      break;
-    }
+    appendRejectedEntries(ctx.work, iter, updateJson);
+    writeConvergenceState(ctx.work, ctx.convergence);
 
     const changed = changedLineCount(plan, next);
     log(`  → diff_lines=${changed}`);
     if (changed < ctx.settings.diffThreshold) {
-      log(`stable-diff at v${iter + 1} (revision <${ctx.settings.diffThreshold} lines)`);
-      copyFileSync(next, path.join(ctx.work, 'plan.final.md'));
-      iter += 1;
-      break;
+      log(`stable-diff telemetry at v${iter + 1} (revision <${ctx.settings.diffThreshold} lines)`);
     }
 
     iter += 1;
   }
 
   if (!existsSync(path.join(ctx.work, 'plan.final.md'))) {
-    log(`hit MAX_ITERS=${ctx.settings.maxIters} without convergence — using last revision`);
+    log(`hit MAX_ITERS=${ctx.settings.maxIters} without proof — using last revision`);
+    addConvergenceLimit(
+      ctx.convergence,
+      'iteration-cap',
+      `plan.v${iter}:not-independently-reviewed`,
+    );
+    ctx.convergence.stopReason = 'iteration-cap';
     copyFileSync(path.join(ctx.work, `plan.v${iter}.md`), path.join(ctx.work, 'plan.final.md'));
   }
 
-  return { iter };
+  classifyTerminal(ctx.convergence, ctx.quality.judge === 1);
+  writeConvergenceState(ctx.work, ctx.convergence);
+
+  return { iter, converged: ctx.convergence.satisfied };
 }

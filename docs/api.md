@@ -30,6 +30,9 @@ import {
   type Role,
   type Runner,
   type Quality,
+  type CompletenessPromise,
+  type ConvergenceLimit,
+  type ConvergenceReport,
 } from 'agent-quorum';
 ```
 
@@ -90,6 +93,13 @@ const result = await runPlanLoop({
 //   structuralReason: '',
 //   readiness: { evaluated: true, ready: true, rationale: 'Ready.', planSha256: '…' },
 //   readinessPath: '/abs/path/loop-my-plan/judge.final.meta.json',
+//   convergence: {
+//     promise: 'cumulative',
+//     satisfied: true,
+//     artifactPath: '/abs/path/loop-my-plan/convergence.final.json',
+//     exhaustedLimits: [],
+//     unresolvedCoverage: [],
+//   },
 // }
 ```
 
@@ -116,6 +126,16 @@ structurally blocked runs omit the readiness fields. The durable `RunRecord`
 stores the same facts as `finalStatus`/`finalReason`,
 `structuralStatus`/`structuralReason`, and `finalReadiness`. `LaunchResult`
 remains unchanged because detachment occurs before completion.
+`RunResult.convergence` is an additive proof projection with the selected
+completeness promise, satisfaction flag, canonical artifact path, exhausted
+limits, and unresolved coverage IDs. The durable run record stores the same
+projection as `finalConvergence`. Missing fields on legacy records remain
+readable and mean unavailable, not implicitly satisfied.
+`ConvergenceLimit` identifies `issue-budget`, `iteration-cap`,
+`provider-context`, `unknown-provider-context`, or `authoritative-scope`.
+The two provider-context values remain readable for legacy artifacts and future
+provider/model-aware admission; the current UTF-8 estimate is telemetry-only
+and does not emit them.
 Artifacts land in the resolved workdir; for `home`/`workDir` the precedence is
 option > environment variable > default (`~/.agent-quorum` / `<home>/runs/loop-<name>`).
 Structured `config`/`secrets` resolve in the override tier (override > env >
@@ -131,6 +151,12 @@ compatibility. The options are typed alternatives to mutating `process.env` — 
 `workDir`/`config`/`secrets` plumbing itself never writes to the calling process
 environment; ambient `AGENT_QUORUM_*` env still fills any unset key (see
 [configuration.md](configuration.md)).
+
+When `input` is an existing plan rather than a prompt, the original request is
+reported as unavailable and the plan itself is the declared scope. Such a run
+can be `clean` only when an independent critic explicitly verifies the complete
+declared/direct-plan scope; otherwise `authoritative-scope` remains visible and
+the result is `needs-review`.
 
 When a bot token and chat id resolve (from `secrets`/`config`, the
 `<home>/secrets.json`+`config.json` store, or ambient env), `runPlanLoop` also

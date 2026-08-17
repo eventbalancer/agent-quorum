@@ -13,6 +13,37 @@ const skills = skillPaths(REPO_ROOT);
 const DRAFT_2019_09_SCHEMA = 'https://json-schema.org/draft/2019-09/schema';
 const DRAFT_07_SCHEMA = 'http://json-schema.org/draft-07/schema#';
 const Ajv = ajvModule.default;
+const REQUIRED_CRITIC_CONTEXT = [
+  'original-scope',
+  'authoritative-system-facts',
+  'operator-decisions',
+  'material-findings',
+  'active-invariants',
+  'quality-and-limits',
+] as const;
+const CRITIC_SCOPE_COVERAGE = ['original-scope', 'declared-scope', 'direct-plan-scope'] as const;
+const SYSTEMIC_DISPOSITION = {
+  issue_id: 'C1',
+  scope: 'local',
+  rationale: 'The cited plan section confines the finding to one location.',
+  evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+  invariant: null,
+} as const;
+const CREATOR_ISSUE = {
+  id: 'C1',
+  verdict: 'accept',
+  verdict_reason: 'The evidence supports the correction.',
+  final_severity: 'major',
+  duplicate_of: null,
+} as const;
+const COMPLETE_CRITIC_REVIEW = {
+  considered_context: REQUIRED_CRITIC_CONTEXT,
+  invariant_assessments: [],
+  scope_coverage: ['original-scope'],
+  issue_budget: { limit: 8, used: 0, exhausted: false },
+  scan_complete: true,
+  unresolved_coverage: [],
+} as const;
 
 interface SchemaContract {
   readonly name: string;
@@ -71,10 +102,71 @@ const schemaContracts: readonly SchemaContract[] = [
     },
   },
   {
+    name: 'enriched creator update',
+    schemaFile: skills.creatorSchema,
+    valid: {
+      plan_version: 1,
+      plan_markdown: '# Work Plan',
+      issues: [CREATOR_ISSUE],
+      applied: ['C1'],
+      systemic_dispositions: [SYSTEMIC_DISPOSITION],
+      rejected_append: [],
+    },
+    invalid: {
+      plan_version: 1,
+      plan_markdown: '# Work Plan',
+      issues: [CREATOR_ISSUE],
+      applied: ['C1'],
+      systemic_dispositions: [
+        { ...SYSTEMIC_DISPOSITION, evidence_refs: [{ kind: 'unknown', value: 'Work Plan' }] },
+      ],
+      rejected_append: [],
+    },
+  },
+  {
+    name: 'enriched creator update metadata',
+    schemaFile: skills.creatorMetaSchema,
+    valid: {
+      plan_version: 1,
+      issues: [CREATOR_ISSUE],
+      applied: ['C1'],
+      systemic_dispositions: [SYSTEMIC_DISPOSITION],
+      rejected_append: [],
+    },
+    invalid: {
+      plan_version: 1,
+      issues: [CREATOR_ISSUE],
+      applied: ['C1'],
+      systemic_dispositions: [
+        { ...SYSTEMIC_DISPOSITION, evidence_refs: [{ kind: 'unknown', value: 'Work Plan' }] },
+      ],
+      rejected_append: [],
+    },
+  },
+  {
     name: 'critique',
     schemaFile: skills.criticSchema,
     valid: { plan_version: 0, summary: 'ok', issues: [] },
     invalid: { plan_version: 0, issues: [] },
+  },
+  {
+    name: 'enriched critique proof vocabulary',
+    schemaFile: skills.criticSchema,
+    valid: {
+      plan_version: 0,
+      summary: 'complete independent scan',
+      review: COMPLETE_CRITIC_REVIEW,
+      issues: [],
+    },
+    invalid: {
+      plan_version: 0,
+      summary: 'incomplete retained-context proof',
+      review: {
+        ...COMPLETE_CRITIC_REVIEW,
+        considered_context: REQUIRED_CRITIC_CONTEXT.slice(0, -1),
+      },
+      issues: [],
+    },
   },
   {
     name: 'fix review',
@@ -137,6 +229,32 @@ describe('role skill split-package contract', () => {
       expect(text, `creator lists "${field}"`).toContain(field);
     }
     expect(text).toContain('one master plan');
+  });
+});
+
+describe('critic proof vocabulary contract', () => {
+  it('keeps the prompt instructions and schema on the same closed vocabularies', () => {
+    const skill = skillText(skills.criticSkill);
+    for (const token of [...REQUIRED_CRITIC_CONTEXT, ...CRITIC_SCOPE_COVERAGE]) {
+      expect(skill).toContain(`\`${token}\``);
+    }
+
+    const schema = JSON.parse(readFileSync(skills.criticSchema, 'utf8')) as {
+      properties: {
+        review: {
+          properties: {
+            considered_context: { items: { enum: string[] } };
+            scope_coverage: { items: { enum: string[] } };
+          };
+        };
+      };
+    };
+    expect(schema.properties.review.properties.considered_context.items.enum).toEqual(
+      REQUIRED_CRITIC_CONTEXT,
+    );
+    expect(schema.properties.review.properties.scope_coverage.items.enum).toEqual(
+      CRITIC_SCOPE_COVERAGE,
+    );
   });
 });
 

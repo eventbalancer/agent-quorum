@@ -27,6 +27,19 @@ prompt="$(cat)"
 if [[ -n "${FAKE_CLAUDE_PROMPT:-}" ]]; then
   printf '%s' "$prompt" > "$FAKE_CLAUDE_PROMPT"
 fi
+if [[ -n "${FAKE_CLAUDE_FINAL_PLAN_MUTATION_SOURCE:-}" && -n "${FAKE_CLAUDE_FINAL_PLAN_MUTATION_TARGET:-}" && "$prompt" == *"scope: final"* ]]; then
+  mutate=1
+  if [[ -n "${FAKE_CLAUDE_FINAL_PLAN_MUTATION_CALLS:-}" ]]; then
+    mutation_calls=0
+    [[ -f "$FAKE_CLAUDE_FINAL_PLAN_MUTATION_CALLS" ]] && mutation_calls="$(cat "$FAKE_CLAUDE_FINAL_PLAN_MUTATION_CALLS")"
+    mutation_calls=$((mutation_calls + 1))
+    printf '%s' "$mutation_calls" > "$FAKE_CLAUDE_FINAL_PLAN_MUTATION_CALLS"
+    (( mutation_calls > 1 )) && mutate=0
+  fi
+  if (( mutate == 1 )); then
+    cp "$FAKE_CLAUDE_FINAL_PLAN_MUTATION_SOURCE" "$FAKE_CLAUDE_FINAL_PLAN_MUTATION_TARGET"
+  fi
+fi
 # Raw-stderr injection: a multi-line blob plus one ~2 MB line with no trailing
 # newline, then a non-zero exit. Exercises bounded capture + default-drop.
 if [[ -n "${FAKE_CLAUDE_STDERR:-}" ]]; then
