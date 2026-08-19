@@ -45,6 +45,23 @@ describe('Codex structured-output schema projection', () => {
     expect(isJsonObject(review) ? review.type : undefined).toEqual(['object', 'null']);
   });
 
+  it('removes schema keywords unsupported by Codex while retaining canonical constraints', () => {
+    const canonical = readSchema();
+    const projected = projectCodexJsonSchema(canonical);
+    const canonicalReview = (canonical.properties as JsonObject).review as JsonObject;
+    const canonicalReviewProperties = canonicalReview.properties as JsonObject;
+    const projectedReview = (projected.schema.properties as JsonObject).review as JsonObject;
+    const projectedReviewProperties = projectedReview.properties as JsonObject;
+
+    expect((canonicalReviewProperties.considered_context as JsonObject).uniqueItems).toBe(true);
+    expect((canonicalReviewProperties.scope_coverage as JsonObject).uniqueItems).toBe(true);
+    expect(
+      (projectedReviewProperties.considered_context as JsonObject).uniqueItems,
+    ).toBeUndefined();
+    expect((projectedReviewProperties.scope_coverage as JsonObject).uniqueItems).toBeUndefined();
+    expect(projected.changed).toBe(true);
+  });
+
   it('removes projected null placeholders before canonical validation', () => {
     const canonical = readSchema();
     const projectedOutput: JsonValue = {

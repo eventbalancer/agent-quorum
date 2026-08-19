@@ -5,6 +5,8 @@ export interface CodexSchemaProjection {
   readonly changed: boolean;
 }
 
+const CODEX_UNSUPPORTED_SCHEMA_KEYWORDS = new Set(['uniqueItems']);
+
 function nullableSchema(schema: JsonValue): JsonValue {
   if (!isJsonObject(schema)) {
     return { anyOf: [schema, { type: 'null' }] };
@@ -32,6 +34,10 @@ export function projectCodexJsonSchema(schema: JsonObject): CodexSchemaProjectio
 
     const projected: JsonObject = {};
     for (const [key, child] of Object.entries(value)) {
+      if (CODEX_UNSUPPORTED_SCHEMA_KEYWORDS.has(key)) {
+        changed = true;
+        continue;
+      }
       projected[key] = project(child);
     }
 
