@@ -10,6 +10,23 @@ export type RunMode = 'plan' | 'prompt';
 
 export type RunFinalStatus = 'clean' | 'needs-review' | 'blocked';
 
+export type CompletenessPromise = 'best-effort' | 'cumulative' | 'exhaustive';
+
+export type ConvergenceLimit =
+  | 'issue-budget'
+  | 'iteration-cap'
+  | 'provider-context'
+  | 'unknown-provider-context'
+  | 'authoritative-scope';
+
+export interface ConvergenceReport {
+  readonly promise: CompletenessPromise;
+  readonly satisfied: boolean;
+  readonly artifactPath: string;
+  readonly exhaustedLimits: readonly ConvergenceLimit[];
+  readonly unresolvedCoverage: readonly string[];
+}
+
 export type ReadinessLabel = 'ready' | 'not-ready' | 'unknown';
 
 export interface FinalReadiness {

@@ -42,6 +42,10 @@ const RETAIN_DEFAULTS = { keepCount: 50, maxAgeDays: 30 };
 
 let stateDir: string;
 
+function recentRunTimestamp(hoursAgo = 1): string {
+  return new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString();
+}
+
 function draft(overrides: Partial<RunRecordDraft> = {}): RunRecordDraft {
   return {
     name: 'demo',
@@ -53,7 +57,7 @@ function draft(overrides: Partial<RunRecordDraft> = {}): RunRecordDraft {
     workDir: path.join(stateDir, 'work'),
     logPath: path.join(stateDir, 'work', 'run.log'),
     plansDir: '/tmp/plans',
-    startedAt: '2026-06-13T00:00:00Z',
+    startedAt: recentRunTimestamp(),
     quality: 'balanced',
     state: 'running',
     ...overrides,
@@ -114,7 +118,7 @@ describe('run records', () => {
         rationale: 'missing gate',
         planSha256: 'a'.repeat(64),
       },
-      endedAt: '2026-06-13T01:00:00Z',
+      endedAt: recentRunTimestamp(),
     });
 
     const all = readRunRecords(stateDir);
@@ -263,7 +267,7 @@ describe('pruneRuns', () => {
   it('removes terminal records beyond keepCount, keeps running, and dry-run removes none', () => {
     const running = writeRunRecord(stateDir, draft({ name: 'live' }));
     for (let i = 0; i < 4; i += 1) {
-      seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
+      seedFinished(`done-${i}`, recentRunTimestamp(4 - i));
     }
 
     const dry = pruneRuns(stateDir, { keepCount: 2, dryRun: true }, RETAIN_DEFAULTS);
@@ -279,7 +283,7 @@ describe('pruneRuns', () => {
 
   it('removes terminal records older than maxAgeDays', () => {
     const old = seedFinished('old', '2020-01-01T00:00:00Z');
-    const recent = seedFinished('recent', '2026-06-13T00:00:00Z');
+    const recent = seedFinished('recent', recentRunTimestamp());
     const result = pruneRuns(stateDir, { keepCount: 100, maxAgeDays: 30 }, RETAIN_DEFAULTS);
     expect(result.removed).toContain(old);
     expect(result.removed).not.toContain(recent);
@@ -287,7 +291,7 @@ describe('pruneRuns', () => {
 
   it('resolved defaults bound retention when the policy omits the field', () => {
     for (let i = 0; i < 4; i += 1) {
-      seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
+      seedFinished(`done-${i}`, recentRunTimestamp(4 - i));
     }
     const result = pruneRuns(stateDir, {}, { keepCount: 1, maxAgeDays: 0 });
     expect(result.removed).toHaveLength(3);
@@ -296,7 +300,7 @@ describe('pruneRuns', () => {
 
   it('an explicit policy keepCount overrides the resolved default', () => {
     for (let i = 0; i < 4; i += 1) {
-      seedFinished(`done-${i}`, `2026-06-1${i}T00:00:00Z`);
+      seedFinished(`done-${i}`, recentRunTimestamp(4 - i));
     }
     const result = pruneRuns(stateDir, { keepCount: 3 }, { keepCount: 1, maxAgeDays: 0 });
     expect(result.removed).toHaveLength(1);

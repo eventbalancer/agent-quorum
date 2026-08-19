@@ -58,7 +58,7 @@ function makeContext() {
 }
 
 describe('runJudge', () => {
-  it('returns ready:true on a valid verdict', async () => {
+  it('returns the verdict without recording approval when coverage proof is absent', async () => {
     mockProviderRun.mockImplementation((_provider, _role, _mode, file) => {
       writeFileSync(file, JSON.stringify({ ready: true, rationale: 'looks good' }));
       return Promise.resolve(0);
@@ -67,6 +67,31 @@ describe('runJudge', () => {
     const ctx = makeContext();
     const result = await runJudge(ctx, 0, planFile, critiqueFile, outFile);
     expect(result).toEqual({ ready: true, rationale: 'looks good' });
+    expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
+  });
+
+  it('records approval only when the current-plan coverage proof is complete', async () => {
+    mockProviderRun.mockImplementation((_provider, _role, _mode, file) => {
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ready: true,
+          rationale: 'coverage proved',
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [],
+        }),
+      );
+      return Promise.resolve(0);
+    });
+
+    const ctx = makeContext();
+    ctx.convergence.unresolvedCoverage.push('plan.v0:judge');
+    const result = await runJudge(ctx, 0, planFile, critiqueFile, outFile);
+
+    expect(result).toEqual({ ready: true, rationale: 'coverage proved' });
+    expect(ctx.convergence.judgeApprovedPlanVersion).toBe(0);
+    expect(ctx.convergence.unresolvedCoverage).not.toContain('plan.v0:judge');
   });
 
   it('labels the intermediate critique as current context', () => {
@@ -79,8 +104,10 @@ describe('runJudge', () => {
     mockProviderRun.mockResolvedValue(1);
 
     const ctx = makeContext();
+    ctx.convergence.judgeApprovedPlanVersion = 0;
     const result = await runJudge(ctx, 0, planFile, critiqueFile, outFile);
     expect(result).toEqual({ ready: false, rationale: '' });
+    expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
     expect(capture.text()).toContain('judge provider call failed');
   });
 
@@ -127,7 +154,13 @@ describe('runFinalJudge', () => {
   }
 
   it('binds a valid verdict to the exact final-plan bytes', async () => {
-    mockFinalOutput({ ready: true, rationale: 'implementation ready' });
+    mockFinalOutput({
+      ready: true,
+      rationale: 'implementation ready',
+      coverage_complete: true,
+      unresolved_occurrence_ids: [],
+      invariant_assessments: [],
+    });
     const ctx = makeContext();
     ctx.lastCritiqueIter = 0;
 
@@ -141,6 +174,8 @@ describe('runFinalJudge', () => {
       planSha256: digest,
     });
     expect(result.metadataPath).toBe(path.join(work, FINAL_JUDGE_METADATA));
+    expect(result.coverageProved).toBe(true);
+    expect(result.candidateUnchanged).toBe(true);
     expect(readFileSync(path.join(work, 'judge.final.json'), 'utf8')).toBe(
       readFileSync(path.join(work, 'judge.final.raw'), 'utf8'),
     );
@@ -156,6 +191,39 @@ describe('runFinalJudge', () => {
     expect(prompt).toContain('scope: final');
     expect(prompt).toContain('critique_context: advisory');
     expect(prompt).toContain(`plan_sha256: ${digest}`);
+  });
+
+  it('rejects coverage proof when the final plan changes during evaluation', async () => {
+    const originalPlan = readFileSync(planFile, 'utf8');
+    const originalDigest = createHash('sha256').update(originalPlan).digest('hex');
+    mockProviderRun.mockImplementation(
+      (_provider, _role, _mode, file, _skill, _schema, _tools, _disallowed, prompt, options) => {
+        writeFileSync(
+          file,
+          JSON.stringify({
+            ready: true,
+            rationale: 'implementation ready',
+            coverage_complete: true,
+            unresolved_occurrence_ids: [],
+            invariant_assessments: [],
+          }),
+        );
+        writeFileSync(planFile, `${originalPlan}\nMutated during final Judge.\n`);
+        const valid = options?.validateOutput?.(file) ?? true;
+        expect(prompt).toContain(`plan_sha256: ${originalDigest}`);
+        expect(prompt).toContain(`## Plan\n${originalPlan}\n\n## Critique Context`);
+        return Promise.resolve(valid ? 0 : 1);
+      },
+    );
+
+    const result = await runFinalJudge(makeContext(), planFile);
+
+    expect(result.readiness.planSha256).toBe(originalDigest);
+    expect(result.readiness.planSha256).not.toBe(
+      createHash('sha256').update(readFileSync(planFile)).digest('hex'),
+    );
+    expect(result.candidateUnchanged).toBe(false);
+    expect(result.coverageProved).toBe(false);
   });
 
   it('uses a deterministic fallback for an empty negative rationale', async () => {

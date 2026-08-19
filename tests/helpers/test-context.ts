@@ -15,6 +15,8 @@ import { DISABLED_STREAM_KNOBS } from '../../src/providers/registry.js';
 import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';
+import { createConvergenceState } from '../../src/core/convergence.js';
+import type { SystemContext } from '../../src/core/system-context.js';
 
 export const BASE_STREAM_KNOBS: StreamKnobs = {
   stallStatus: 124,
@@ -66,6 +68,7 @@ export interface TestContextOptions {
   splitMode?: SplitMode;
   splitMinPhases?: number;
   maxPlanLines?: number;
+  sourceDigest?: string;
   telegram?: Partial<ResolvedTelegram>;
   claudePermissionMode?: string;
 }
@@ -97,6 +100,40 @@ export function makeTestRunContext(
     permissions,
     telegram: { ...base.telegram, ...options.telegram },
   };
+  const systemContext: SystemContext = {
+    schemaVersion: 1,
+    scopeSource: options.mode === 'prompt' ? 'prompt' : 'direct-plan',
+    originalRequestAvailable: options.mode === 'prompt',
+    declaredScope: [],
+    sources: [],
+    digest: 'test-system-digest',
+    crossRepository: false,
+    relationships: [],
+    limitations: [],
+    facts: {
+      repositories: [],
+      packages: [],
+      packageExports: [],
+      packageScripts: [],
+      images: [],
+      workflows: [],
+      ciTriggers: [],
+      regions: [],
+      migrationCommands: [],
+      deliveryStages: [],
+      authorizationBoundaries: [],
+      gates: [],
+    },
+  };
+  const convergence = createConvergenceState({
+    quality,
+    matrix: qualityMatrix(quality),
+    mode: options.mode ?? 'plan',
+    sourceDigest: options.sourceDigest ?? 'test-source-digest',
+    authoritativeDigest: systemContext.digest,
+    relationshipIds: [],
+    maxIters: settings.maxIters,
+  });
   return {
     work,
     mode: options.mode ?? 'plan',
@@ -138,5 +175,7 @@ export function makeTestRunContext(
     },
     lastCritiqueIter: -1,
     resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
+    convergence,
+    systemContext,
   };
 }

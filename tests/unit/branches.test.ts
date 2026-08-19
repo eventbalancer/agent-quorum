@@ -18,11 +18,7 @@ import {
   operatorInterventionsContext,
   operatorInterventionsState,
 } from '../../src/stages/plan/interventions.js';
-import {
-  compactCritiqueFile,
-  criticPrompt,
-  topologyContext,
-} from '../../src/stages/plan/critic.js';
+import { criticPrompt } from '../../src/stages/plan/critic.js';
 import { resolveConfig } from '../../src/core/config.js';
 import { resolveWatchdogKnobs } from '../../src/core/knobs.js';
 import { HaltError } from '../../src/runtime/halt.js';
@@ -32,14 +28,7 @@ import {
   spawnDetached,
   waitForExit,
 } from '../../src/runtime/exec.js';
-import {
-  captureStderr,
-  defaultPlanLoopConfig,
-  stripAnsi,
-  writeCritique,
-} from '../helpers/harness.js';
-import { makeTestRunContext } from '../helpers/test-context.js';
-import { Scratch } from '../../src/runtime/scratch.js';
+import { captureStderr, defaultPlanLoopConfig, stripAnsi } from '../helpers/harness.js';
 import type { JsonObject } from '../../src/core/json.js';
 
 let tmp: string;
@@ -252,69 +241,15 @@ describe('intervention ledger fallbacks', () => {
 });
 
 describe('critic prompt helpers', () => {
-  it('compacts critiques and renders topology variants', () => {
-    const critique = path.join(tmp, 'critique.v0.json');
-    writeCritique(critique, [
-      {
-        id: 'C1',
-        addresses: null,
-        severity: 'major',
-        category: 'correctness',
-        claim: 'first claim',
-        evidence: 'e',
-        suggested_fix: 'f',
-        confidence: 1,
-        duplicate_of: null,
-      },
-    ]);
-    expect(compactCritiqueFile(critique)).toBe(
-      '- critique.v0.json.C1 [major, correctness, addresses=new]: first claim',
-    );
-    const empty = path.join(tmp, 'critique.v1.json');
-    writeCritique(empty, []);
-    expect(compactCritiqueFile(empty)).toBe('- critique.v1.json: no issues');
-
-    expect(topologyContext(tmp, 'compact')).toBe('');
-    writeFileSync(path.join(tmp, 'ecosystem.yaml'), 'name: x\n');
-    expect(topologyContext(tmp, 'compact')).toContain('## Repo topology summary');
-    expect(topologyContext(tmp, 'full')).toContain('## Repo topology (ecosystem.yaml)\nname: x');
-  });
-
-  it('includes compact previous critiques and skips invalid ones', () => {
-    const work = path.join(tmp, 'work');
-    mkdirSync(work);
-    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+  it('keeps role-local input limited to the current plan', () => {
     const plan = path.join(tmp, 'plan.md');
     writeFileSync(plan, '# Plan body\n');
-    writeCritique(path.join(work, 'critique.v0.json'), [
-      {
-        id: 'C1',
-        addresses: null,
-        severity: 'major',
-        category: 'correctness',
-        claim: 'old claim',
-        evidence: 'e',
-        suggested_fix: 'f',
-        confidence: 1,
-        duplicate_of: null,
-      },
-    ]);
-    writeFileSync(path.join(work, 'critique.v1.json'), '{"not": "a critique"}\n');
-    const scratch = Scratch.create('critic-branch');
-    const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'quick' });
-    const capture = captureStderr();
-    try {
-      const prompt = criticPrompt(ctx, 2, plan);
-      expect(prompt).toContain('## Previous critiques');
-      expect(prompt).toContain('### critique.v0.json compact');
-      expect(prompt).toContain(
-        '- critique.v0.json.C1 [major, correctness, addresses=new]: old claim',
-      );
-      expect(capture.text()).toContain('skipping invalid previous critique: critique.v1.json');
-    } finally {
-      capture.restore();
-      scratch.sweep();
-    }
+    const prompt = criticPrompt(plan);
+    expect(prompt).toContain('## Plan\n# Plan body');
+    expect(prompt).not.toContain('Previous critiques');
+    expect(prompt).not.toContain('Rejected log');
+    expect(prompt).not.toContain('Operator interventions');
+    expect(prompt).not.toContain('Repo topology');
   });
 });
 

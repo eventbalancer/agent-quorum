@@ -10,6 +10,21 @@
       "enum": ["accept", "accept_with_concerns", "reject"],
       "description": "accept — 0 concerns or nit only; accept_with_concerns — there are minor concerns; reject — there are blocker/major concerns."
     },
+    "coverage_complete": { "type": "boolean" },
+    "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } },
+    "invariant_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["invariant_id", "satisfied", "unresolved_occurrence_ids"],
+        "properties": {
+          "invariant_id": { "type": "string" },
+          "satisfied": { "type": "boolean" },
+          "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
     "concerns": {
       "type": "array",
       "description": "List of concerns about the proposed fix. Each concern is tied to a specific spot in the Proposed fix or to an unresolved finding.",

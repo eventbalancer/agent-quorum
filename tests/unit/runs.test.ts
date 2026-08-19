@@ -31,7 +31,7 @@ function seed(name: string, withLog: boolean, withReadiness = false): string {
     workDir,
     logPath: path.join(workDir, 'run.log'),
     plansDir: path.join(tmp, 'plans'),
-    startedAt: '2026-06-13T00:00:00Z',
+    startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     quality: 'quick',
     state: 'running',
   };
@@ -39,7 +39,7 @@ function seed(name: string, withLog: boolean, withReadiness = false): string {
   finalizeRunRecord(stateDir, record.runId, {
     state: 'finished',
     exitCode: 0,
-    endedAt: '2026-06-13T01:00:00Z',
+    endedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
     ...(withReadiness
       ? {
           finalStatus: 'needs-review' as const,

@@ -838,7 +838,8 @@ describe('codex argv and retries', () => {
 
     expect(status).toBe(0);
     const fullPrompt = `${strippedFile(CRITIC_SKILL)}\n\nPROMPT BODY`;
-    expect(argvRecords(argvLog)).toEqual([
+    const records = argvRecords(argvLog);
+    expect(records).toEqual([
       [
         'exec',
         '--sandbox',
@@ -851,13 +852,14 @@ describe('codex argv and retries', () => {
         '-c',
         'model_reasoning_effort="xhigh"',
         '--output-schema',
-        CRITIC_SCHEMA,
+        expect.any(String),
         '-o',
         out,
         '--',
         fullPrompt,
       ],
     ]);
+    expect(records[0]?.[10]).not.toBe(CRITIC_SCHEMA);
     expect(readFileSync(promptCapture, 'utf8')).toBe(fullPrompt);
     expect(existsSync(path.join(tmp, 'critic.session-id'))).toBe(false);
   });

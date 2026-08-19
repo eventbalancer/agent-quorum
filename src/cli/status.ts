@@ -9,7 +9,8 @@ import { fileLineCount, nonEmptyFile } from '../runtime/files.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
 import { commandOf, ppidOf, ps, psField } from '../runtime/proc.js';
-import { critiqueHealth } from '../core/metrics.js';
+import { convergenceHealth, critiqueHealth } from '../core/metrics.js';
+import { fileSha256, readConvergenceState } from '../core/convergence.js';
 import { resolveRunState, type RunRecord } from '../core/run-store.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
 import { listCandidates, pickInteractive, renderListing } from './picker.js';
@@ -363,6 +364,60 @@ function pad(value: string, width: number): string {
   return value.length >= width ? value : value + ' '.repeat(width - value.length);
 }
 
+function relationshipCoverage(work: string, iteration: number): string {
+  const check = readJsonObject(path.join(work, `system-check.v${iteration}.json`));
+  const relationships =
+    check !== undefined && Array.isArray(check.relationships)
+      ? check.relationships.filter(isJsonObject)
+      : [];
+  const covered = relationships.filter(
+    (item) => item.disposition === 'covered' || item.disposition === 'not-applicable',
+  ).length;
+  return `${covered}/${relationships.length}`;
+}
+
+function printIterationProof(
+  work: string,
+  criticSchema: string,
+  iteration: number,
+  critiqueFile: string,
+  pal: Palette,
+  write: (s: string) => void,
+): void {
+  let rich: ReturnType<typeof convergenceHealth> | undefined;
+  try {
+    rich = convergenceHealth(work, criticSchema, iteration, critiqueFile);
+  } catch {
+    /* an interrupted critique remains observable without breaking status */
+  }
+  const state = readConvergenceState(path.join(work, `convergence.v${iteration}.json`));
+  const deliveries =
+    state?.contextDeliveries.filter((delivery) => delivery.planVersion === iteration) ?? [];
+  const mandatoryBytes = deliveries.reduce((sum, delivery) => sum + delivery.mandatoryBytes, 0);
+  const optionalBytes = deliveries.reduce((sum, delivery) => sum + delivery.optionalBytes, 0);
+  const omitted = [...new Set(deliveries.flatMap((delivery) => delivery.omittedCategories))];
+  const active = state?.invariants.filter((invariant) => invariant.status === 'active').length ?? 0;
+  const covered =
+    state?.invariants.filter((invariant) => invariant.status === 'resolved').length ?? 0;
+  const unresolved =
+    state?.invariants.reduce(
+      (count, invariant) =>
+        count +
+        invariant.occurrences.filter(
+          (occurrence) =>
+            occurrence.disposition === 'violated' || occurrence.disposition === 'unresolved',
+        ).length,
+      0,
+    ) ?? 0;
+  const plan = path.join(work, `plan.v${iteration}.md`);
+  const planLines = existsSync(plan) ? fileLineCount(plan) : 0;
+  const planBytes = existsSync(plan) ? statSync(plan).size : 0;
+  const reason = state?.stopReason ?? 'unavailable';
+  write(
+    `      ${pal.DIM}proof: lineage=${rich === undefined ? 'unavailable' : JSON.stringify(rich.lineage)} grounding=${rich === undefined ? 'unavailable' : JSON.stringify(rich.grounding)} evidence_kinds=${rich === undefined ? 'unavailable' : JSON.stringify(rich.evidenceKinds)} plan=${planLines}L/${planBytes}B retained=${mandatoryBytes}B+${optionalBytes}B invariants=${active}/${covered}/${unresolved} relationships=${relationshipCoverage(work, iteration)} omitted=${omitted.join('|') || 'none'} reason=${reason}${pal.R}\n`,
+  );
+}
+
 // The iteration table comes from $WORK artifacts; run.log only feeds last event.
 function printIterTable(work: string, pal: Palette, write: (s: string) => void): void {
   const criticSchema = path.join(packageRoot(), 'skills', 'plan-critic', 'critique.schema.json');
@@ -440,7 +495,44 @@ function printIterTable(work: string, pal: Palette, write: (s: string) => void):
     write(
       `    ${pad(String(iter), 5)} ${pad(raw, 5)} ${pad(`${addr}/${neu}/${invalid}/${pct}%`, 13)} ${pad(applied, 7)} ${pad(`${blk}/${maj}`, 8)} ${pad(rej, 7)} ${pad(lines, 7)} ${flag}\n`,
     );
+    printIterationProof(work, criticSchema, iter, critiqueFile, pal, write);
   }
+}
+
+function printFinalArtifactStatus(work: string, pal: Palette, write: (s: string) => void): void {
+  const finalPlan = path.join(work, 'plan.final.md');
+  if (!existsSync(finalPlan)) {
+    return;
+  }
+  const convergence = readConvergenceState(path.join(work, 'convergence.final.json'));
+  const lines = readFileSync(finalPlan, 'utf8').split('\n');
+  const closing =
+    lines[0]?.trim() === '---' ? lines.slice(1).findIndex((line) => line.trim() === '---') : -1;
+  const statusLine =
+    closing < 0 ? undefined : lines.slice(1, closing + 1).find((line) => /^status:\s+/.test(line));
+  const declaredStatus = /^(clean|needs-review|blocked)$/.exec(
+    statusLine?.split(':').slice(1).join(':').trim() ?? '',
+  )?.[1];
+  const exactCandidateProof = convergence?.canonicalPlanSha256 === fileSha256(finalPlan);
+  if (convergence?.satisfied === true && declaredStatus === 'clean' && exactCandidateProof) {
+    write(`  ${pal.GRN}✓ converged (proof satisfied; final status clean)${pal.R}\n`);
+    return;
+  }
+  if (
+    declaredStatus === 'needs-review' ||
+    convergence?.satisfied === false ||
+    (convergence?.satisfied === true && !exactCandidateProof)
+  ) {
+    write(
+      `  ${pal.YEL}final artifact present; status=needs-review (proof not satisfied)${pal.R}\n`,
+    );
+    return;
+  }
+  if (declaredStatus === 'blocked') {
+    write(`  ${pal.YEL}final artifact present; status=blocked${pal.R}\n`);
+    return;
+  }
+  write(`  ${pal.YEL}final artifact present; convergence proof unavailable${pal.R}\n`);
 }
 
 function countFiles(work: string, pattern: RegExp): number {
@@ -571,9 +663,7 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
     write(`  ${pal.YEL}(a provider is retrying API calls, waiting not progressing)${pal.R}\n`);
   }
 
-  if (existsSync(path.join(work, 'plan.final.md'))) {
-    write(`  ${pal.GRN}✓ converged (plan.final.md present)${pal.R}\n`);
-  }
+  printFinalArtifactStatus(work, pal, write);
 
   write(`\n  follow: tail -F ${logPath}\n`);
   write(`  intervene: agent-quorum intervene --work ${work} --target all "message"\n`);

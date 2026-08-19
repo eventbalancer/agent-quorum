@@ -10,7 +10,10 @@ import {
   schemaValidQuiet,
   validateSchema,
 } from '../../src/core/schema.js';
-import { captureStderr, withEnv } from '../helpers/harness.js';
+import { skillPaths } from '../../src/core/run-context.js';
+import { captureStderr, REPO_ROOT, withEnv } from '../helpers/harness.js';
+
+const skills = skillPaths(REPO_ROOT);
 
 let tmp: string;
 
@@ -22,6 +25,9 @@ interface SanitizedUpdateIssue {
 interface SanitizedUpdate {
   issues: SanitizedUpdateIssue[];
   rejected_append: Record<string, unknown>[];
+  systemic_dispositions?: {
+    evidence_refs?: unknown[];
+  }[];
 }
 
 interface SanitizedCritiqueIssue {
@@ -169,6 +175,55 @@ describe('sanitizers', () => {
       applied: [],
       rejected_append: [],
     });
+  });
+
+  it('preserves systemic-disposition evidence through both update paths', () => {
+    const systemicDisposition = {
+      issue_id: 'C1',
+      scope: 'local',
+      rationale: 'The evidence limits this finding to the Work Plan section.',
+      evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      invariant: null,
+    };
+    const issue = {
+      id: 'C1',
+      verdict: 'accept',
+      verdict_reason: 'The cited section demonstrates the local correction.',
+      final_severity: 'major',
+      duplicate_of: null,
+    };
+    const update = writeJson('enriched-update.json', {
+      plan_version: 1,
+      plan_markdown: '# Work Plan',
+      issues: [issue],
+      applied: ['C1'],
+      systemic_dispositions: [systemicDisposition],
+      rejected_append: [],
+    });
+    const meta = writeJson('enriched-meta.json', {
+      plan_version: 1,
+      issues: [issue],
+      applied: ['C1'],
+      systemic_dispositions: [systemicDisposition],
+      rejected_append: [],
+    });
+    const markdown = path.join(tmp, 'enriched-plan.md');
+    const combined = path.join(tmp, 'enriched-combined.json');
+    writeFileSync(markdown, '# Work Plan\n');
+
+    sanitizeUpdateJson(update, 1);
+    sanitizeUpdateMetaJson(meta, 1);
+    combineUpdateJson(meta, markdown, combined);
+
+    for (const file of [update, meta, combined]) {
+      const result = readJson(file) as SanitizedUpdate;
+      expect(result.systemic_dispositions?.[0]?.evidence_refs).toEqual(
+        systemicDisposition.evidence_refs,
+      );
+    }
+    expect(schemaValidQuiet(update, skills.creatorSchema)).toBe(true);
+    expect(schemaValidQuiet(meta, skills.creatorMetaSchema)).toBe(true);
+    expect(schemaValidQuiet(combined, skills.creatorSchema)).toBe(true);
   });
 });
 

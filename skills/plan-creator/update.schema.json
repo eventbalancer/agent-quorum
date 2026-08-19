@@ -61,6 +61,9 @@
         "pattern": "^C[0-9]+$"
       }
     },
+    "systemic_dispositions": {
+      "$ref": "#/$defs/systemicDispositions"
+    },
     "rejected_append": {
       "type": "array",
       "description": "Issues the creator rejected despite the critic's accept. Allowed only for minor/nit.",
@@ -76,6 +79,64 @@
             "pattern": "^(not_value_adding|conflicts_with: C[0-9]+|out_of_plan_scope|requires_external_decision)$",
             "description": "Allowed values: not_value_adding | conflicts_with: C<id> | out_of_plan_scope | requires_external_decision"
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "systemicDispositions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue_id", "scope", "rationale", "invariant"],
+        "properties": {
+          "issue_id": { "type": "string", "pattern": "^C[0-9]+$" },
+          "scope": { "enum": ["local", "cross-cutting"] },
+          "rationale": { "type": "string", "minLength": 1 },
+          "evidence_refs": { "$ref": "#/$defs/evidenceRefs" },
+          "superseded_by": { "type": ["string", "null"] },
+          "invariant": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["statement", "occurrences"],
+            "properties": {
+              "statement": { "type": "string", "minLength": 1 },
+              "occurrences": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["dimension", "subject"],
+                  "properties": {
+                    "dimension": { "type": "string", "minLength": 1 },
+                    "subject": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": { "enum": ["file-line", "plan-section", "phase-gate", "command", "repository", "topology"] },
+          "value": { "type": "string" },
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "section": { "type": "string" },
+          "phase": { "type": "string" },
+          "gate": { "type": "string" },
+          "command": { "type": "string" },
+          "repository": { "type": "string" },
+          "topology_id": { "type": "string" }
         }
       }
     }

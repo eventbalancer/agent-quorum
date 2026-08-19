@@ -70,9 +70,27 @@ function baseEnv(
   };
 }
 
-function writeVerdict(name: string, ready: boolean, rationale = `${name} rationale`): string {
+function writeVerdict(
+  name: string,
+  ready: boolean,
+  rationale = `${name} rationale`,
+  coverageComplete = true,
+): string {
   const file = path.join(tmp, `${name}.json`);
-  writeFileSync(file, `${JSON.stringify({ ready, rationale }, null, 2)}\n`);
+  writeFileSync(
+    file,
+    `${JSON.stringify(
+      {
+        ready,
+        rationale,
+        coverage_complete: coverageComplete,
+        unresolved_occurrence_ids: [],
+        invariant_assessments: [],
+      },
+      null,
+      2,
+    )}\n`,
+  );
   return file;
 }
 
@@ -113,7 +131,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         env: baseEnv({ FAKE_CODEX_OUTPUT: critique, FAKE_CLAUDE_JSON_RESULT: finalVerdict }),
         quality: 'balanced',
         fix: false,
-        expectedLog: 'converged at v0 (critic returned no issues)',
+        expectedLog: 'iter=0 — intermediate judge',
       };
     case 'intermediate-judge': {
       writeCritique(critique, [NIT_ISSUE]);
@@ -129,7 +147,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         }),
         quality: 'balanced',
         fix: false,
-        expectedLog: 'intermediate judge verdict: implementation-ready',
+        expectedLog: 'proof-satisfied at v0',
       };
     }
     case 'creator-convergence': {
@@ -148,7 +166,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         }),
         quality: 'balanced',
         fix: false,
-        expectedLog: 'converged at v1 (no accepted blockers/majors)',
+        expectedLog: 'hit MAX_ITERS=1 without proof',
       };
     }
     case 'stable-diff': {
@@ -165,7 +183,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         }),
         quality: 'balanced',
         fix: false,
-        expectedLog: 'stable-diff at v1',
+        expectedLog: 'stable-diff telemetry at v1',
       };
     }
     case 'max-iters': {
@@ -185,7 +203,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         quality: 'thorough',
         fix: false,
         diffThreshold: 0,
-        expectedLog: 'hit MAX_ITERS=1 without convergence',
+        expectedLog: 'hit MAX_ITERS=1 without proof',
       };
     }
     case 'post-fix': {
@@ -197,7 +215,16 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
       const fixed = path.join(tmp, 'fixed.md');
       writeStructuredPlanFile(fixed, 'Post-fix Final');
       const review = path.join(tmp, 'review.json');
-      writeFileSync(review, `${JSON.stringify({ approval: 'accept', concerns: [] })}\n`);
+      writeFileSync(
+        review,
+        `${JSON.stringify({
+          approval: 'accept',
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [],
+          concerns: [],
+        })}\n`,
+      );
       return {
         env: baseEnv({
           FAKE_CODEX_OUTPUT: critique,
@@ -273,10 +300,15 @@ describe('final Judge termination and verdict matrix', () => {
       const finalPlan = path.join(work, 'plan.final.md');
       const planBytes = readFileSync(finalPlan);
       const digest = createHash('sha256').update(planBytes).digest('hex');
-      const expectedStatus = ready ? 'clean' : 'needs-review';
+      const proofCanSatisfy = !['creator-convergence', 'stable-diff', 'max-iters'].includes(kind);
+      const expectedStatus = ready && proofCanSatisfy ? 'clean' : 'needs-review';
       expect(result.exitCode).toBe(0);
       expect(result.status).toBe(expectedStatus);
       expect(result.structuralStatus).toBe('clean');
+      expect(result.convergence).toMatchObject({
+        promise: setup.quality === 'thorough' ? 'exhaustive' : 'cumulative',
+        satisfied: expectedStatus === 'clean',
+      });
       expect(result.readiness).toEqual({
         evaluated: true,
         ready,
@@ -306,10 +338,13 @@ describe('final Judge termination and verdict matrix', () => {
       expect(summary).toContain(
         `- final_judge: evaluated=true, readiness=${ready ? 'ready' : 'not-ready'}, plan_sha256=${digest}`,
       );
-      expect(summary).toContain('- final_judge_rationale: final-verdict rationale');
+      expect(summary).not.toContain('final_judge_rationale:');
       expect(summary).toContain(`- FINAL: ${expectedStatus}`);
       const runLog = readFileSync(path.join(work, 'run.log'), 'utf8');
       expect(runLog).toContain(`FINAL JUDGE: ${ready ? 'ready' : 'not-ready'}`);
+      expect(runLog.indexOf('FINAL:')).toBeGreaterThan(
+        runLog.indexOf('translate-pass: disabled (locale=en)'),
+      );
       const finalPrompt = readFileSync(path.join(tmp, 'claude.prompt'), 'utf8');
       expect(finalPrompt).toContain(`plan_sha256: ${digest}`);
       expect(finalPrompt).toContain(
@@ -318,12 +353,16 @@ describe('final Judge termination and verdict matrix', () => {
 
       const records = readRunRecords(path.join(tmp, 'state'));
       expect(records).toHaveLength(1);
-      expect(records[0]).toMatchObject({
+      const record = records[0];
+      expect(record).toMatchObject({
         state: 'finished',
         exitCode: 0,
         finalStatus: expectedStatus,
-        finalReason: ready ? '' : 'Final Judge: final-verdict rationale',
         structuralStatus: 'clean',
+        finalConvergence: {
+          promise: setup.quality === 'thorough' ? 'exhaustive' : 'cumulative',
+          satisfied: expectedStatus === 'clean',
+        },
         finalReadiness: {
           evaluated: true,
           ready,
@@ -331,9 +370,239 @@ describe('final Judge termination and verdict matrix', () => {
           planSha256: digest,
         },
       });
+      if (expectedStatus === 'clean') {
+        expect(record?.finalReason).toBe('');
+      } else {
+        expect(record?.finalReason).toContain(
+          ready ? 'Convergence proof:' : 'Final Judge: not-ready',
+        );
+      }
+      expect(record?.finalConvergence?.artifactPath).toMatch(/\/convergence\.final\.json$/);
+      expect(Array.isArray(record?.finalConvergence?.exhaustedLimits)).toBe(true);
+      expect(Array.isArray(record?.finalConvergence?.unresolvedCoverage)).toBe(true);
     },
     30_000,
   );
+
+  it('keeps final coverage proof separate from intermediate Judge approval', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const intermediate = writeVerdict('intermediate-ready', true);
+    const finalUnproved = writeVerdict('final-coverage-unproved', true, 'coverage unproved', false);
+    const calls = path.join(tmp, 'claude-json.calls');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CLAUDE_JSON_RESULT: finalUnproved,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: intermediate,
+        FAKE_CLAUDE_JSON_RESULT_2: finalUnproved,
+        FAKE_CLAUDE_JSON_RESULT_3: finalUnproved,
+      }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'balanced',
+          fix: false,
+          translate: false,
+          workDir: work,
+        }),
+    );
+
+    expect(result.status).toBe('needs-review');
+    expect(result.readiness?.ready).toBe(true);
+    expect(result.convergence?.satisfied).toBe(false);
+    expect(result.convergence?.unresolvedCoverage).toContain('final-judge:coverage-unproved');
+    expect(
+      JSON.parse(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')),
+    ).toMatchObject({
+      judgeApprovedPlanVersion: 0,
+      satisfied: false,
+    });
+  });
+
+  it('cannot clean a canonical plan mutated by the final Judge provider', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const verdict = writeVerdict('mutation-ready', true);
+    const mutatedPlan = path.join(tmp, 'mutated-final.md');
+    writeStructuredPlanFile(mutatedPlan, 'Mutated During Final Judge');
+    writeFileSync(
+      mutatedPlan,
+      readFileSync(mutatedPlan, 'utf8').replaceAll('Fixture Phase', 'Mutated Phase'),
+    );
+    const mutationCalls = path.join(tmp, 'final-mutation.calls');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CLAUDE_JSON_RESULT: verdict,
+        FAKE_CLAUDE_FINAL_PLAN_MUTATION_SOURCE: mutatedPlan,
+        FAKE_CLAUDE_FINAL_PLAN_MUTATION_TARGET: path.join(work, 'plan.final.md'),
+        FAKE_CLAUDE_FINAL_PLAN_MUTATION_CALLS: mutationCalls,
+      }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'balanced',
+          fix: false,
+          translate: false,
+          workDir: work,
+          config: { split: { mode: 'always' } },
+        }),
+    );
+
+    const finalPlan = path.join(work, 'plan.final.md');
+    const finalDigest = createHash('sha256').update(readFileSync(finalPlan)).digest('hex');
+    const systemCheck = JSON.parse(
+      readFileSync(path.join(work, 'system-check.final.json'), 'utf8'),
+    ) as { planSha256: string };
+    const convergence = JSON.parse(
+      readFileSync(path.join(work, 'convergence.final.json'), 'utf8'),
+    ) as { canonicalPlanSha256: string; unresolvedCoverage: string[] };
+
+    expect(result.status).toBe('needs-review');
+    expect(result.convergence?.satisfied).toBe(false);
+    expect(result.convergence?.unresolvedCoverage).toContain('canonical-plan:proof-hash-mismatch');
+    expect(convergence.unresolvedCoverage).toContain('canonical-plan:proof-hash-mismatch');
+    expect(convergence.canonicalPlanSha256).toBe(finalDigest);
+    expect(systemCheck.planSha256).toBe(finalDigest);
+    expect(result.readiness?.planSha256).toBe(finalDigest);
+    expect(readFileSync(finalPlan, 'utf8')).toContain('# Mutated During Final Judge');
+    expect(readFileSync(finalPlan, 'utf8')).toContain('status: needs-review');
+    const packageDir = path.join(work, 'plan.package');
+    expect(readFileSync(path.join(packageDir, 'plan.md'))).toEqual(readFileSync(finalPlan));
+    expect(readFileSync(path.join(packageDir, 'README.md'), 'utf8')).toContain(
+      '# Mutated During Final Judge - change pack',
+    );
+    expect(readFileSync(path.join(packageDir, 'run.md'), 'utf8')).toContain(
+      '# Mutated During Final Judge - runbook',
+    );
+    expect(existsSync(path.join(packageDir, 'phase-1-fixture-phase.md'))).toBe(false);
+    expect(existsSync(path.join(packageDir, 'phase-1-mutated-phase.md'))).toBe(true);
+    expect(readFileSync(mutationCalls, 'utf8')).toBe('2');
+    expect(readFileSync(path.join(work, 'run.log'), 'utf8')).not.toContain('FINAL: clean');
+  });
+
+  it('does not let final Judge readiness substitute for rejected intermediate proof', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const intermediate = writeVerdict('intermediate-not-ready', false);
+    const finalReady = writeVerdict('final-ready', true);
+    const calls = path.join(tmp, 'claude-json.calls');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CLAUDE_JSON_RESULT: finalReady,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: intermediate,
+        FAKE_CLAUDE_JSON_RESULT_2: finalReady,
+        FAKE_CLAUDE_JSON_RESULT_3: finalReady,
+      }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'balanced',
+          fix: false,
+          translate: false,
+          workDir: work,
+        }),
+    );
+
+    expect(result.status).toBe('needs-review');
+    expect(result.readiness?.ready).toBe(true);
+    expect(result.convergence?.unresolvedCoverage).toContain('plan.v0:judge');
+    expect(result.convergence?.unresolvedCoverage).not.toContain('final-judge:coverage-unproved');
+    const state = JSON.parse(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')) as {
+      judgeApprovedPlanVersion?: number;
+    };
+    expect(state.judgeApprovedPlanVersion).toBeUndefined();
+  });
+
+  it('keeps a changed final coverage proof from cleaning the projected plan', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const intermediate = writeVerdict('intermediate-ready', true);
+    const finalUnproved = writeVerdict('final-first-unproved', true, 'first proof', false);
+    const finalProved = writeVerdict('final-second-proved', true, 'second proof', true);
+    const calls = path.join(tmp, 'claude-json.calls');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CLAUDE_JSON_RESULT: finalProved,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: intermediate,
+        FAKE_CLAUDE_JSON_RESULT_2: finalUnproved,
+        FAKE_CLAUDE_JSON_RESULT_3: finalProved,
+      }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'balanced',
+          fix: false,
+          translate: false,
+          workDir: work,
+        }),
+    );
+
+    expect(result.status).toBe('needs-review');
+    expect(result.convergence?.unresolvedCoverage).toContain('final-judge:inconsistent-verdict');
+    expect(result.convergence?.unresolvedCoverage).not.toContain('final-judge:coverage-unproved');
+  });
+
+  it('keeps intermediate and final Judge rationale out of normal run logging', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const intermediateSecret = 'INTERMEDIATE_JUDGE_PRIVATE_BODY_68f121';
+    const finalSecret = 'FINAL_JUDGE_PRIVATE_BODY_d19c04';
+    const intermediate = writeVerdict('intermediate-private', true, intermediateSecret);
+    const finalNotReady = writeVerdict('final-private', false, finalSecret);
+    const calls = path.join(tmp, 'claude-json.calls');
+
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CLAUDE_JSON_RESULT: finalNotReady,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: intermediate,
+        FAKE_CLAUDE_JSON_RESULT_2: finalNotReady,
+        FAKE_CLAUDE_JSON_RESULT_3: finalNotReady,
+      }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'balanced',
+          fix: false,
+          translate: false,
+          workDir: work,
+        }),
+    );
+
+    const runLog = readFileSync(path.join(work, 'run.log'), 'utf8');
+    const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
+    expect(runLog).not.toContain(intermediateSecret);
+    expect(runLog).not.toContain(finalSecret);
+    expect(summary).not.toContain(intermediateSecret);
+    expect(summary).not.toContain(finalSecret);
+    expect(result.reason).not.toContain(finalSecret);
+    expect(result.readiness?.rationale).toBe(finalSecret);
+    const record = readRunRecords(path.join(tmp, 'state'))[0];
+    expect(record?.finalReason).not.toContain(finalSecret);
+    expect(record?.finalReadiness?.rationale).toBe(finalSecret);
+    expect(
+      JSON.parse(readFileSync(path.join(work, 'judge.final.meta.json'), 'utf8')),
+    ).toMatchObject({
+      rationale: finalSecret,
+    });
+  });
 
   it('degrades exhausted schema-invalid final output to unknown needs-review', async () => {
     const critique = path.join(tmp, 'critique.json');
@@ -363,7 +632,7 @@ describe('final Judge termination and verdict matrix', () => {
     expect(result.exitCode).toBe(0);
     expect(result.status).toBe('needs-review');
     expect(result.readiness).toMatchObject({ evaluated: false, ready: null });
-    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(calls, 'utf8')).toBe('5');
     expect(existsSync(path.join(work, 'plan.final.md'))).toBe(true);
     expect(existsSync(path.join(work, 'judge.final.json'))).toBe(false);
     expect(

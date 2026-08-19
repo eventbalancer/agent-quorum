@@ -17,6 +17,8 @@ describe('qualityMatrix', () => {
       previousCritiques: 'compact',
       topology: 'compact',
       judge: 0,
+      completenessPromise: 'best-effort',
+      requiresExhaustiveScan: 0,
     });
     expect(qualityMatrix('balanced')).toEqual({
       sessionMode: 1,
@@ -24,6 +26,8 @@ describe('qualityMatrix', () => {
       previousCritiques: 'full',
       topology: 'full',
       judge: 1,
+      completenessPromise: 'cumulative',
+      requiresExhaustiveScan: 0,
     });
     expect(qualityMatrix('thorough')).toEqual({
       sessionMode: 0,
@@ -31,6 +35,8 @@ describe('qualityMatrix', () => {
       previousCritiques: 'full',
       topology: 'full',
       judge: 1,
+      completenessPromise: 'exhaustive',
+      requiresExhaustiveScan: 1,
     });
   });
 

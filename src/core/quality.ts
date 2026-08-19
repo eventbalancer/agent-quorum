@@ -1,4 +1,4 @@
-import type { Quality, Role, Runner } from '../types.js';
+import type { CompletenessPromise, Quality, Role, Runner } from '../types.js';
 
 export type CritiquesMode = 'compact' | 'full';
 
@@ -8,6 +8,8 @@ export interface QualityMatrix {
   previousCritiques: CritiquesMode;
   topology: CritiquesMode;
   judge: 0 | 1;
+  completenessPromise: CompletenessPromise;
+  requiresExhaustiveScan: 0 | 1;
 }
 
 export const QUALITY_VALUES: readonly Quality[] = ['quick', 'balanced', 'thorough'];
@@ -29,6 +31,8 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         previousCritiques: 'compact',
         topology: 'compact',
         judge: 0,
+        completenessPromise: 'best-effort',
+        requiresExhaustiveScan: 0,
       };
     case 'balanced':
       return {
@@ -37,6 +41,8 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         previousCritiques: 'full',
         topology: 'full',
         judge: 1,
+        completenessPromise: 'cumulative',
+        requiresExhaustiveScan: 0,
       };
     case 'thorough':
       return {
@@ -45,6 +51,8 @@ export function qualityMatrix(quality: Quality): QualityMatrix {
         previousCritiques: 'full',
         topology: 'full',
         judge: 1,
+        completenessPromise: 'exhaustive',
+        requiresExhaustiveScan: 1,
       };
   }
 }

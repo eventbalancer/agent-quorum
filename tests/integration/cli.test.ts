@@ -162,12 +162,16 @@ describe('exit-code matrix', () => {
       expect(result.stderr).toContain('FINAL: needs-review');
       const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
       expect(summary).toContain('readiness=not-ready');
-      expect(summary).toContain(`final_judge_rationale: ${rationale}`);
+      expect(summary).not.toContain(rationale);
+      expect(summary).not.toContain('final_judge_rationale:');
       expect(summary).toContain('- FINAL: needs-review');
-      expect(readRunRecords(path.join(tmp, 'state'))[0]).toMatchObject({
-        finalReason: `Final Judge: ${rationale}`,
+      const record = readRunRecords(path.join(tmp, 'state'))[0];
+      expect(record).toMatchObject({
         finalReadiness: { rationale },
+        finalConvergence: { satisfied: false },
       });
+      expect(record?.finalReason).toContain('Final Judge: not-ready');
+      expect(record?.finalReason).not.toContain(rationale);
       const message = stub.sent[0] ?? '';
       expect(message).toContain('status: needs-review');
       expect(message).toContain('structural: clean');

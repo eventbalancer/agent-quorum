@@ -21,11 +21,20 @@ import {
   type RetentionPolicy,
   type RunRecord,
 } from './core/run-store.js';
-import type { FinalReadiness, Quality, RunFinalStatus, RunOverrides } from './types.js';
+import type {
+  ConvergenceReport,
+  FinalReadiness,
+  Quality,
+  RunFinalStatus,
+  RunOverrides,
+} from './types.js';
 
 export { ExitCode } from './exit-codes.js';
 export type {
   FinalReadiness,
+  CompletenessPromise,
+  ConvergenceLimit,
+  ConvergenceReport,
   Quality,
   Role,
   RunFinalStatus,
@@ -107,6 +116,7 @@ export interface RunResult {
   structuralReason?: string;
   readiness?: FinalReadiness;
   readinessPath?: string;
+  convergence?: ConvergenceReport;
 }
 
 export interface CommandResult {
@@ -196,6 +206,7 @@ function toRunResult(outcome: RunOutcome): RunResult {
     ...(report.structuralReason !== undefined ? { structuralReason: report.structuralReason } : {}),
     ...(report.readiness !== undefined ? { readiness: report.readiness } : {}),
     ...(report.readinessPath !== undefined ? { readinessPath: report.readinessPath } : {}),
+    ...(report.convergence !== undefined ? { convergence: report.convergence } : {}),
   };
 }
 

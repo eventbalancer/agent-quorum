@@ -1,5 +1,6 @@
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import type { RoleInputLimits } from './config.js';
 
 export interface RunMetadataRole {
   runner: string;
@@ -32,6 +33,9 @@ export interface RunMetadata {
   creatorOneShot: string;
   previousCritiques: string;
   topology: string;
+  completenessPromise?: string;
+  issueCap?: number;
+  inputLimits?: RoleInputLimits;
   maxIters: number;
   fixPass: string;
   diffThreshold: number;
@@ -44,10 +48,30 @@ export interface RunMetadata {
   name: string;
 }
 
+type RunMetadataRow = [string, string];
+
+function convergenceMetadataRows(meta: RunMetadata): RunMetadataRow[] {
+  const rows: RunMetadataRow[] = [];
+  if (meta.completenessPromise !== undefined) {
+    rows.push(['completeness_promise', meta.completenessPromise]);
+  }
+  if (meta.issueCap !== undefined) {
+    rows.push(['issue_cap', String(meta.issueCap)]);
+  }
+  return rows;
+}
+
+function inputLimitMetadataRows(inputLimits: RoleInputLimits | undefined): RunMetadataRow[] {
+  return Object.entries(inputLimits ?? {}).flatMap(([role, limit]): RunMetadataRow[] => [
+    [`${role}_input_bound_source`, limit.source],
+    [`${role}_input_bound_tokens`, limit.tokens === null ? 'unknown' : String(limit.tokens)],
+  ]);
+}
+
 // Role rows follow the execution sequence (creator, critic, fixer, reviewer, judge;
 // translator is omitted here); run_id and name are appended as trailing rows.
 export function renderRunMetadata(meta: RunMetadata): string {
-  const rows: [string, string][] = [
+  const rows: RunMetadataRow[] = [
     ['pid', String(meta.pid)],
     ['pgid', meta.pgid],
     ['mode', meta.mode],
@@ -62,9 +86,11 @@ export function renderRunMetadata(meta: RunMetadata): string {
     ['creator_one_shot', meta.creatorOneShot],
     ['previous_critiques', meta.previousCritiques],
     ['topology', meta.topology],
+    ...convergenceMetadataRows(meta),
     ['max_iters', String(meta.maxIters)],
     ['fix_pass', meta.fixPass],
     ['diff_threshold', String(meta.diffThreshold)],
+    ...inputLimitMetadataRows(meta.inputLimits),
     ['creator_runner', meta.creator.runner],
     ['creator_model', meta.creator.model],
     ['creator_reasoning', meta.creator.reasoning],

@@ -120,6 +120,9 @@ const CRITIQUE_ISSUE_KEYS = [
   'suggested_fix',
   'confidence',
   'duplicate_of',
+  'evidence_refs',
+  'invariant_id',
+  'introduced_by_revision',
 ];
 
 export function sanitizeCritiqueJson(file: string, expectedVersion?: number | string): void {
@@ -127,7 +130,7 @@ export function sanitizeCritiqueJson(file: string, expectedVersion?: number | st
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   const obj: JsonObject = isJsonObject(parsed) ? parsed : {};
 
-  const extras = sortedExtraKeys(obj, ['plan_version', 'summary', 'issues']).join(',');
+  const extras = sortedExtraKeys(obj, ['plan_version', 'summary', 'issues', 'review']).join(',');
   if (extras) {
     log(`WARNING: dropping unknown top-level fields from critique: ${extras}`);
   }
@@ -171,7 +174,13 @@ export function sanitizeCritiqueJson(file: string, expectedVersion?: number | st
       suggested_fix: issue.suggested_fix ?? null,
       confidence: 'confidence' in issue ? issue.confidence : null,
       duplicate_of: 'duplicate_of' in issue ? issue.duplicate_of : null,
+      ...('evidence_refs' in issue ? { evidence_refs: issue.evidence_refs } : {}),
+      ...('invariant_id' in issue ? { invariant_id: issue.invariant_id } : {}),
+      ...('introduced_by_revision' in issue
+        ? { introduced_by_revision: issue.introduced_by_revision }
+        : {}),
     })),
+    ...('review' in obj ? { review: obj.review } : {}),
   });
 }
 
@@ -212,6 +221,7 @@ export function sanitizeUpdateJson(file: string, expectedVersion?: number | stri
     'issues',
     'applied',
     'rejected_append',
+    'systemic_dispositions',
   ]).join(',');
   if (extras) {
     log(`WARNING: dropping unknown top-level fields from update: ${extras}`);
@@ -225,6 +235,7 @@ export function sanitizeUpdateJson(file: string, expectedVersion?: number | stri
     issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
     applied: jqAlt(obj.applied, []),
     rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
+    ...('systemic_dispositions' in obj ? { systemic_dispositions: obj.systemic_dispositions } : {}),
   });
 }
 
@@ -238,6 +249,7 @@ export function sanitizeUpdateMetaJson(file: string, expectedVersion?: number | 
     'issues',
     'applied',
     'rejected_append',
+    'systemic_dispositions',
   ]).join(',');
   if (extras) {
     log(`WARNING: dropping unknown top-level fields from update metadata: ${extras}`);
@@ -250,6 +262,7 @@ export function sanitizeUpdateMetaJson(file: string, expectedVersion?: number | 
     issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
     applied: jqAlt(obj.applied, []),
     rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
+    ...('systemic_dispositions' in obj ? { systemic_dispositions: obj.systemic_dispositions } : {}),
   });
 }
 
@@ -262,6 +275,9 @@ export function combineUpdateJson(metaFile: string, markdownFile: string, outFil
     issues: meta.issues ?? null,
     applied: meta.applied ?? null,
     rejected_append: meta.rejected_append ?? null,
+    ...('systemic_dispositions' in meta
+      ? { systemic_dispositions: meta.systemic_dispositions }
+      : {}),
   };
   writeFileSync(outFile, `${JSON.stringify(combined, null, 2)}\n`);
 }

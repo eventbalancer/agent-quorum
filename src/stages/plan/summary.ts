@@ -2,12 +2,18 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { countNewlines } from '../../runtime/files.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { critiqueHealth, type CritiqueHealth } from '../../core/metrics.js';
+import { convergenceHealth, critiqueHealth, type CritiqueHealth } from '../../core/metrics.js';
 import { operatorInterventionsState } from './interventions.js';
 import { PACKAGE_DIR_NAME, SPLIT_DECISION_FILE, type PackageHealth } from './plan-package.js';
 import { planDocumentShapeHealth } from './plan-shape.js';
 import type { RunContext } from '../../core/run-context.js';
-import { readinessLabel, type FinalReadiness, type RunFinalStatus } from '../../types.js';
+import {
+  readinessLabel,
+  type ConvergenceReport,
+  type FinalReadiness,
+  type RunFinalStatus,
+} from '../../types.js';
+import { readConvergenceState } from '../../core/convergence.js';
 
 function jsonArrayLength(file: string, key: string): number {
   try {
@@ -69,6 +75,7 @@ export interface RunReport {
   readonly structuralReason?: string;
   readonly readiness?: FinalReadiness;
   readonly readinessPath?: string;
+  readonly convergence?: ConvergenceReport;
 }
 
 export interface RunReportFinalFacts {
@@ -78,6 +85,7 @@ export interface RunReportFinalFacts {
   readonly structuralReason: string;
   readonly readiness?: FinalReadiness;
   readonly readinessPath?: string;
+  readonly convergence?: ConvergenceReport;
 }
 
 function readSplitDecision(work: string): string | undefined {
@@ -94,6 +102,68 @@ function readSplitDecision(work: string): string | undefined {
   }
 }
 
+function relationshipCoverage(work: string, iteration: number): string {
+  const systemCheckFile = path.join(work, `system-check.v${iteration}.json`);
+  if (!existsSync(systemCheckFile)) {
+    return '0/0';
+  }
+  try {
+    const systemCheck = JSON.parse(readFileSync(systemCheckFile, 'utf8')) as JsonValue;
+    const relationships =
+      isJsonObject(systemCheck) && Array.isArray(systemCheck.relationships)
+        ? systemCheck.relationships.filter(isJsonObject)
+        : [];
+    const covered = relationships.filter(
+      (item) => item.disposition === 'covered' || item.disposition === 'not-applicable',
+    ).length;
+    return `${covered}/${relationships.length}`;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+function iterationSummaryLine(ctx: RunContext, iteration: number, critique: string): string {
+  const raw = jsonArrayLength(critique, 'issues');
+  const update = path.join(ctx.work, `update.v${iteration}.json`);
+  const accepted = updateIssueCount(
+    update,
+    (issue) => issue.verdict === 'accept' || issue.verdict === 'downgrade',
+  );
+  const applied = jsonArrayLength(update, 'applied');
+  const health = critiqueHealth(ctx.work, ctx.skills.criticSchema, iteration, critique);
+  const convergence = convergenceHealth(
+    ctx.work,
+    ctx.skills.criticSchema,
+    iteration,
+    critique,
+    ctx.provider.projectRoot,
+  );
+  const deliveries = ctx.convergence.contextDeliveries.filter(
+    (item) => item.planVersion === iteration,
+  );
+  const mandatoryBytes = deliveries.reduce((sum, item) => sum + item.mandatoryBytes, 0);
+  const optionalBytes = deliveries.reduce((sum, item) => sum + item.optionalBytes, 0);
+  const planFile = path.join(ctx.work, `plan.v${iteration}.md`);
+  const planBytes = existsSync(planFile) ? statSync(planFile).size : 0;
+  const planLines = existsSync(planFile) ? countNewlines(readFileSync(planFile, 'utf8')) : 0;
+  const state = readConvergenceState(path.join(ctx.work, `convergence.v${iteration}.json`));
+  const activeInvariants = state?.invariants.filter((item) => item.status === 'active').length ?? 0;
+  const coveredInvariants =
+    state?.invariants.filter((item) => item.status === 'resolved').length ?? 0;
+  const unresolvedOccurrences =
+    state?.invariants.reduce(
+      (count, invariant) =>
+        count +
+        invariant.occurrences.filter(
+          (occurrence) =>
+            occurrence.disposition === 'unresolved' || occurrence.disposition === 'violated',
+        ).length,
+      0,
+    ) ?? 0;
+  const omittedCategories = [...new Set(deliveries.flatMap((item) => item.omittedCategories))];
+  return `- v${iteration}: critic=${raw}, accepted=${accepted}, applied=${applied}, addressed=${health.addressed}, new=${health.newIssues}, invalid=${health.invalid}, valid_addressed_pct=${health.pct}, lineage=${JSON.stringify(convergence.lineage)}, grounding=${JSON.stringify(convergence.grounding)}, evidence_kinds=${JSON.stringify(convergence.evidenceKinds)}, plan_lines=${planLines}, plan_bytes=${planBytes}, retained_mandatory_bytes=${mandatoryBytes}, retained_optional_bytes=${optionalBytes}, issue_budget=${state?.issueBudget.used ?? raw}/${state?.issueBudget.limit ?? 'unknown'}, issue_budget_exhausted=${String(state?.issueBudget.exhausted ?? false)}, invariants_active=${activeInvariants}, invariants_covered=${coveredInvariants}, invariant_occurrences_unresolved=${unresolvedOccurrences}, relationship_coverage=${relationshipCoverage(ctx.work, iteration)}, omitted_optional_categories=${omittedCategories.join('|') || 'none'}, continuation_or_stop_reason=${state?.stopReason ?? 'unavailable'}`;
+}
+
 export function buildRunReport(
   ctx: RunContext,
   iter: number,
@@ -104,6 +174,13 @@ export function buildRunReport(
   const packageDir = path.join(ctx.work, PACKAGE_DIR_NAME);
   const splitDecision = readSplitDecision(ctx.work);
   const health = finalHealth(ctx);
+  const convergence: ConvergenceReport = {
+    promise: ctx.convergence.promise,
+    satisfied: ctx.convergence.satisfied,
+    artifactPath: path.join(ctx.work, 'convergence.final.json'),
+    exhaustedLimits: [...ctx.convergence.exhaustedLimits],
+    unresolvedCoverage: [...ctx.convergence.unresolvedCoverage],
+  };
   return {
     workDir: ctx.work,
     iterations: iter,
@@ -122,6 +199,7 @@ export function buildRunReport(
           ...(facts.readinessPath !== undefined ? { readinessPath: facts.readinessPath } : {}),
         }
       : {}),
+    convergence,
   };
 }
 
@@ -168,6 +246,17 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
     `- final_references: stale=${input.finalStale}, ambiguous=${input.finalAmbiguous}, unresolved=${input.finalUnresolved}`,
   );
   const facts = input.finalFacts;
+  if (facts.convergence !== undefined) {
+    lines.push(
+      `- convergence: promise=${facts.convergence.promise}, satisfied=${String(facts.convergence.satisfied)}, exhausted_limits=${facts.convergence.exhaustedLimits.join(',') || 'none'}, unresolved_coverage=${facts.convergence.unresolvedCoverage.length}`,
+    );
+    lines.push(`- convergence_artifact: \`${facts.convergence.artifactPath}\``);
+    if (facts.convergence.unresolvedCoverage.length > 0) {
+      lines.push(
+        `- convergence_unresolved_ids: ${facts.convergence.unresolvedCoverage.join(', ')}`,
+      );
+    }
+  }
   lines.push(`- structural_status: ${facts.structuralStatus}`);
   if (facts.structuralReason !== '') {
     lines.push(`- structural_reason: ${facts.structuralReason}`);
@@ -176,7 +265,6 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
     lines.push(
       `- final_judge: evaluated=${String(facts.readiness.evaluated)}, readiness=${readinessLabel(facts.readiness.ready)}, plan_sha256=${facts.readiness.planSha256}`,
     );
-    lines.push(`- final_judge_rationale: ${facts.readiness.rationale}`);
     if (facts.readinessPath !== undefined) {
       lines.push(`- final_judge_metadata: \`${facts.readinessPath}\``);
     }
@@ -190,7 +278,7 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
     if (input.packageHealth !== undefined) {
       const pkgHealth = input.packageHealth;
       lines.push(
-        `- package_validation: ${pkgHealth.ok ? 'ok' : 'broken'} (missing_files=${pkgHealth.missingFiles}, missing_headings=${pkgHealth.missingHeadings}, broken_cross_refs=${pkgHealth.brokenCrossRefs}, forbidden_shell=${pkgHealth.forbiddenShell}, references=${pkgHealth.references.stale}/${pkgHealth.references.ambiguous}/${pkgHealth.references.unresolved})`,
+        `- package_validation: ${pkgHealth.ok ? 'ok' : 'broken'} (missing_files=${pkgHealth.missingFiles}, missing_headings=${pkgHealth.missingHeadings}, broken_cross_refs=${pkgHealth.brokenCrossRefs}, forbidden_shell=${pkgHealth.forbiddenShell}, system_coverage_missing=${pkgHealth.systemCoverageMissing ?? 0}, references=${pkgHealth.references.stale}/${pkgHealth.references.ambiguous}/${pkgHealth.references.unresolved})`,
       );
     }
   }
@@ -213,17 +301,7 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
     if (!existsSync(critique)) {
       continue;
     }
-    const raw = jsonArrayLength(critique, 'issues');
-    const update = path.join(ctx.work, `update.v${i}.json`);
-    const acc = updateIssueCount(
-      update,
-      (issue) => issue.verdict === 'accept' || issue.verdict === 'downgrade',
-    );
-    const app = jsonArrayLength(update, 'applied');
-    const health = critiqueHealth(ctx.work, ctx.skills.criticSchema, i, critique);
-    lines.push(
-      `- v${i}: critic=${raw}, accepted=${acc}, applied=${app}, addressed=${health.addressed}, new=${health.newIssues}, invalid=${health.invalid}, valid_addressed_pct=${health.pct}`,
-    );
+    lines.push(iterationSummaryLine(ctx, i, critique));
   }
   lines.push('');
   const rejectedContent = existsSync(rejectedLog) ? readFileSync(rejectedLog, 'utf8') : '';

@@ -13,6 +13,11 @@ interface PlanFrontmatterPhase {
   readonly effort: string;
 }
 
+export interface WriteStructuredPlanOptions {
+  readonly frontmatter?: boolean;
+  readonly status?: 'clean' | 'needs-review' | 'blocked';
+}
+
 function planFrontmatterLines(
   phaseCount: number,
   effortTotal: string,
@@ -43,11 +48,11 @@ export function writeFakeBin(dir: string): void {
 export function writeStructuredPlanFile(
   file: string,
   title: string,
-  opts: { frontmatter?: boolean } = {},
+  opts: WriteStructuredPlanOptions = {},
 ): void {
   const withFrontmatter = opts.frontmatter !== false;
   const header = withFrontmatter
-    ? planFrontmatterLines(1, '~1h', [{ name: 'P1 — Fixture Phase', effort: '~1h' }])
+    ? planFrontmatterLines(1, '~1h', [{ name: 'P1 — Fixture Phase', effort: '~1h' }], opts.status)
     : [];
   const workPlan = withFrontmatter
     ? [
@@ -196,7 +201,26 @@ function writeJsonFixture(file: string, value: JsonValue): void {
 }
 
 export function writeCritique(file: string, issues: JsonValue[]): void {
-  writeJsonFixture(file, { plan_version: 0, summary: 'fixture critique', issues });
+  writeJsonFixture(file, {
+    plan_version: 0,
+    summary: 'fixture critique',
+    issues,
+    review: {
+      considered_context: [
+        'original-scope',
+        'authoritative-system-facts',
+        'operator-decisions',
+        'material-findings',
+        'active-invariants',
+        'quality-and-limits',
+      ],
+      invariant_assessments: [],
+      scope_coverage: ['declared-scope', 'direct-plan-scope'],
+      issue_budget: { limit: 8, used: issues.length, exhausted: issues.length >= 8 },
+      scan_complete: issues.length < 8,
+      unresolved_coverage: [],
+    },
+  });
 }
 
 export function emptyCritique(file: string): void {
@@ -236,6 +260,15 @@ export function writeAcceptUpdate(
       },
     ],
     applied: [issue],
+    systemic_dispositions: [
+      {
+        issue_id: issue,
+        scope: 'local',
+        rationale: 'Fixture evidence proves this finding is confined to the named plan location.',
+        evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+        invariant: null,
+      },
+    ],
     rejected_append: [],
   });
 }

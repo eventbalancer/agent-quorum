@@ -7,6 +7,7 @@ import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { validateSchema } from '../../core/schema.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
 import type { FinalReadiness } from '../../types.js';
+import { retainedRolePrompt } from './retained-context.js';
 
 const FINAL_PLAN_ARTIFACT = 'plan.final.md';
 const FINAL_JUDGE_RAW = 'judge.final.raw';
@@ -18,18 +19,29 @@ const UNKNOWN_RATIONALE = 'Final Judge did not produce a valid verdict after pro
 interface JudgeVerdict {
   readonly ready: boolean;
   readonly rationale: string;
+  readonly coverageComplete: boolean;
+  readonly unresolvedOccurrenceIds: readonly string[];
+  readonly assessedInvariantIds: readonly string[];
 }
 
-const NOT_READY: JudgeVerdict = { ready: false, rationale: '' };
+const NOT_READY = { ready: false, rationale: '' } as const;
+
+export interface JudgeResult {
+  readonly ready: boolean;
+  readonly rationale: string;
+}
 
 export interface FinalJudgeResult {
   readonly readiness: FinalReadiness;
   readonly metadataPath: string;
+  readonly coverageProved: boolean;
+  readonly candidateUnchanged: boolean;
 }
 
 interface JudgePromptOptions {
   readonly scope?: 'intermediate' | 'final';
   readonly planSha256?: string;
+  readonly planContent?: string;
 }
 
 interface FinalJudgeFiles {
@@ -71,7 +83,38 @@ function readJudgeVerdict(outputFile: string, schemaFile: string): JudgeVerdict 
   return {
     ready: parsed.ready,
     rationale: typeof parsed.rationale === 'string' ? parsed.rationale : '',
+    coverageComplete: parsed.coverage_complete === true,
+    unresolvedOccurrenceIds: Array.isArray(parsed.unresolved_occurrence_ids)
+      ? parsed.unresolved_occurrence_ids.filter(
+          (id): id is string => typeof id === 'string' && id !== '',
+        )
+      : ['coverage-metadata-unavailable'],
+    assessedInvariantIds: Array.isArray(parsed.invariant_assessments)
+      ? parsed.invariant_assessments
+          .filter(isJsonObject)
+          .filter(
+            (assessment) =>
+              assessment.satisfied === true &&
+              Array.isArray(assessment.unresolved_occurrence_ids) &&
+              assessment.unresolved_occurrence_ids.length === 0,
+          )
+          .map((assessment) => assessment.invariant_id)
+          .filter((id): id is string => typeof id === 'string')
+      : [],
   };
+}
+
+function judgeCoverageProved(ctx: RunContext, verdict: JudgeVerdict | undefined): boolean {
+  if (verdict === undefined) {
+    return false;
+  }
+  return (
+    verdict.coverageComplete &&
+    verdict.unresolvedOccurrenceIds.length === 0 &&
+    ctx.convergence.invariants.every((invariant) =>
+      verdict.assessedInvariantIds.includes(invariant.id),
+    )
+  );
 }
 
 function finalJudgeRationale(verdict: JudgeVerdict): string {
@@ -112,7 +155,9 @@ export function judgePrompt(
   critiqueFile: string | undefined,
   options: JudgePromptOptions = {},
 ): string {
-  const plan = options.scope === 'final' ? readFileSync(planFile, 'utf8') : readStripped(planFile);
+  const plan =
+    options.planContent ??
+    (options.scope === 'final' ? readFileSync(planFile, 'utf8') : readStripped(planFile));
   const critiqueContext =
     critiqueFile === undefined
       ? 'No critique context is available. Evaluate the plan independently.'
@@ -127,12 +172,21 @@ export function judgePrompt(
 
 export async function runJudge(
   ctx: RunContext,
-  _iter: number,
+  iter: number,
   planFile: string,
   critiqueFile: string,
   outFile: string,
-): Promise<JudgeVerdict> {
-  const prompt = judgePrompt(planFile, critiqueFile);
+): Promise<JudgeResult> {
+  delete ctx.convergence.judgeApprovedPlanVersion;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'judge',
+    stage: 'intermediate-readiness',
+    planVersion: iter,
+    skillFile: ctx.skills.judgeSkill,
+    schemaFile: ctx.skills.judgeSchema,
+    basePrompt: judgePrompt(planFile, critiqueFile),
+  });
   const status = await providerRun(
     ctx.provider,
     'judge',
@@ -152,6 +206,13 @@ export async function runJudge(
   if (verdict === undefined) {
     log('WARNING: judge output failed schema validation — treating as not ready');
     return NOT_READY;
+  }
+  const coverageProved = judgeCoverageProved(ctx, verdict);
+  if (verdict.ready && coverageProved) {
+    ctx.convergence.judgeApprovedPlanVersion = iter;
+    ctx.convergence.unresolvedCoverage = ctx.convergence.unresolvedCoverage.filter(
+      (id) => id !== `plan.v${iter}:judge`,
+    );
   }
   return {
     ready: verdict.ready,
@@ -229,17 +290,35 @@ function persistFinalJudgeResult(files: FinalJudgeFiles, readiness: FinalReadine
 
 export async function runFinalJudge(ctx: RunContext, finalPlan: string): Promise<FinalJudgeResult> {
   const files = resolveFinalJudgeFiles(ctx.work);
-  const planSha256 = createHash('sha256').update(readFileSync(finalPlan)).digest('hex');
+  const planBytes = readFileSync(finalPlan);
+  const planSha256 = createHash('sha256').update(planBytes).digest('hex');
   rmSync(files.raw, { force: true });
   rmSync(files.verdict, { force: true });
   rmSync(files.metadata, { force: true });
 
-  const prompt = judgePrompt(finalPlan, resolveFinalCritiqueFile(ctx), {
-    scope: 'final',
-    planSha256,
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'judge',
+    stage: 'final-readiness',
+    planVersion: ctx.convergence.planVersion,
+    skillFile: ctx.skills.judgeSkill,
+    schemaFile: ctx.skills.judgeSchema,
+    basePrompt: judgePrompt(finalPlan, resolveFinalCritiqueFile(ctx), {
+      scope: 'final',
+      planSha256,
+      planContent: planBytes.toString('utf8'),
+    }),
+    persistVersionedState: false,
   });
   const verdict = await requestFinalJudge(ctx, files.raw, prompt);
+  const candidateUnchanged =
+    createHash('sha256').update(readFileSync(finalPlan)).digest('hex') === planSha256;
   const readiness = finalReadiness(verdict, planSha256);
   persistFinalJudgeResult(files, readiness);
-  return { readiness, metadataPath: files.metadata };
+  return {
+    readiness,
+    metadataPath: files.metadata,
+    coverageProved: candidateUnchanged && judgeCoverageProved(ctx, verdict),
+    candidateUnchanged,
+  };
 }

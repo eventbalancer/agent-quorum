@@ -60,15 +60,20 @@ describe('package exports (ESM + CJS consumability)', () => {
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   });
 
-  it('publishes additive final readiness types without narrowing legacy run records', () => {
+  it('publishes additive final readiness and convergence types without narrowing legacy records', () => {
     const consumer = path.join(tempDir, 'consumer.ts');
     writeFileSync(
       consumer,
-      "import type { FinalReadiness, RunFinalStatus, RunRecord } from 'agent-quorum';\n" +
+      "import type { CompletenessPromise, ConvergenceLimit, ConvergenceReport, FinalReadiness, RunFinalStatus, RunRecord, RunResult } from 'agent-quorum';\n" +
         "const status: RunFinalStatus = 'needs-review';\n" +
         "const readiness: FinalReadiness = { evaluated: false, ready: null, rationale: 'unknown', planSha256: 'a'.repeat(64) };\n" +
+        "const promise: CompletenessPromise = 'cumulative';\n" +
+        "const limit: ConvergenceLimit = 'iteration-cap';\n" +
+        "const convergence: ConvergenceReport = { promise, satisfied: false, artifactPath: '/tmp/convergence.final.json', exhaustedLimits: [limit], unresolvedCoverage: ['plan.v1:review'] };\n" +
+        "const result: Pick<RunResult, 'convergence'> = { convergence };\n" +
+        "const durable: Pick<RunRecord, 'finalConvergence'> = { finalConvergence: convergence };\n" +
         "const legacy: Pick<RunRecord, 'finalStatus'> = { finalStatus: 'legacy-status' };\n" +
-        'void [status, readiness, legacy];\n',
+        'void [status, readiness, promise, limit, convergence, result, durable, legacy];\n',
     );
     const result = runConsumer([
       path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),

@@ -11,6 +11,21 @@
     "rationale": {
       "type": "string",
       "maxLength": 700
+    },
+    "coverage_complete": { "type": "boolean" },
+    "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } },
+    "invariant_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["invariant_id", "satisfied", "unresolved_occurrence_ids"],
+        "properties": {
+          "invariant_id": { "type": "string" },
+          "satisfied": { "type": "boolean" },
+          "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
     }
   }
 }

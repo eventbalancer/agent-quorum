@@ -25,6 +25,23 @@ afterEach(() => {
 });
 
 describe('resolveConfig validation', () => {
+  it('resolves per-role input bounds from operator, environment, registry, then unknown', () => {
+    const { config, provenance } = resolveConfig({
+      home: tmp,
+      env: {
+        AGENT_QUORUM_CRITIC_INPUT_TOKEN_LIMIT: '12345',
+        AGENT_QUORUM_FIXER_MODEL: 'unregistered-model',
+      },
+      overrides: { config: { roles: { creator: { inputTokenLimit: 23456 } } } },
+    });
+    expect(config.inputLimits.creator).toEqual({ tokens: 23456, source: 'operator' });
+    expect(config.inputLimits.critic).toEqual({ tokens: 12345, source: 'operator' });
+    expect(config.inputLimits.reviewer.source).toBe('model-registry');
+    expect(config.inputLimits.fixer).toEqual({ tokens: null, source: 'unknown' });
+    expect(provenance.get('roles.creator.inputTokenLimit')).toBe('override');
+    expect(provenance.get('roles.critic.inputTokenLimit')).toBe('env');
+  });
+
   it('halts on a non-positive iters', () => {
     writeStore({ settings: { iters: 0 } });
     const capture = captureStderr();

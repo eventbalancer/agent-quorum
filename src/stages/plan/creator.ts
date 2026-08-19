@@ -6,7 +6,6 @@ import { err, log } from '../../runtime/log.js';
 import { providerRun } from '../../providers/provider.js';
 import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { operatorInterventionsContext } from './interventions.js';
 import {
   normalizePlanDocument,
   planDocumentShapeOk,
@@ -20,6 +19,7 @@ import {
   validateSchema,
 } from '../../core/schema.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
+import { retainedRolePrompt } from './retained-context.js';
 
 const ONE_SHOT_OUTPUT_MODE =
   'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
@@ -48,22 +48,10 @@ function jqRawRender(value: JsonValue | undefined): string {
   return JSON.stringify(value ?? null, null, 2);
 }
 
-function creatorUpdatePrompt(
-  ctx: RunContext,
-  planBlock: string,
-  critiqueFile: string,
-  outputMode: string,
-): string {
-  const interventions = operatorInterventionsContext(ctx.work, 'creator');
-  const interventionsBlock = interventions !== '' ? `\n${interventions}` : '';
-  const rejected = readStripped(path.join(ctx.work, 'rejected-log.jsonl'));
+function creatorUpdatePrompt(planBlock: string, critiqueFile: string, outputMode: string): string {
   return (
     `${planBlock}\n` +
-    `${interventionsBlock}\n` +
-    '\n' +
     `## Critique\n${readStripped(critiqueFile)}\n` +
-    '\n' +
-    `## Rejected log\n${rejected}\n` +
     '\n' +
     `## Output mode\n${outputMode}`
   );
@@ -94,20 +82,24 @@ function requireCreatorCreateShape(ctx: RunContext, outFile: string): void {
 
 export async function runCreatorCreate(
   ctx: RunContext,
-  promptFile: string,
+  _promptFile: string,
   outFile: string,
 ): Promise<void> {
-  const interventions = operatorInterventionsContext(ctx.work, 'creator');
-  const interventionsBlock = interventions !== '' ? `\n${interventions}` : '';
-  const prompt =
-    `## Prompt\n${readStripped(promptFile)}\n` +
-    `${interventionsBlock}\n` +
-    '\n' +
+  const basePrompt =
     '## Output mode\n' +
     'Return the full implementation plan as clean Markdown only.\n' +
     'Follow the Plan Document Contract from the plan-creator skill.\n' +
     'This is the definitive plan, not a draft for later review to expand: fully specify the in-scope work on this first pass — concrete file lists, the complete importer/consumer set, exact per-phase edits and gates. When the work changes file/directory layout or component topology, render the target as a diagram in ## Target State (a before→after directory tree for file moves), not prose alone.\n' +
     'Include the final required ## Impact Graph section with a Mermaid flowchart.';
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'create',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: '',
+    basePrompt,
+  });
 
   const status = await providerRun(
     ctx.provider,
@@ -145,7 +137,15 @@ async function runCreatorUpdateOneShot(
 ): Promise<number> {
   const planVersion = iter + 1;
   const planBlock = `## Plan\n${readStripped(planFile)}`;
-  const prompt = creatorUpdatePrompt(ctx, planBlock, critiqueFile, ONE_SHOT_OUTPUT_MODE);
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'revision-and-metadata',
+    planVersion: iter,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.creatorSchema,
+    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, ONE_SHOT_OUTPUT_MODE),
+  });
 
   const status = await providerRun(
     ctx.provider,
@@ -184,6 +184,9 @@ async function runCreatorUpdateOneShot(
     issues: updateObj.issues ?? null,
     applied: updateObj.applied ?? null,
     rejected_append: updateObj.rejected_append ?? null,
+    ...('systemic_dispositions' in updateObj
+      ? { systemic_dispositions: updateObj.systemic_dispositions }
+      : {}),
   };
   writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`);
   sanitizeUpdateMetaJson(metaFile, planVersion);
@@ -195,12 +198,21 @@ async function runCreatorUpdateOneShot(
 
 async function runCreatorUpdatePlan(
   ctx: RunContext,
+  iter: number,
   planFile: string,
   critiqueFile: string,
   outFile: string,
 ): Promise<void> {
   const planBlock = `## Plan\n${readStripped(planFile)}`;
-  const prompt = creatorUpdatePrompt(ctx, planBlock, critiqueFile, SPLIT_PLAN_OUTPUT_MODE);
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'markdown-revision',
+    planVersion: iter,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: '',
+    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, SPLIT_PLAN_OUTPUT_MODE),
+  });
   const status = await providerRun(
     ctx.provider,
     'creator',
@@ -219,13 +231,22 @@ async function runCreatorUpdatePlan(
 
 async function runCreatorUpdateMeta(
   ctx: RunContext,
+  iter: number,
   originalPlan: string,
   revisedPlan: string,
   critiqueFile: string,
   outFile: string,
 ): Promise<void> {
   const planBlock = `## Original plan\n${readStripped(originalPlan)}\n\n## Revised plan\n${readStripped(revisedPlan)}`;
-  const prompt = creatorUpdatePrompt(ctx, planBlock, critiqueFile, SPLIT_META_OUTPUT_MODE);
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'update-metadata',
+    planVersion: iter,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.creatorMetaSchema,
+    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, SPLIT_META_OUTPUT_MODE),
+  });
   const status = await providerRun(
     ctx.provider,
     'creator',
@@ -277,14 +298,14 @@ export async function runCreatorUpdate(
     rmSync(nextFile, { force: true });
   }
 
-  await runCreatorUpdatePlan(ctx, planFile, critiqueFile, revisionFile);
+  await runCreatorUpdatePlan(ctx, iter, planFile, critiqueFile, revisionFile);
   if (!nonEmptyFile(revisionFile)) {
     err('creator produced empty revised plan');
     throw new HaltError('creator produced empty revised plan', 4, true);
   }
   normalizePlanDocument(revisionFile);
 
-  await runCreatorUpdateMeta(ctx, planFile, revisionFile, critiqueFile, metaFile);
+  await runCreatorUpdateMeta(ctx, iter, planFile, revisionFile, critiqueFile, metaFile);
   sanitizeUpdateMetaJson(metaFile, planVersion);
   if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) {
     throw new HaltError('update metadata failed schema validation', 3, true);
@@ -310,17 +331,24 @@ export interface ClarifyQuestion {
 
 export async function runCreatorClarify(
   ctx: RunContext,
-  promptFile: string,
+  _promptFile: string,
   outFile: string,
 ): Promise<number> {
   const localeInstruction = `Write all operator-facing strings in the requested locale: ${ctx.settings.locale}.`;
-  const prompt =
-    `## Prompt\n${readStripped(promptFile)}\n` +
-    '\n' +
+  const basePrompt =
     '## Output mode: clarification questions\n' +
     'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
     `${localeInstruction}\n` +
     'Surface only the blocking questions whose answers would materially change the plan, following the Clarify Mode rules in the plan-creator skill. Resolve everything you can from the repo yourself; return {"questions": []} when nothing is genuinely blocking.';
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'clarification',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.clarifySchema,
+    basePrompt,
+  });
 
   const status = await providerRun(
     ctx.provider,

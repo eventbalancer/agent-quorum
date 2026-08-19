@@ -93,7 +93,7 @@ default is the built-in fallback.
 | `settings.fix`               | _(override/store only; `--fix`)_     | `true`     | reference fix pass                                                   |
 | `settings.translate`         | `AGENT_QUORUM_TRANSLATE`             | `false`    | localized companion plan pass                                        |
 | `settings.locale`            | `AGENT_QUORUM_LOCALE`                | `en`       | interaction/companion locale (non-`en` enables translate unless off) |
-| `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`        | `5`        | stable-diff convergence threshold                                    |
+| `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`        | `5`        | stable-diff telemetry threshold; never a proof gate                  |
 | `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | provider retry attempts                                              |
 | `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`   | `10`       | delay between retries                                                |
 
@@ -105,6 +105,20 @@ tool-permission fields; the per-role reasoning level is derived from
 `settings.quality` at runtime rather than stored per role. `runner`/`model`
 accept an env override `AGENT_QUORUM_<ROLE>_RUNNER` / `_MODEL`; tool fields are
 store-only and accept a non-empty string or string array (joined with commas).
+
+Each role also accepts an optional positive `inputTokenLimit`, with environment
+override `AGENT_QUORUM_<ROLE>_INPUT_TOKEN_LIMIT`. Resolution is operator
+override, exact-model safe-input registry, then `unknown`. The run records the
+source and value in `run.meta.tsv`. Input sizing records UTF-8 bytes for the
+skill, schema, and rendered prompt plus a fixed conservative wrapper allowance
+as telemetry. The byte estimate does not block provider calls, reduce retained
+context, or downgrade convergence;
+`inputTokenLimit` remains readable for configuration and artifact compatibility
+until admission can use provider/model-appropriate token evidence.
+
+Quality promises are additive to the existing topology: `quick` is
+`best-effort`, `balanced` is cumulative system-aware coverage, and `thorough` is
+exhaustive in-scope coverage with no optional category omitted.
 
 | Tool field (per role)                                                          | Applies to                             |
 | ------------------------------------------------------------------------------ | -------------------------------------- |
@@ -158,7 +172,16 @@ Provider diagnostics keep the metadata-only log contract: normal logs emit only 
 `diagnostics →` reference; raw prompt/plan/source/tool/stderr bodies never reach
 standard output. Capture is best-effort and never changes a provider exit code.
 
-#### Claude structured-output compatibility
+#### Provider structured-output compatibility
+
+Codex Structured Outputs requires every property declared by an object schema to
+also appear in that object's `required` array. Before a Codex JSON-mode call,
+agent-quorum writes a temporary strict projection of the canonical additive role
+schema: canonical optional properties become required and nullable. After a
+successful call, null placeholders for those optional properties are removed,
+the temporary schema is deleted, and the payload is validated against the
+unchanged canonical draft 2019-09 contract. Legacy payloads therefore remain
+schema-readable while current Codex calls satisfy the stricter provider format.
 
 Claude Code `2.1.205` is the verified structured-output baseline. The canonical
 role contracts stay on JSON Schema draft 2019-09 for local validation; immediately
@@ -185,7 +208,7 @@ is needed for deeper troubleshooting.
 | `split.minPhases`     | `AGENT_QUORUM_SPLIT_MIN_PHASES` | `5`     | phase count that triggers an `auto` split                |
 | `status.maxPlanLines` | `AGENT_QUORUM_MAX_PLAN_LINES`   | `900`   | plan-size warning threshold and `auto` split size signal |
 
-`auto` emits a navigable `plan.package/` when the converged, post-fix
+`auto` emits a navigable `plan.package/` when the latest post-fix canonical
 `plan.final.md` exceeds `status.maxPlanLines` **or** has at least
 `split.minPhases` Work Plan phases; `always` forces a package; `never` keeps a
 single document. Every run records the decision in `plan.split.json`;

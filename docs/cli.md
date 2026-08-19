@@ -71,14 +71,14 @@ agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [
 agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [--locale LOCALE] [--no-translate] --prompt <prompt.md>
 ```
 
-| Flag                                  | Purpose                                                 |
-| ------------------------------------- | ------------------------------------------------------- |
-| `--iters N` / `--max-iters N`         | Set the iteration cap.                                  |
-| `--quality {quick,balanced,thorough}` | Select the role-call topology and session behavior.     |
-| `--fix` / `--no-fix`                  | Enable or skip the post-convergence reference fix pass. |
-| `--locale <tag>`                      | Set the human-interaction locale; defaults to `en`.     |
-| `--translate` / `--no-translate`      | Enable or skip the companion final-plan localization.   |
-| `--prompt <file>`                     | Create `plan.v0` from a prompt before the loop starts.  |
+| Flag                                  | Purpose                                                |
+| ------------------------------------- | ------------------------------------------------------ |
+| `--iters N` / `--max-iters N`         | Set the iteration cap.                                 |
+| `--quality {quick,balanced,thorough}` | Select the role-call topology and session behavior.    |
+| `--fix` / `--no-fix`                  | Enable or skip the post-loop reference fix pass.       |
+| `--locale <tag>`                      | Set the human-interaction locale; defaults to `en`.    |
+| `--translate` / `--no-translate`      | Enable or skip the companion final-plan localization.  |
+| `--prompt <file>`                     | Create `plan.v0` from a prompt before the loop starts. |
 
 Flags accept both `--flag value` and `--flag=value` forms for `--iters` /
 `--max-iters`, `--quality`, and `--locale`. `--locale <tag>` selects the
@@ -90,7 +90,8 @@ usage and exit 1. One positional input only.
 
 `--quality` also controls Judge readiness. `balanced` and `thorough` enable an
 intermediate Judge call after a critic pass with no open blocker or major issue;
-`ready: true` can end the loop early, but that evidence remains intermediate.
+`ready: true` is only one convergence prerequisite and cannot override
+unresolved invariant, system, scan, or limit evidence.
 After the fix pass, every non-blocked run at those quality levels evaluates the
 exact canonical `plan.final.md` again. `quick` skips Judge entirely.
 
@@ -106,8 +107,24 @@ unknown verdict after provider retries produces `needs-review` with exit 0.
 `judge.final.meta.json` binds the reported result to the SHA-256 of the exact
 canonical plan, while `judge.final.json` exists only for a schema-valid verdict.
 The summary records `structural_status` and optional `structural_reason`; a
-Judge-enabled run also records `final_judge`, `final_judge_rationale`, and
-`final_judge_metadata`.
+Judge-enabled run also records the metadata-only `final_judge` classification
+and `final_judge_metadata` path. The Judge rationale remains available in the
+structured readiness artifact and public result, but is not copied into normal
+logs or the summary.
+
+`quick`, `balanced`, and `thorough` promise best-effort, cumulative, and
+exhaustive coverage respectively. When the issue budget, iteration cap,
+or authoritative scope prevents proof, the latest usable plan is retained with
+frontmatter `status: needs-review`, exit 0, and explicit limit/coverage IDs in
+`summary.md` and `convergence.final.json`. Input byte estimates and configured
+token limits remain telemetry and do not currently block provider calls. Logs
+never call an unproved result clean or converged.
+
+With a positional existing plan, the original request is explicitly
+unavailable and the plan becomes the declared scope. A direct-plan run can be
+`clean` only when the critic reports a complete scan and explicitly verifies
+`declared-scope` or `direct-plan-scope`; otherwise the latest plan is retained as
+`needs-review` with the `authoritative-scope` limitation.
 
 Before the loop starts, every runner the effective config selects is
 preflighted: installation on `PATH`, then an authentication probe
@@ -176,7 +193,13 @@ run stays reachable by `id`/`--last`.
 With a PID — **any** process in the run's tree, including provider children —
 walks the parent chain to the root run, resolves its workdir, and prints the
 process tree, artifact counts, an iteration table computed from the `$WORK`
-artifacts, interventions, the last log event, and follow/stop hints.
+artifacts, interventions, the last log event, and follow/stop hints. Each
+completed iteration includes lineage and grounding classes, plan and retained
+context sizes, invariant and relationship coverage, optional omissions, and its
+continuation/stop reason. A final artifact is labelled converged only when
+`convergence.final.json` is proof-satisfied, its candidate digest matches the
+current `plan.final.md`, and that plan declares `status: clean`; artifact
+presence alone is never treated as convergence.
 
 With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  carrySystemCoverageIntoPackage,
   emitPlanPackage,
   evaluateSplitDecision,
   parsePlanStructure,
@@ -289,6 +290,135 @@ describe('emitPlanPackage', () => {
     const result = emitPlanPackage(work, plan, structure, splitFor(plan));
     expect(result.kind).toBe('empty-work-plan');
     expect(existsSync(path.join(work, 'plan.package'))).toBe(false);
+  });
+
+  it('keeps covered and not-applicable system relationships coherent in split output', () => {
+    const plan = file('system-coverage.md');
+    writeLargeStructuredPlanFile(plan, 'System Coverage Plan', 6);
+    const covered = `R-${'a'.repeat(64)}`;
+    const notApplicable = `R-${'b'.repeat(64)}`;
+    writeFileSync(
+      plan,
+      readFileSync(plan, 'utf8').replace(
+        '## Impact Graph',
+        [
+          '## System Coverage',
+          '',
+          '| Relationship ID | Type | Producer/authority | Consumer/executor | Implementation phase | Release stage/gate | Evidence |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
+          `| ${covered} | package-consumer | producer | consumer | P1 | P2 | package.json |`,
+          `| ${notApplicable} | delivery-gate | producer | not-applicable | not-applicable | not-applicable | topology excludes this gate |`,
+          '',
+          '## Impact Graph',
+        ].join('\n'),
+      ),
+    );
+    const sourceBytes = readFileSync(plan);
+    const structure = parsePlanStructure(plan);
+    const result = emitPlanPackage(work, plan, structure, splitFor(plan));
+    expect(result.kind).toBe('emitted');
+    if (result.kind !== 'emitted') {
+      return;
+    }
+    carrySystemCoverageIntoPackage(result.paths, [covered, notApplicable]);
+
+    expect(readFileSync(result.paths.plan).equals(sourceBytes)).toBe(true);
+    expect(readFileSync(result.paths.phases[0] ?? '', 'utf8')).toContain(covered);
+    expect(
+      result.paths.phases.every((phase) => !readFileSync(phase, 'utf8').includes(notApplicable)),
+    ).toBe(true);
+    const run = readFileSync(result.paths.run, 'utf8');
+    expect(run).toContain('## Ordered Release Gates');
+    expect(run).toContain(covered);
+    expect(run).toContain(notApplicable);
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, {
+        relationshipIds: [covered, notApplicable],
+      }).ok,
+    ).toBe(true);
+
+    const releasePhase = result.paths.phases[1] ?? '';
+    const wrongPhase = result.paths.phases[2] ?? '';
+    const releaseBefore = readFileSync(releasePhase, 'utf8');
+    const wrongBefore = readFileSync(wrongPhase, 'utf8');
+    const runBefore = readFileSync(result.paths.run, 'utf8');
+    const coveredRow = `| ${covered} | package-consumer | producer | consumer | P1 | P2 | package.json |`;
+    writeFileSync(releasePhase, releaseBefore.replace(`${coveredRow}\n`, ''));
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, {
+        relationshipIds: [covered, notApplicable],
+      }).systemCoverageMissing,
+    ).toBeGreaterThan(0);
+    writeFileSync(releasePhase, releaseBefore);
+
+    writeFileSync(wrongPhase, `${wrongBefore}\n${coveredRow}\n`);
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, {
+        relationshipIds: [covered, notApplicable],
+      }).systemCoverageMissing,
+    ).toBeGreaterThan(0);
+    writeFileSync(wrongPhase, wrongBefore);
+
+    writeFileSync(result.paths.run, runBefore.replace(coveredRow, coveredRow.replace('P2', 'P20')));
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, {
+        relationshipIds: [covered, notApplicable],
+      }).systemCoverageMissing,
+    ).toBeGreaterThan(0);
+    writeFileSync(result.paths.run, runBefore);
+
+    writeFileSync(result.paths.plan, `${sourceBytes.toString()}\n${coveredRow}\n`);
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, {
+        relationshipIds: [covered, notApplicable],
+      }).systemCoverageMissing,
+    ).toBeGreaterThan(0);
+    writeFileSync(result.paths.plan, sourceBytes);
+  });
+
+  it('maps a relationship to a named implementation phase without an explicit P-id', () => {
+    const plan = file('named-system-coverage.md');
+    writeLargeStructuredPlanFile(plan, 'Named System Coverage Plan', 6);
+    const relationship = `R-${'c'.repeat(64)}`;
+    writeFileSync(
+      plan,
+      readFileSync(plan, 'utf8').replace(
+        '## Impact Graph',
+        [
+          '## System Coverage',
+          '',
+          '| Relationship ID | Type | Producer/authority | Consumer/executor | Implementation phase | Release stage/gate | Evidence |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
+          `| ${relationship} | package-consumer | producer | consumer | Phase 1 work | P2 | package.json |`,
+          '',
+          '## Impact Graph',
+        ].join('\n'),
+      ),
+    );
+    const structure = parsePlanStructure(plan);
+    const result = emitPlanPackage(work, plan, structure, splitFor(plan));
+    expect(result.kind).toBe('emitted');
+    if (result.kind !== 'emitted') {
+      return;
+    }
+    carrySystemCoverageIntoPackage(result.paths, [relationship]);
+
+    expect(readFileSync(result.paths.phases[0] ?? '', 'utf8')).toContain(relationship);
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, { relationshipIds: [relationship] }).ok,
+    ).toBe(true);
+
+    const row = `| ${relationship} | package-consumer | producer | consumer | Phase 1 work | P2 | package.json |`;
+    const correctPhase = result.paths.phases[0] ?? '';
+    const wrongPhase = result.paths.phases[2] ?? '';
+    const correctBefore = readFileSync(correctPhase, 'utf8');
+    const wrongBefore = readFileSync(wrongPhase, 'utf8');
+    writeFileSync(correctPhase, correctBefore.replace(`${row}\n`, ''));
+    writeFileSync(wrongPhase, `${wrongBefore}\n${row}\n`);
+    expect(
+      validatePlanPackage(REPO_ROOT, result.paths.dir, { relationshipIds: [relationship] })
+        .systemCoverageMissing,
+    ).toBeGreaterThan(0);
   });
 });
 
