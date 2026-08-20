@@ -9,6 +9,7 @@ import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.j
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import {
   normalizePlanDocument,
+  normalizeRepositoryFileLineReferences,
   requirePlanDocumentShape,
   validatePlanDocumentShape,
 } from './plan-shape.js';
@@ -17,8 +18,13 @@ import { validateFinalPlan } from './validate-plan.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
 import { retainedRolePrompt } from './retained-context.js';
 
-function fixPassAcceptPlanCandidate(candidate: string, label: string): boolean {
+function fixPassAcceptPlanCandidate(
+  candidate: string,
+  label: string,
+  projectRoot: string,
+): boolean {
   normalizePlanDocument(candidate);
+  normalizeRepositoryFileLineReferences(candidate, projectRoot);
   validatePlanDocumentShape(candidate);
   try {
     requirePlanDocumentShape(candidate);
@@ -205,7 +211,7 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
     return;
   }
   log(`fix-pass:   → proposal_lines=${fileLineCount(proposalFile)}`);
-  if (!fixPassAcceptPlanCandidate(proposalFile, 'proposal output')) {
+  if (!fixPassAcceptPlanCandidate(proposalFile, 'proposal output', ctx.provider.projectRoot)) {
     err('fix-pass: keeping pre-fix canonical plan, fix-pass skipped');
     copyFileSync(beforeFix, finalPlan);
     return;
@@ -343,7 +349,7 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
       }
     } else {
       log(`fix-pass:   → applied_lines=${fileLineCount(applyOut)}`);
-      if (fixPassAcceptPlanCandidate(applyOut, 'apply output')) {
+      if (fixPassAcceptPlanCandidate(applyOut, 'apply output', ctx.provider.projectRoot)) {
         copyFileSync(applyOut, finalPlan);
         fixPassReplaced = true;
         appliedCandidateNeedsReview = true;

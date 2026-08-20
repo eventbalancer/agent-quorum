@@ -42,6 +42,7 @@ JSON conforming to `readiness.schema.json`:
 {
   "ready": true | false,
   "rationale": "One sentence explaining the verdict (may be empty string).",
+  "revision_issue": null,
   "coverage_complete": true | false,
   "unresolved_occurrence_ids": [],
   "invariant_assessments": []
@@ -51,6 +52,15 @@ JSON conforming to `readiness.schema.json`:
 No fields beyond the schema. No markdown fences. JSON only.
 
 The rationale is reporting metadata. Keep it concise and do not quote or reproduce plan text, prompts, credentials, tokens, secrets, or provider output.
+
+For `scope: intermediate`, set `revision_issue` to one grounded blocker or major
+only when the negative verdict is caused by a concrete gap that the creator can
+fix inside the frozen boundary. Include `severity`, `category`, `claim`,
+`evidence`, at least one typed `evidence_refs` anchor, and `suggested_fix`. Set it
+to `null` for a positive verdict, unavailable required evidence, a boundary
+challenge, an operator-owned question, or any `scope: final` verdict. Report the
+single highest-priority fixable gap; the next critic pass will reassess the exact
+revision.
 
 ## What to assess
 
@@ -71,6 +81,8 @@ Do not return `ready: true` by default. The loop already has structural converge
 
 ## What not to do
 
-- Do not propose plan improvements or new issues — you judge readiness, not plan quality.
+- Do not propose optional improvements. The intermediate-only `revision_issue`
+  is reserved for the material gap that directly caused a fixable negative
+  verdict.
 - Do not write prose outside the JSON output.
 - Do not add markdown fences around the JSON.

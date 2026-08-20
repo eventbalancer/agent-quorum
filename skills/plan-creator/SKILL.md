@@ -29,7 +29,13 @@ This read-only pass runs before Create Mode. It establishes the boundary and ris
 2. State one concrete implementation `goal`, enumerate `in_scope`, and make expected exclusions explicit in `out_of_scope`. Preserve operator constraints verbatim in meaning. Do not widen the requested outcome.
 3. Emit exactly one assessment for each domain: `correctness`, `public-compatibility`, `data-migrations`, `security-privacy-authorization`, `concurrency-distributed-ordering`, `cross-repository-delivery`, `production-operability`, and `performance-cost`.
 4. Set `applicability` to `applicable`, `not-applicable`, or `unknown`; set `risk` to `standard` or `high`. Give a non-empty rationale and cite the concrete repository, prompt, operator-decision, or topology anchors used in `evidence_refs`. An unavailable topology category is not evidence that a domain applies. Use `unknown` only when required evidence cannot be obtained in this pass.
-5. Add a `material_questions` entry only when the answer is operator-owned, materially changes the boundary or required assurance, and cannot be resolved from available evidence. Supply 2–6 distinct answer options that can be sent through the clarification transport. Return an empty list when no such question remains.
+   Classify additive, backward-compatible local public-surface work as `standard`
+   unless concrete evidence shows migration, authorization, data-integrity,
+   distributed-ordering, irreversible delivery, or comparable high-impact risk.
+   A public field, CLI flag, config key, or artifact projection is not `high`
+   merely because it is public. Use `high` only when failure in that applicable
+   domain can materially violate one of those stronger invariants.
+5. Add a `material_questions` entry only when the answer is operator-owned, materially changes the boundary or required assurance, and cannot be resolved from available evidence. Supply 2–6 distinct answer options that can be sent through the clarification transport. Return an empty list when no such question remains. Do not escalate an ordinary in-boundary implementation choice that the plan can resolve with a safe, evidence-backed default; make and justify that choice in the plan instead.
 6. When `cross-repository-delivery` is applicable, name every included repository in `in_scope` with the exact repository name or alias supplied by authoritative system facts. Put explicitly excluded repositories in `out_of_scope`; descriptions that omit repository identities cannot establish the deterministic topology boundary.
 
 ### Output Format

@@ -352,6 +352,8 @@ describe('Judge final-readiness contract', () => {
     expect(text).toContain('authoritative post-fix canonical artifact');
     expect(text).toContain('advisory only');
     expect(text).toContain('do not quote or reproduce plan text');
+    expect(text).toContain('revision_issue');
+    expect(text).toContain('inside the frozen boundary');
   });
 });
 

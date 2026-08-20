@@ -68,6 +68,7 @@ import {
   type SplitDecision,
 } from './plan-package.js';
 import {
+  normalizeRepositoryFileLineReferences,
   planDocumentShapeHealth,
   planFrontmatterStatus,
   planHasTitleHeading,
@@ -1221,6 +1222,7 @@ export async function runPlanLoopCli(
         if (!existsSync(v0)) {
           copyFileSync(inputPath, v0);
         }
+        normalizeRepositoryFileLineReferences(v0, ctx.provider.projectRoot);
       }
 
       if (startIter > 0) {

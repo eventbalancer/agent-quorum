@@ -104,7 +104,12 @@ domains. `thorough` additionally requires an exhaustive scan within applicable
 domains and disables provider sessions. A high-risk task under an appetite that
 cannot supply its required Judge or scan terminates as
 `limits-exhausted:assurance-appetite`. Intermediate `judge.vN.json` evidence is
-historical and is never used as the canonical final verdict.
+historical and is never used as the canonical final verdict. When an
+intermediate negative verdict includes one grounded blocker or major that is
+fixable inside the frozen boundary, the orchestrator appends that structured
+finding to the exact-version critique and returns to `revision-required` within
+the existing appetite. A negative verdict without such a revision issue remains
+`unable-to-decide`; final Judge verdicts never trigger creator changes.
 
 Every planning role receives one mandatory retained-context block: original
 scope (or an explicit direct-plan/unavailable marker), authoritative topology,
@@ -148,7 +153,11 @@ release gates.
 
 Post-loop: the reference validator mines `file:line` tokens out of code
 spans, resolves them against an in-process workspace snapshot, and writes
-`findings.json`; the fix pass proposes → reviews → applies (every failure path
+`findings.json`. Provider-produced absolute `file-line:` references rooted in
+the current repository are normalized deterministically before independent
+review; the validator also bounds direct absolute resolution to that repository.
+References outside the repository remain unresolved. The fix pass proposes →
+reviews → applies (every failure path
 keeps the pre-fix canonical plan). A deterministic split policy then evaluates the
 post-fix `plan.final.md` and records `plan.split.json` on every run; when the
 policy fires (size signal exceeded or a structural threshold met), the

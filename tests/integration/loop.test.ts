@@ -675,6 +675,107 @@ describe('iteration loop', () => {
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
   });
 
+  it('routes a grounded intermediate Judge gap through one bounded creator revision', async () => {
+    seedWork();
+    const critique0 = path.join(tmp, 'critique-0.json');
+    const critique1 = path.join(tmp, 'critique-1.json');
+    emptyCritique(critique0);
+    emptyCritique(critique1);
+    const judgeRevision = path.join(tmp, 'judge-revision.json');
+    writeFileSync(
+      judgeRevision,
+      JSON.stringify({
+        ready: false,
+        rationale: 'P1 leaves the implementation file open.',
+        revision_issue: {
+          severity: 'major',
+          category: 'clarity',
+          claim: 'P1 leaves the implementation file open.',
+          evidence: '## Work Plan',
+          evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+          suggested_fix: 'Name one concrete implementation file in P1.',
+        },
+        coverage_complete: true,
+        unresolved_occurrence_ids: [],
+        invariant_assessments: [],
+      }),
+    );
+    const revised = path.join(tmp, 'revised.md');
+    writeStructuredPlanFile(revised, 'Judge Revision');
+    const updateMeta = path.join(tmp, 'update-meta.json');
+    writeFileSync(
+      updateMeta,
+      JSON.stringify({
+        plan_version: 1,
+        issues: [
+          {
+            id: 'C1',
+            verdict: 'accept',
+            verdict_reason: 'The Judge gap is material and in scope.',
+            final_severity: 'major',
+            duplicate_of: null,
+          },
+        ],
+        applied: ['C1'],
+        systemic_dispositions: [
+          {
+            issue_id: 'C1',
+            scope: 'local',
+            rationale: 'The concrete P1 file selection resolves the local gap.',
+            evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+            invariant: null,
+          },
+        ],
+        rejected_append: [],
+      }),
+    );
+    const judgeReady = path.join(tmp, 'judge-ready.json');
+    writeFileSync(
+      judgeReady,
+      JSON.stringify({
+        ready: true,
+        rationale: 'The exact revision is implementation-ready.',
+        revision_issue: null,
+        coverage_complete: true,
+        unresolved_occurrence_ids: [],
+        invariant_assessments: [],
+      }),
+    );
+    const codexCalls = path.join(tmp, 'codex.calls');
+    const claudeJsonCalls = path.join(tmp, 'claude-json.calls');
+    const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
+    applyHighRiskPolicy(ctx);
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT_CALLS: codexCalls,
+        FAKE_CODEX_OUTPUT_1: critique0,
+        FAKE_CODEX_OUTPUT_2: critique1,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_JSON_CALLS: claudeJsonCalls,
+        FAKE_CLAUDE_JSON_RESULT: judgeRevision,
+        FAKE_CLAUDE_JSON_RESULT_1: judgeRevision,
+        FAKE_CLAUDE_JSON_RESULT_2: updateMeta,
+        FAKE_CLAUDE_JSON_RESULT_3: judgeReady,
+        FAKE_CLAUDE_MARKDOWN_RESULT: revised,
+        FAKE_CLAUDE_PROMPT: path.join(tmp, 'claude.prompt'),
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    const augmented = JSON.parse(readFileSync(path.join(work, 'critique.v0.json'), 'utf8')) as {
+      issues: { id: string; claim: string }[];
+    };
+    expect(augmented.issues).toEqual([
+      expect.objectContaining({ id: 'C1', claim: 'P1 leaves the implementation file open.' }),
+    ]);
+    expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toContain('# Judge Revision');
+    expect(capture.text()).toContain('intermediate judge requested major in-boundary revision');
+    expect(capture.text()).toContain('ready at v1');
+    expect(ctx.convergence.decision).toBe('ready');
+  });
+
   it('invalidates a stale Judge approval when the current critique skips Judge', async () => {
     seedWork();
     const critiqueFile = path.join(tmp, 'critique.json');

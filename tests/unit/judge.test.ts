@@ -94,6 +94,42 @@ describe('runJudge', () => {
     expect(ctx.convergence.unresolvedCoverage).not.toContain('plan.v0:judge');
   });
 
+  it('returns a grounded in-boundary revision issue from an intermediate negative verdict', async () => {
+    mockProviderRun.mockImplementation((_provider, _role, _mode, file) => {
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ready: false,
+          rationale: 'P5 leaves a concrete design choice open.',
+          revision_issue: {
+            severity: 'major',
+            category: 'clarity',
+            claim: 'P5 leaves the write-hook location unresolved.',
+            evidence: '## Work Plan',
+            evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+            suggested_fix: 'Select one concrete write-hook file and update P5.',
+          },
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [],
+        }),
+      );
+      return Promise.resolve(0);
+    });
+
+    const result = await runJudge(makeContext(), 0, planFile, critiqueFile, outFile);
+
+    expect(result).toMatchObject({
+      ready: false,
+      revisionIssue: {
+        severity: 'major',
+        category: 'clarity',
+        claim: 'P5 leaves the write-hook location unresolved.',
+        evidenceRefs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      },
+    });
+  });
+
   it('labels the intermediate critique as current context', () => {
     const prompt = judgePrompt(planFile, critiqueFile);
     expect(prompt).toContain('scope: intermediate');

@@ -369,6 +369,21 @@ export function normalizePlanDocument(file: string): void {
   }
 }
 
+export function normalizeRepositoryFileLineReferences(file: string, projectRoot: string): number {
+  if (!existsSync(file)) {
+    return 0;
+  }
+  const repositoryPrefix = `file-line:${path.resolve(projectRoot).replaceAll('\\', '/')}/`;
+  const content = readFileSync(file, 'utf8');
+  const count = content.split(repositoryPrefix).length - 1;
+  if (count === 0) {
+    return 0;
+  }
+  writeFileSync(file, content.replaceAll(repositoryPrefix, 'file-line:'));
+  log(`  → normalized ${count} absolute in-repository file-line reference(s)`);
+  return count;
+}
+
 export function requirePlanDocumentShape(file: string): void {
   const { missing, graph, frontmatter } = planDocumentShapeHealth(file);
   const title = planHasTitleHeading(file) ? 1 : 0;

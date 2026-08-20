@@ -1,4 +1,11 @@
-import { appendFileSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { structuredPatch } from 'diff';
 import { fileLineCount } from '../../runtime/files.js';
@@ -9,7 +16,7 @@ import { convergenceHealth, critiqueDuplicateIsValid, critiqueHealth } from '../
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { runCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
-import { runJudge } from './judge.js';
+import { runJudge, type JudgeRevisionIssue } from './judge.js';
 import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
 import type { RunContext } from '../../core/run-context.js';
 import {
@@ -86,6 +93,64 @@ function openBlockerMajor(critiqueJson: JsonValue): MaterialIssueCounts {
     }
   }
   return { blockers, majors };
+}
+
+function appendJudgeRevisionIssue(
+  critiqueFile: string,
+  critiqueJson: JsonValue,
+  issue: JudgeRevisionIssue,
+  criticSchema: string,
+): JsonValue {
+  const critique = isJsonObject(critiqueJson) ? critiqueJson : {};
+  const issues = Array.isArray(critique.issues) ? critique.issues.filter(isJsonObject) : [];
+  const nextNumber =
+    issues.reduce((max, candidate) => {
+      const match = /^C([0-9]+)$/.exec(typeof candidate.id === 'string' ? candidate.id : '');
+      return match === null ? max : Math.max(max, Number(match[1]));
+    }, 0) + 1;
+  const review = isJsonObject(critique.review) ? critique.review : {};
+  const budget = isJsonObject(review.issue_budget) ? review.issue_budget : {};
+  const used = issues.length + 1;
+  const limit = typeof budget.limit === 'number' ? budget.limit : used;
+  const summary =
+    `${typeof critique.summary === 'string' ? critique.summary : ''} Intermediate Judge requested one material revision.`
+      .trim()
+      .slice(0, 700);
+  const augmented: JsonObject = {
+    ...critique,
+    summary,
+    issues: [
+      ...issues,
+      {
+        id: `C${nextNumber}`,
+        addresses: null,
+        severity: issue.severity,
+        category: issue.category,
+        claim: issue.claim,
+        evidence: issue.evidence,
+        evidence_refs: [...issue.evidenceRefs],
+        invariant_id: null,
+        introduced_by_revision: null,
+        suggested_fix: issue.suggestedFix,
+        confidence: 1,
+        duplicate_of: null,
+      },
+    ],
+    review: {
+      ...review,
+      issue_budget: {
+        ...budget,
+        limit,
+        used,
+        exhausted: budget.exhausted === true || used > limit,
+      },
+    },
+  };
+  writeFileSync(critiqueFile, `${JSON.stringify(augmented, null, 2)}\n`);
+  if (!validateSchema(critiqueFile, criticSchema)) {
+    throw new HaltError('Judge revision issue failed critique schema validation', 3, true);
+  }
+  return augmented;
 }
 
 const UNANCHORED_WARN_RATIO = 0.5;
@@ -186,7 +251,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       throw new HaltError('critique failed schema validation', 3, true);
     }
     ctx.lastCritiqueIter = iter;
-    const critiqueJson = readJson(critique);
+    let critiqueJson = readJson(critique);
     recordCritique(ctx.convergence, critiqueJson, iter, {
       work: ctx.work,
       projectRoot: ctx.provider.projectRoot,
@@ -221,6 +286,21 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
         const judgeFile = path.join(ctx.work, `judge.v${iter}.json`);
         const verdict = await runJudge(ctx, iter, plan, critique, judgeFile);
         log(`  → intermediate judge ready=${verdict.ready}`);
+        if (!verdict.ready && verdict.revisionIssue !== undefined) {
+          critiqueJson = appendJudgeRevisionIssue(
+            critique,
+            critiqueJson,
+            verdict.revisionIssue,
+            ctx.skills.criticSchema,
+          );
+          recordCritique(ctx.convergence, critiqueJson, iter, {
+            work: ctx.work,
+            projectRoot: ctx.provider.projectRoot,
+          });
+          log(
+            `  → intermediate judge requested ${verdict.revisionIssue.severity} in-boundary revision`,
+          );
+        }
       } else {
         log(
           `iter=${iter} — intermediate judge skipped (${blockers} blocker / ${majors} major open)`,

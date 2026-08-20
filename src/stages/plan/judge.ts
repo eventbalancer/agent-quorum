@@ -22,6 +22,7 @@ interface JudgeVerdict {
   readonly coverageComplete: boolean;
   readonly unresolvedOccurrenceIds: readonly string[];
   readonly assessedInvariantIds: readonly string[];
+  readonly revisionIssue?: JudgeRevisionIssue;
 }
 
 const NOT_READY = { ready: false, rationale: '' } as const;
@@ -29,6 +30,24 @@ const NOT_READY = { ready: false, rationale: '' } as const;
 export interface JudgeResult {
   readonly ready: boolean;
   readonly rationale: string;
+  readonly revisionIssue?: JudgeRevisionIssue;
+}
+
+export interface JudgeRevisionIssue {
+  readonly severity: 'blocker' | 'major';
+  readonly category:
+    | 'correctness'
+    | 'scope'
+    | 'risk'
+    | 'testability'
+    | 'clarity'
+    | 'convention'
+    | 'missing_context'
+    | 'assumption';
+  readonly claim: string;
+  readonly evidence: string;
+  readonly evidenceRefs: readonly JsonValue[];
+  readonly suggestedFix: string;
 }
 
 export interface FinalJudgeResult {
@@ -80,6 +99,7 @@ function readJudgeVerdict(outputFile: string, schemaFile: string): JudgeVerdict 
   if (!isJsonObject(parsed) || typeof parsed.ready !== 'boolean') {
     return undefined;
   }
+  const revision = isJsonObject(parsed.revision_issue) ? parsed.revision_issue : undefined;
   return {
     ready: parsed.ready,
     rationale: typeof parsed.rationale === 'string' ? parsed.rationale : '',
@@ -101,6 +121,21 @@ function readJudgeVerdict(outputFile: string, schemaFile: string): JudgeVerdict 
           .map((assessment) => assessment.invariant_id)
           .filter((id): id is string => typeof id === 'string')
       : [],
+    ...(!parsed.ready && revision !== undefined
+      ? {
+          revisionIssue: {
+            severity: revision.severity === 'blocker' ? 'blocker' : 'major',
+            category:
+              typeof revision.category === 'string'
+                ? (revision.category as JudgeRevisionIssue['category'])
+                : 'clarity',
+            claim: typeof revision.claim === 'string' ? revision.claim : '',
+            evidence: typeof revision.evidence === 'string' ? revision.evidence : '',
+            evidenceRefs: Array.isArray(revision.evidence_refs) ? revision.evidence_refs : [],
+            suggestedFix: typeof revision.suggested_fix === 'string' ? revision.suggested_fix : '',
+          },
+        }
+      : {}),
   };
 }
 
@@ -222,6 +257,7 @@ export async function runJudge(
   return {
     ready: verdict.ready,
     rationale: compactRationale(verdict.rationale),
+    ...(verdict.revisionIssue === undefined ? {} : { revisionIssue: verdict.revisionIssue }),
   };
 }
 

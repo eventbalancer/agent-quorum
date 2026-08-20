@@ -8,6 +8,7 @@ import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
   normalizePlanDocument,
+  normalizeRepositoryFileLineReferences,
   PLAN_DOCUMENT_REQUIRED_SECTIONS,
   planDocumentShapeOk,
   planHasFrontmatter,
@@ -194,6 +195,7 @@ export async function runCreatorCreate(
   if (!planDocumentShapeOk(outFile) && !isClaudeCreatorPlanMode(ctx)) {
     await repairCreatorCreateShape(ctx, outFile);
   }
+  normalizeRepositoryFileLineReferences(outFile, ctx.provider.projectRoot);
   requireCreatorCreateShape(ctx, outFile);
 }
 
@@ -294,6 +296,7 @@ async function runCreatorUpdateOneShot(
     return 4;
   }
   normalizePlanDocument(revisionFile);
+  normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
   validatePlanDocumentShape(revisionFile);
   if (!planDocumentShapeOk(revisionFile)) {
     return 4;
@@ -425,6 +428,7 @@ export async function runCreatorUpdate(
     throw new HaltError('creator produced empty revised plan', 4, true);
   }
   normalizePlanDocument(revisionFile);
+  normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
 
   await runCreatorUpdateMeta(ctx, iter, planFile, revisionFile, critiqueFile, metaFile);
   sanitizeUpdateMetaJson(metaFile, planVersion);

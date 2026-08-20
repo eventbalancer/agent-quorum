@@ -124,7 +124,11 @@ applicable domains and disables provider sessions. The compatibility promises
 remain `best-effort`, `cumulative`, and `exhaustive`. Applicability and risk,
 not the preset name alone, determine which proof gates are required. High-risk
 work under an appetite that cannot provide its required Judge/scan reports the
-`assurance-appetite` convergence limit.
+`assurance-appetite` convergence limit. An additive, backward-compatible local
+public field, flag, config key, or artifact projection remains standard risk
+unless repository evidence shows migration, authorization, data-integrity,
+distributed-ordering, irreversible-delivery, or comparable high-impact
+consequences.
 
 | Tool field (per role)                                                          | Applies to                             |
 | ------------------------------------------------------------------------------ | -------------------------------------- |
