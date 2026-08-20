@@ -82,6 +82,14 @@ printf '%s' "$prompt" > "${FAKE_CODEX_PROMPT:?}"
 if [[ -n "${FAKE_CODEX_PROMPT_LOG:-}" ]]; then
   { printf '%s' "$prompt"; printf '\0'; } >> "$FAKE_CODEX_PROMPT_LOG"
 fi
+if [[ "$prompt" == *$'\nstage: assessment\n'* ]]; then
+  if [[ -n "${FAKE_READINESS_ASSESSMENT:-}" ]]; then
+    cp "$FAKE_READINESS_ASSESSMENT" "$out"
+  else
+    printf '%s\n' '{"boundary":{"goal":"Produce the fixture implementation plan.","in_scope":["fixture implementation"],"out_of_scope":["unrelated fixture behavior"],"constraints":["preserve fixture contracts"]},"domain_assessments":[{"domain":"correctness","applicability":"applicable","risk":"standard","rationale":"Fixture correctness assessment.","evidence_refs":[]},{"domain":"public-compatibility","applicability":"not-applicable","risk":"standard","rationale":"Fixture compatibility assessment.","evidence_refs":[]},{"domain":"data-migrations","applicability":"not-applicable","risk":"standard","rationale":"Fixture migration assessment.","evidence_refs":[]},{"domain":"security-privacy-authorization","applicability":"not-applicable","risk":"standard","rationale":"Fixture security assessment.","evidence_refs":[]},{"domain":"concurrency-distributed-ordering","applicability":"not-applicable","risk":"standard","rationale":"Fixture concurrency assessment.","evidence_refs":[]},{"domain":"cross-repository-delivery","applicability":"not-applicable","risk":"standard","rationale":"Fixture delivery assessment.","evidence_refs":[]},{"domain":"production-operability","applicability":"not-applicable","risk":"standard","rationale":"Fixture operability assessment.","evidence_refs":[]},{"domain":"performance-cost","applicability":"not-applicable","risk":"standard","rationale":"Fixture performance assessment.","evidence_refs":[]}],"material_questions":[]}' > "$out"
+  fi
+  exit 0
+fi
 output="${FAKE_CODEX_OUTPUT:-}"
 if [[ -n "${FAKE_CODEX_OUTPUT_CALLS:-}" ]]; then
   calls=0

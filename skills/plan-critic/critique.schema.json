@@ -84,9 +84,105 @@
         "unresolved_coverage": { "type": "array", "items": { "type": "string" } }
       }
     },
+    "domain_assessments": {
+      "type": "array",
+      "description": "Assessment of the fixed readiness domains for this exact plan version. Emit one entry per domain; an empty array is accepted only as a compatibility input and cannot prove readiness.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "applicability",
+          "risk",
+          "complete",
+          "rationale",
+          "unavailable_evidence",
+          "evidence_refs"
+        ],
+        "properties": {
+          "domain": { "$ref": "#/$defs/riskDomain" },
+          "applicability": { "$ref": "#/$defs/applicability" },
+          "risk": { "$ref": "#/$defs/riskLevel" },
+          "complete": {
+            "type": "boolean",
+            "description": "True only when the applicable evidence needed to assess this domain was available and checked for this plan version."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Concise evidence-based explanation of applicability, risk, and any unavailable required evidence."
+          },
+          "unavailable_evidence": {
+            "type": "array",
+            "description": "Required evidence that could not be obtained. Keep empty when the assessment is complete or the domain is not applicable.",
+            "items": { "type": "string" }
+          },
+          "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
+        }
+      }
+    },
+    "boundary_challenges": {
+      "type": "array",
+      "description": "Material changes that would alter the frozen implementation boundary or exceed its assurance appetite. Any entry prevents an in-run revision decision.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "claim", "rationale", "evidence", "evidence_refs"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^B[0-9]+$"
+          },
+          "kind": {
+            "enum": ["scope-expansion", "out-of-scope-removal", "assurance-appetite"]
+          },
+          "claim": {
+            "type": "string",
+            "description": "The concrete boundary or appetite change required before readiness can be decided."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why the frozen contract cannot contain the required change."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "A quote from the frozen contract or plan, or a path:line reference."
+          },
+          "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
+        }
+      }
+    },
+    "opportunities": {
+      "type": "array",
+      "description": "Non-blocking improvements that remain visible but never trigger a creator revision or affect readiness.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fingerprint", "claim", "evidence", "suggested_improvement", "evidence_refs"],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable identity derived from the substantive claim, evidence, and improvement rather than the plan version."
+          },
+          "claim": {
+            "type": "string",
+            "description": "One-sentence optional improvement."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "A quote from the plan or a path:line reference."
+          },
+          "suggested_improvement": {
+            "type": "string",
+            "description": "A concrete non-blocking improvement."
+          },
+          "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
+        }
+      }
+    },
     "issues": {
       "type": "array",
-      "description": "Structured list of issues. An empty array means the plan is accepted.",
+      "description": "Material blocker or major issues that are fixable inside the frozen boundary. Optional improvements belong in opportunities. An empty array means no in-boundary revision is required.",
       "items": {
         "type": "object",
         "required": [
@@ -113,8 +209,8 @@
             "description": "ID of the immediate parent issue from a previous iteration that this issue refines. Use the most recent iteration covering this concern, for example v2.C1. Null if new."
           },
           "severity": {
-            "enum": ["blocker", "major", "minor", "nit"],
-            "description": "blocker — the plan cannot be executed as is; major — a serious gap; minor — an improvement; nit — taste."
+            "enum": ["blocker", "major"],
+            "description": "blocker — the plan cannot be executed as is; major — a serious gap required for correct execution."
           },
           "category": {
             "enum": [
@@ -154,13 +250,31 @@
           },
           "duplicate_of": {
             "type": ["string", "null"],
-            "description": "Id of the rejected-log.jsonl entry on a repeat. Null if not a repeat. When non-null the severity must be nit."
+            "description": "Compatibility lineage field. Material issues must use null; a rejected repeat belongs in opportunities instead."
           }
         }
       }
     }
   },
   "$defs": {
+    "riskDomain": {
+      "enum": [
+        "correctness",
+        "public-compatibility",
+        "data-migrations",
+        "security-privacy-authorization",
+        "concurrency-distributed-ordering",
+        "cross-repository-delivery",
+        "production-operability",
+        "performance-cost"
+      ]
+    },
+    "applicability": {
+      "enum": ["applicable", "not-applicable", "unknown"]
+    },
+    "riskLevel": {
+      "enum": ["standard", "high"]
+    },
     "evidenceRefs": {
       "type": "array",
       "items": {

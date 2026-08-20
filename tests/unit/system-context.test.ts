@@ -3,7 +3,11 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildSystemContext, validateSystemCoverage } from '../../src/core/system-context.js';
+import {
+  buildSystemContext,
+  validateSystemCoverage,
+  writeSystemCheck,
+} from '../../src/core/system-context.js';
 
 const roots: string[] = [];
 
@@ -118,6 +122,11 @@ describe('authoritative system context', () => {
     expect(second).toEqual(first);
     expect(first.passed).toBe(true);
     expect(first.planSha256).toBe(createHash('sha256').update(readFileSync(plan)).digest('hex'));
+    expect(validateSystemCoverage(context, plan, 0, { required: true })).toMatchObject({
+      passed: true,
+      mismatches: [],
+      requiredEvidenceUnavailable: [],
+    });
 
     const repositoryEdge = context.relationships.find(
       (edge) => edge.type === 'repository-dependency',
@@ -149,9 +158,10 @@ describe('authoritative system context', () => {
           .filter((entry) => entry !== row)
           .join('\n'),
       );
-      const missing = validateSystemCoverage(context, plan, 0);
+      const missing = validateSystemCoverage(context, plan, 0, { required: true });
       expect(missing.passed).toBe(false);
       expect(missing.mismatches.some((entry) => entry.endsWith(':missing'))).toBe(true);
+      expect(missing.requiredEvidenceUnavailable).toEqual([]);
     }
   });
 
@@ -385,6 +395,165 @@ describe('authoritative system context', () => {
       inputFile: input,
     });
     expect(afterScopedChange.digest).not.toBe(context.digest);
+  });
+
+  it('treats unavailable topology as telemetry unless cross-repository delivery requires it', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-system-applicability.'));
+    roots.push(root);
+    const input = path.join(root, 'input.md');
+    const plan = path.join(root, 'plan.md');
+    writeFileSync(input, '# Cross-repository delivery\n\nCoordinate producer and consumer.');
+    writeFileSync(plan, '# Plan\n\n## Work Plan\n\nP1 update the local implementation.\n');
+    const context = buildSystemContext({ projectRoot: root, mode: 'prompt', inputFile: input });
+
+    expect(context.crossRepository).toBe(true);
+    expect(context.relationships).toEqual([]);
+
+    const irrelevant = validateSystemCoverage(context, plan, 0, { required: false });
+    expect(irrelevant).toMatchObject({
+      required: false,
+      passed: true,
+      relationships: [],
+      mismatches: [],
+      requiredEvidenceUnavailable: [],
+    });
+    expect(irrelevant.limitations).toContain('authoritative-topology-unavailable');
+
+    const applicable = validateSystemCoverage(context, plan, 0, { required: true });
+    expect(applicable).toMatchObject({
+      required: true,
+      passed: false,
+      relationships: [],
+      mismatches: [],
+    });
+    expect(applicable.requiredEvidenceUnavailable).toEqual(
+      expect.arrayContaining([
+        'cross-repository-scope:relationships-unavailable',
+        'authoritative-limitation:authoritative-topology-unavailable',
+      ]),
+    );
+
+    const legacy = validateSystemCoverage(context, plan, 0);
+    expect(legacy.requiredEvidenceUnavailable).toEqual([]);
+    expect(legacy.mismatches).toContain('cross-repository-scope:relationships-unavailable');
+
+    const artifact = writeSystemCheck(root, applicable);
+    expect(JSON.parse(readFileSync(artifact, 'utf8'))).toMatchObject({
+      required: true,
+      passed: false,
+      mismatches: [],
+      requiredEvidenceUnavailable: applicable.requiredEvidenceUnavailable,
+    });
+  });
+
+  it('checks only relationships and unavailable evidence inside the frozen repository boundary', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-system-boundary.'));
+    roots.push(root);
+    mkdirSync(path.join(root, 'producer'));
+    mkdirSync(path.join(root, 'consumer'));
+    writeFileSync(
+      path.join(root, 'ecosystem.yaml'),
+      [
+        'repositories:',
+        '  producer:',
+        '    path: producer',
+        '  consumer:',
+        '    path: consumer',
+        '    depends_on: [producer]',
+        '  unrelated:',
+        '    path: ../unrelated',
+        '    delivery_gates: [unrelated-ready]',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(root, 'producer', 'package.json'),
+      JSON.stringify({ name: '@fixture/producer' }),
+    );
+    writeFileSync(
+      path.join(root, 'consumer', 'package.json'),
+      JSON.stringify({ name: '@fixture/consumer' }),
+    );
+    const input = path.join(root, 'input.md');
+    writeFileSync(
+      input,
+      '# Cross-repository delivery\n\nInspect producer, consumer, and unrelated repositories.',
+    );
+    const context = buildSystemContext({ projectRoot: root, mode: 'prompt', inputFile: input });
+    const boundary = new Set(['producer', 'consumer']);
+    const boundedRelationships = context.relationships.filter((edge) =>
+      edge.repositories.every((repository) => boundary.has(repository)),
+    );
+    const excludedRelationships = context.relationships.filter(
+      (edge) => !boundedRelationships.includes(edge),
+    );
+    expect(excludedRelationships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'delivery-gate', repositories: ['unrelated'] }),
+      ]),
+    );
+    expect(context.limitations).toContain('repository-path-outside-project:unrelated');
+
+    const plan = path.join(root, 'plan.md');
+    const rows = boundedRelationships.map(
+      (edge) =>
+        `| ${edge.id} | ${edge.type} | ${edge.producer} | ${edge.consumer} | P1 | P2 | ${edge.tokens.join(' ')} |`,
+    );
+    writeFileSync(
+      plan,
+      [
+        '# Plan',
+        '## Work Plan',
+        'P1 producer @fixture/producer then consumer @fixture/consumer.',
+        'P2 release gate.',
+        '## System Coverage',
+        '| Relationship ID | Type | Producer/authority | Consumer/executor | Implementation phase | Release stage/gate | Evidence |',
+        '| --- | --- | --- | --- | --- | --- | --- |',
+        ...rows,
+      ].join('\n'),
+    );
+
+    const bounded = validateSystemCoverage(context, plan, 1, {
+      required: true,
+      inScope: ['producer implementation', 'consumer delivery'],
+      outOfScope: ['unrelated repository'],
+    });
+    expect(bounded).toMatchObject({
+      passed: true,
+      boundaryRepositories: ['consumer', 'producer'],
+      mismatches: [],
+      requiredEvidenceUnavailable: [],
+    });
+    expect(bounded.relationships.map((relationship) => relationship.id)).toEqual(
+      boundedRelationships.map((relationship) => relationship.id),
+    );
+
+    const unbounded = validateSystemCoverage(context, plan, 1, { required: true });
+    expect(unbounded.passed).toBe(false);
+    expect(unbounded.mismatches).toEqual(
+      expect.arrayContaining(excludedRelationships.map((edge) => `${edge.id}:missing`)),
+    );
+    expect(unbounded.requiredEvidenceUnavailable).toContain(
+      'authoritative-limitation:repository-path-outside-project:unrelated',
+    );
+
+    const relevantEvidenceMissing = validateSystemCoverage(
+      {
+        ...context,
+        limitations: [...context.limitations, 'migration-executor-unavailable:consumer'],
+      },
+      plan,
+      1,
+      {
+        required: true,
+        inScope: ['producer implementation', 'consumer delivery'],
+        outOfScope: ['unrelated repository'],
+      },
+    );
+    expect(relevantEvidenceMissing.mismatches).toEqual([]);
+    expect(relevantEvidenceMissing.requiredEvidenceUnavailable).toEqual([
+      'authoritative-limitation:migration-executor-unavailable:consumer',
+    ]);
   });
 
   it('activates explicit multi-repository scope and includes only named repositories', () => {

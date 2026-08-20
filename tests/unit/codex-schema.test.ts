@@ -41,8 +41,13 @@ describe('Codex structured-output schema projection', () => {
 
     expect(projected.changed).toBe(true);
     expectEveryPropertyRequired(projected.schema);
-    const review = (projected.schema.properties as JsonObject).review;
+    const properties = projected.schema.properties as JsonObject;
+    const review = properties.review;
     expect(isJsonObject(review) ? review.type : undefined).toEqual(['object', 'null']);
+    for (const field of ['domain_assessments', 'boundary_challenges', 'opportunities']) {
+      const property = properties[field];
+      expect(isJsonObject(property) ? property.type : undefined).toEqual(['array', 'null']);
+    }
   });
 
   it('removes schema keywords unsupported by Codex while retaining canonical constraints', () => {
@@ -68,11 +73,14 @@ describe('Codex structured-output schema projection', () => {
       plan_version: 0,
       summary: 'No issues.',
       review: null,
+      domain_assessments: null,
+      boundary_challenges: null,
+      opportunities: null,
       issues: [
         {
           id: 'C1',
           addresses: null,
-          severity: 'minor',
+          severity: 'major',
           category: 'clarity',
           claim: 'Clarify the phase gate.',
           evidence: '## Verification',
@@ -108,7 +116,7 @@ describe('Codex structured-output schema projection', () => {
         {
           id: 'C1',
           addresses: null,
-          severity: 'minor',
+          severity: 'major',
           category: 'clarity',
           claim: 'Clarify the phase gate.',
           evidence: '## Verification',
@@ -118,6 +126,98 @@ describe('Codex structured-output schema projection', () => {
           duplicate_of: null,
         },
       ],
+    });
+    const validate = new Ajv2019({ strict: false }).compile(canonical);
+    expect(validate(normalized)).toBe(true);
+  });
+
+  it('normalizes bounded-readiness arrays from projected Codex output', () => {
+    const canonical = readSchema();
+    const projectedEvidenceRef = {
+      kind: 'plan-section',
+      value: null,
+      path: null,
+      line: null,
+      section: 'Security',
+      phase: null,
+      gate: null,
+      command: null,
+      repository: null,
+      topology_id: null,
+    };
+    const projectedOutput: JsonValue = {
+      plan_version: 3,
+      summary: 'The boundary must be revised before readiness can be decided.',
+      review: null,
+      domain_assessments: [
+        {
+          domain: 'security-privacy-authorization',
+          applicability: 'applicable',
+          risk: 'high',
+          complete: false,
+          rationale: 'The required policy source is unavailable.',
+          unavailable_evidence: ['deployed policy source'],
+          evidence_refs: [projectedEvidenceRef],
+        },
+      ],
+      boundary_challenges: [
+        {
+          id: 'B1',
+          kind: 'scope-expansion',
+          claim: 'The policy service must enter scope.',
+          rationale: 'The scoped component cannot enforce the policy alone.',
+          evidence: '## Out of Scope',
+          evidence_refs: [projectedEvidenceRef],
+        },
+      ],
+      opportunities: [
+        {
+          fingerprint: 'navigation-link',
+          claim: 'Add a navigation link.',
+          evidence: '## Verification',
+          suggested_improvement: 'Link to verification.',
+          evidence_refs: [],
+        },
+      ],
+      issues: [],
+    };
+
+    const normalized = normalizeCodexJsonValue(projectedOutput, canonical);
+
+    expect(normalized).toEqual({
+      plan_version: 3,
+      summary: 'The boundary must be revised before readiness can be decided.',
+      domain_assessments: [
+        {
+          domain: 'security-privacy-authorization',
+          applicability: 'applicable',
+          risk: 'high',
+          complete: false,
+          rationale: 'The required policy source is unavailable.',
+          unavailable_evidence: ['deployed policy source'],
+          evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+        },
+      ],
+      boundary_challenges: [
+        {
+          id: 'B1',
+          kind: 'scope-expansion',
+          claim: 'The policy service must enter scope.',
+          rationale: 'The scoped component cannot enforce the policy alone.',
+          evidence: '## Out of Scope',
+          evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+        },
+      ],
+      opportunities: [
+        {
+          fingerprint: 'navigation-link',
+          claim: 'Add a navigation link.',
+          evidence: '## Verification',
+          suggested_improvement: 'Link to verification.',
+          evidence_refs: [],
+        },
+      ],
+      issues: [],
     });
     const validate = new Ajv2019({ strict: false }).compile(canonical);
     expect(validate(normalized)).toBe(true);

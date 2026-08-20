@@ -13,7 +13,7 @@ import {
   type FinalReadiness,
   type RunFinalStatus,
 } from '../../types.js';
-import { readConvergenceState } from '../../core/convergence.js';
+import { convergenceReport, readConvergenceState } from '../../core/convergence.js';
 
 function jsonArrayLength(file: string, key: string): number {
   try {
@@ -161,7 +161,7 @@ function iterationSummaryLine(ctx: RunContext, iteration: number, critique: stri
       0,
     ) ?? 0;
   const omittedCategories = [...new Set(deliveries.flatMap((item) => item.omittedCategories))];
-  return `- v${iteration}: critic=${raw}, accepted=${accepted}, applied=${applied}, addressed=${health.addressed}, new=${health.newIssues}, invalid=${health.invalid}, valid_addressed_pct=${health.pct}, lineage=${JSON.stringify(convergence.lineage)}, grounding=${JSON.stringify(convergence.grounding)}, evidence_kinds=${JSON.stringify(convergence.evidenceKinds)}, plan_lines=${planLines}, plan_bytes=${planBytes}, retained_mandatory_bytes=${mandatoryBytes}, retained_optional_bytes=${optionalBytes}, issue_budget=${state?.issueBudget.used ?? raw}/${state?.issueBudget.limit ?? 'unknown'}, issue_budget_exhausted=${String(state?.issueBudget.exhausted ?? false)}, invariants_active=${activeInvariants}, invariants_covered=${coveredInvariants}, invariant_occurrences_unresolved=${unresolvedOccurrences}, relationship_coverage=${relationshipCoverage(ctx.work, iteration)}, omitted_optional_categories=${omittedCategories.join('|') || 'none'}, continuation_or_stop_reason=${state?.stopReason ?? 'unavailable'}`;
+  return `- v${iteration}: critic=${raw}, accepted=${accepted}, applied=${applied}, addressed=${health.addressed}, new=${health.newIssues}, invalid=${health.invalid}, valid_addressed_pct=${health.pct}, lineage=${JSON.stringify(convergence.lineage)}, grounding=${JSON.stringify(convergence.grounding)}, evidence_kinds=${JSON.stringify(convergence.evidenceKinds)}, plan_lines=${planLines}, plan_bytes=${planBytes}, retained_mandatory_bytes=${mandatoryBytes}, retained_optional_bytes=${optionalBytes}, issue_budget=${state?.issueBudget.used ?? raw}/${state?.issueBudget.limit ?? 'unknown'}, issue_budget_exhausted=${String(state?.issueBudget.exhausted ?? false)}, invariants_active=${activeInvariants}, invariants_covered=${coveredInvariants}, invariant_occurrences_unresolved=${unresolvedOccurrences}, relationship_coverage=${relationshipCoverage(ctx.work, iteration)}, opportunities=${state?.opportunities.length ?? 0}, decision=${state?.decision ?? 'unavailable'}, reason_codes=${state !== undefined && state.reasonCodes.length > 0 ? state.reasonCodes.join('|') : 'none'}, omitted_optional_categories=${omittedCategories.length > 0 ? omittedCategories.join('|') : 'none'}, continuation_or_stop_reason=${state?.stopReason ?? 'unavailable'}`;
 }
 
 export function buildRunReport(
@@ -174,13 +174,7 @@ export function buildRunReport(
   const packageDir = path.join(ctx.work, PACKAGE_DIR_NAME);
   const splitDecision = readSplitDecision(ctx.work);
   const health = finalHealth(ctx);
-  const convergence: ConvergenceReport = {
-    promise: ctx.convergence.promise,
-    satisfied: ctx.convergence.satisfied,
-    artifactPath: path.join(ctx.work, 'convergence.final.json'),
-    exhaustedLimits: [...ctx.convergence.exhaustedLimits],
-    unresolvedCoverage: [...ctx.convergence.unresolvedCoverage],
-  };
+  const convergence = convergenceReport(ctx.work, ctx.convergence);
   return {
     workDir: ctx.work,
     iterations: iter,
@@ -248,9 +242,11 @@ export function writeSummary(ctx: RunContext, input: SummaryInput): void {
   const facts = input.finalFacts;
   if (facts.convergence !== undefined) {
     lines.push(
-      `- convergence: promise=${facts.convergence.promise}, satisfied=${String(facts.convergence.satisfied)}, exhausted_limits=${facts.convergence.exhaustedLimits.join(',') || 'none'}, unresolved_coverage=${facts.convergence.unresolvedCoverage.length}`,
+      `- convergence: decision=${facts.convergence.decision}, reason_codes=${facts.convergence.reasonCodes.join(',') || 'none'}, promise=${facts.convergence.promise}, satisfied=${String(facts.convergence.satisfied)}, exhausted_limits=${facts.convergence.exhaustedLimits.join(',') || 'none'}, unresolved_coverage=${facts.convergence.unresolvedCoverage.length}, applicable_domains=${facts.convergence.applicableRiskDomains.join(',') || 'none'}, high_risk_domains=${facts.convergence.highRiskDomains.join(',') || 'none'}, opportunities=${facts.convergence.opportunityCount}`,
     );
     lines.push(`- convergence_artifact: \`${facts.convergence.artifactPath}\``);
+    lines.push(`- readiness_contract: \`${path.join(ctx.work, 'readiness-contract.json')}\``);
+    lines.push(`- opportunities_artifact: \`${path.join(ctx.work, 'opportunities.json')}\``);
     if (facts.convergence.unresolvedCoverage.length > 0) {
       lines.push(
         `- convergence_unresolved_ids: ${facts.convergence.unresolvedCoverage.join(', ')}`,

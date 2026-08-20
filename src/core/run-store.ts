@@ -12,7 +12,15 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { HaltError } from '../runtime/halt.js';
-import type { ConvergenceReport, FinalReadiness, RunFinalStatus } from '../types.js';
+import type {
+  CompletenessPromise,
+  ConvergenceLimit,
+  ConvergenceReport,
+  FinalReadiness,
+  ReadinessDecision,
+  RiskDomain,
+  RunFinalStatus,
+} from '../types.js';
 
 export type RunState = 'running' | 'finished' | 'failed' | 'blocked';
 
@@ -72,6 +80,31 @@ export interface RunStateProbes {
 
 const RUN_ID_TS_WIDTH = 9;
 const RUN_ID_RANDOM_BYTES = 10;
+const LEGACY_CONVERGENCE_REASON = 'legacy-state-requires-review';
+const READINESS_DECISIONS = [
+  'ready',
+  'revision-required',
+  'unable-to-decide',
+  'limits-exhausted',
+] as const satisfies readonly ReadinessDecision[];
+const CONVERGENCE_LIMITS = [
+  'issue-budget',
+  'iteration-cap',
+  'provider-context',
+  'unknown-provider-context',
+  'authoritative-scope',
+  'assurance-appetite',
+] as const satisfies readonly ConvergenceLimit[];
+const RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+] as const satisfies readonly RiskDomain[];
 
 // `r<ts36>-<hex>`: a constant non-digit prefix keeps every id from ever starting
 // with a digit (so a bare all-digits selector is unambiguously a pid), while the
@@ -138,6 +171,136 @@ function serializeRecord(record: RunRecord): string {
   return `${JSON.stringify(record, null, 2)}\n`;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? [...value]
+    : undefined;
+}
+
+function enumArray<T extends string>(value: unknown, allowed: readonly T[]): T[] | undefined {
+  const strings = stringArray(value);
+  return strings?.every((entry): entry is T => allowed.includes(entry as T)) === true
+    ? strings
+    : undefined;
+}
+
+function filteredEnumArray<T extends string>(value: unknown, allowed: readonly T[]): T[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is T => typeof entry === 'string' && allowed.includes(entry as T))
+    : [];
+}
+
+function storedCompletenessPromise(value: unknown): CompletenessPromise | undefined {
+  if (value === 'best-effort' || value === 'cumulative' || value === 'exhaustive') {
+    return value;
+  }
+  return undefined;
+}
+
+function completenessPromise(value: unknown, quality: string): CompletenessPromise {
+  const stored = storedCompletenessPromise(value);
+  if (stored !== undefined) {
+    return stored;
+  }
+  return quality === 'thorough'
+    ? 'exhaustive'
+    : quality === 'balanced'
+      ? 'cumulative'
+      : 'best-effort';
+}
+
+function readinessDecision(value: unknown): ReadinessDecision | undefined {
+  return typeof value === 'string' && READINESS_DECISIONS.includes(value as ReadinessDecision)
+    ? (value as ReadinessDecision)
+    : undefined;
+}
+
+function normalizeFinalConvergence(
+  value: unknown,
+  record: Pick<RunRecord, 'quality' | 'workDir'>,
+): ConvergenceReport | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const source = objectValue(value) ?? {};
+  const promise = completenessPromise(source.promise, record.quality);
+  const artifactPath =
+    typeof source.artifactPath === 'string'
+      ? source.artifactPath
+      : path.join(record.workDir, 'convergence.final.json');
+  const exhaustedLimits = enumArray(source.exhaustedLimits, CONVERGENCE_LIMITS);
+  const unresolvedCoverage = stringArray(source.unresolvedCoverage);
+  const decision = readinessDecision(source.decision);
+  const reasonCodes = stringArray(source.reasonCodes);
+  const applicableRiskDomains = enumArray(source.applicableRiskDomains, RISK_DOMAINS);
+  const highRiskDomains = enumArray(source.highRiskDomains, RISK_DOMAINS);
+  const opportunityCount = source.opportunityCount;
+  const isCurrentReport =
+    storedCompletenessPromise(source.promise) !== undefined &&
+    typeof source.artifactPath === 'string' &&
+    source.artifactPath !== '' &&
+    decision !== undefined &&
+    source.satisfied === (decision === 'ready') &&
+    exhaustedLimits !== undefined &&
+    unresolvedCoverage !== undefined &&
+    reasonCodes !== undefined &&
+    applicableRiskDomains !== undefined &&
+    highRiskDomains !== undefined &&
+    typeof opportunityCount === 'number' &&
+    Number.isInteger(opportunityCount) &&
+    opportunityCount >= 0;
+  if (isCurrentReport) {
+    return {
+      ...source,
+      promise,
+      satisfied: decision === 'ready',
+      artifactPath,
+      exhaustedLimits,
+      unresolvedCoverage,
+      decision,
+      reasonCodes,
+      applicableRiskDomains,
+      highRiskDomains,
+      opportunityCount,
+    };
+  }
+  const legacyReasons = reasonCodes ?? [];
+  if (!legacyReasons.includes(LEGACY_CONVERGENCE_REASON)) {
+    legacyReasons.push(LEGACY_CONVERGENCE_REASON);
+  }
+  return {
+    ...source,
+    promise,
+    satisfied: false,
+    artifactPath,
+    exhaustedLimits:
+      exhaustedLimits ?? filteredEnumArray(source.exhaustedLimits, CONVERGENCE_LIMITS),
+    unresolvedCoverage: unresolvedCoverage ?? [],
+    decision: 'unable-to-decide',
+    reasonCodes: legacyReasons,
+    applicableRiskDomains:
+      applicableRiskDomains ?? filteredEnumArray(source.applicableRiskDomains, RISK_DOMAINS),
+    highRiskDomains: highRiskDomains ?? filteredEnumArray(source.highRiskDomains, RISK_DOMAINS),
+    opportunityCount:
+      typeof opportunityCount === 'number' &&
+      Number.isInteger(opportunityCount) &&
+      opportunityCount >= 0
+        ? opportunityCount
+        : 0,
+  };
+}
+
+function normalizeRunRecord(record: RunRecord): RunRecord {
+  const finalConvergence = normalizeFinalConvergence(record.finalConvergence, record);
+  return finalConvergence === undefined ? record : { ...record, finalConvergence };
+}
+
 // Sole owner of record creation. The exclusive `wx` open is the atomic create
 // and the only collision check. Without a fixed id it regenerates on collision
 // and retries internally; with the launch parent's pre-minted id a collision is
@@ -197,9 +360,10 @@ export function readRunRecords(stateDir: string): RunRecord[] {
       continue;
     }
     try {
-      records.push(
-        JSON.parse(readFileSync(runRecordPath(stateDir, entry.slice(0, -5)), 'utf8')) as RunRecord,
-      );
+      const record = JSON.parse(
+        readFileSync(runRecordPath(stateDir, entry.slice(0, -5)), 'utf8'),
+      ) as RunRecord;
+      records.push(normalizeRunRecord(record));
     } catch {
       continue;
     }

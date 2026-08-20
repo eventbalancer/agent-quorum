@@ -20,6 +20,11 @@ import {
 } from '../../core/schema.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
 import { retainedRolePrompt } from './retained-context.js';
+import {
+  parseReadinessAssessment,
+  ReadinessContractValidationError,
+  type ReadinessAssessment,
+} from '../../core/readiness-contract.js';
 
 const ONE_SHOT_OUTPUT_MODE =
   'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
@@ -40,6 +45,10 @@ const SPLIT_META_OUTPUT_MODE =
   '- mark accepted or downgraded issues as applied only when the revised plan actually addresses them;\n' +
   '- put only self-rejected minor/nit accepted items in rejected_append;\n' +
   '- do not include plan_markdown or any other markdown content in this JSON.';
+
+const READ_ONLY_ASSESSMENT_TOOLS = 'Read,Grep,Glob';
+const READ_ONLY_ASSESSMENT_DISALLOWED_TOOLS =
+  'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
 
 function jqRawRender(value: JsonValue | undefined): string {
   if (typeof value === 'string') {
@@ -123,6 +132,55 @@ export async function runCreatorCreate(
   normalizePlanDocument(outFile);
   validatePlanDocumentShape(outFile);
   requireCreatorCreateShape(ctx, outFile);
+}
+
+export async function runCreatorReadinessAssessment(
+  ctx: RunContext,
+  outFile: string,
+): Promise<ReadinessAssessment> {
+  const directPlan =
+    ctx.mode === 'plan'
+      ? `\n\n## Direct plan (declared implementation scope)\n${readStripped(ctx.inputPath)}`
+      : '';
+  const basePrompt =
+    '## Output mode: readiness assessment\n' +
+    'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
+    'Perform the read-only Assessment Mode from the plan-creator skill. Establish the requested implementation boundary, assess all eight fixed risk domains, and surface only unresolved operator-owned material questions. Do not draft or edit a plan.' +
+    directPlan;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'assessment',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.readinessContractSchema,
+    basePrompt,
+  });
+  const status = await providerRun(
+    ctx.provider,
+    'creator',
+    'json',
+    outFile,
+    ctx.skills.creatorSkill,
+    ctx.skills.readinessContractSchema,
+    READ_ONLY_ASSESSMENT_TOOLS,
+    READ_ONLY_ASSESSMENT_DISALLOWED_TOOLS,
+    prompt,
+  );
+  if (status !== 0) {
+    throw new HaltError(`creator readiness assessment failed (${status})`, status, true);
+  }
+  if (!nonEmptyFile(outFile) || !validateSchema(outFile, ctx.skills.readinessContractSchema)) {
+    throw new HaltError('creator readiness assessment failed schema validation', 3, true);
+  }
+  try {
+    return parseReadinessAssessment(readFileSync(outFile, 'utf8'));
+  } catch (error) {
+    if (error instanceof ReadinessContractValidationError) {
+      throw new HaltError(`creator readiness assessment is invalid: ${error.message}`, 3, true);
+    }
+    throw error;
+  }
 }
 
 async function runCreatorUpdateOneShot(

@@ -21,6 +21,7 @@ scope: intermediate | final
 canonical_plan: no | plan.final.md
 plan_sha256: <present for final scope>
 critique_context: <current, advisory, or unavailable>
+frontmatter_status: orchestration projection only
 
 ## Plan
 <full text of the plan being evaluated>
@@ -30,6 +31,8 @@ critique_context: <current, advisory, or unavailable>
 ```
 
 For `scope: final`, the Plan is the authoritative post-fix canonical artifact. The critique context may predate it and is advisory only: independently verify readiness from the supplied final plan, using the critique to check whether concerns still appear unresolved. For `scope: intermediate`, the critique is current for that plan revision.
+
+The leading plan frontmatter `status` is an orchestration projection, not semantic evidence. Evaluate the plan body and applicable assurance evidence identically when a status-only rebind changes `clean` to `needs-review` or vice versa; never change the verdict solely because of that field.
 
 ## Output contract
 
@@ -55,12 +58,12 @@ Return `ready: true` **only** when all of the following hold:
 
 1. **Concrete file list.** Every phase names specific files it touches — no vague "relevant files" or TBD references.
 2. **Per-phase acceptance gates.** Each phase has a verifiable acceptance condition an engineer can check after completing it.
-3. **No open blocker or major concern.** The Critique may contain minor/nit issues; those do not block readiness. If you see any concern that a skilled reviewer would call a blocker or major, return `ready: false`.
+3. **No open blocker or major concern.** If you see any concern that a skilled reviewer would call a blocker or major, return `ready: false`. Non-blocking opportunities are advisory and do not affect the verdict.
 4. **No ambiguous design gaps.** The plan must not leave open design questions that an implementer would have to resolve during execution (e.g., "TBD approach", "choose between X and Y", "see if this works").
 5. **Consistent internal references.** File paths, function names, and line anchors cited in the plan are plausible given the stated context (you are not required to read the codebase, but internally contradictory references are a gap).
 6. **Cumulative coverage.** Independently assess every retained invariant and occurrence against the exact candidate, and verify every authoritative relationship has coherent implementation and release coverage. Set `coverage_complete` only when none is omitted; list every unresolved occurrence ID. Prior role conclusions are disputable evidence and cannot override current plan facts.
 
-Return `ready: false` and a brief `rationale` if **any** of those conditions fail. Do not approve a plan that has open gaps just because the critic only raised nits — the critique covers the plan's logical issues, not its completeness.
+Return `ready: false` and a brief `rationale` if **any** of those conditions fail. Do not approve a plan that has open gaps just because the critic raised no material issue — the critique covers the plan's logical issues, not its completeness.
 
 ## Anti-rubber-stamp
 

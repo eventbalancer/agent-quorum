@@ -414,7 +414,7 @@ function printIterationProof(
   const planBytes = existsSync(plan) ? statSync(plan).size : 0;
   const reason = state?.stopReason ?? 'unavailable';
   write(
-    `      ${pal.DIM}proof: lineage=${rich === undefined ? 'unavailable' : JSON.stringify(rich.lineage)} grounding=${rich === undefined ? 'unavailable' : JSON.stringify(rich.grounding)} evidence_kinds=${rich === undefined ? 'unavailable' : JSON.stringify(rich.evidenceKinds)} plan=${planLines}L/${planBytes}B retained=${mandatoryBytes}B+${optionalBytes}B invariants=${active}/${covered}/${unresolved} relationships=${relationshipCoverage(work, iteration)} omitted=${omitted.join('|') || 'none'} reason=${reason}${pal.R}\n`,
+    `      ${pal.DIM}proof: lineage=${rich === undefined ? 'unavailable' : JSON.stringify(rich.lineage)} grounding=${rich === undefined ? 'unavailable' : JSON.stringify(rich.grounding)} evidence_kinds=${rich === undefined ? 'unavailable' : JSON.stringify(rich.evidenceKinds)} plan=${planLines}L/${planBytes}B retained=${mandatoryBytes}B+${optionalBytes}B invariants=${active}/${covered}/${unresolved} relationships=${relationshipCoverage(work, iteration)} opportunities=${state?.opportunities.length ?? 0} decision=${state?.decision ?? 'unavailable'} reason_codes=${state !== undefined && state.reasonCodes.length > 0 ? state.reasonCodes.join('|') : 'none'} omitted=${omitted.length > 0 ? omitted.join('|') : 'none'} reason=${reason}${pal.R}\n`,
   );
 }
 
@@ -514,8 +514,14 @@ function printFinalArtifactStatus(work: string, pal: Palette, write: (s: string)
     statusLine?.split(':').slice(1).join(':').trim() ?? '',
   )?.[1];
   const exactCandidateProof = convergence?.canonicalPlanSha256 === fileSha256(finalPlan);
-  if (convergence?.satisfied === true && declaredStatus === 'clean' && exactCandidateProof) {
-    write(`  ${pal.GRN}✓ converged (proof satisfied; final status clean)${pal.R}\n`);
+  if (convergence?.decision === 'ready' && declaredStatus === 'clean' && exactCandidateProof) {
+    write(`  ${pal.GRN}✓ ready (final status clean; exact plan bound)${pal.R}\n`);
+    return;
+  }
+  if (declaredStatus === 'blocked') {
+    write(
+      `  ${pal.YEL}final artifact present; status=blocked decision=${convergence?.decision ?? 'unavailable'} reasons=${convergence !== undefined && convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'unavailable'}${pal.R}\n`,
+    );
     return;
   }
   if (
@@ -524,12 +530,8 @@ function printFinalArtifactStatus(work: string, pal: Palette, write: (s: string)
     (convergence?.satisfied === true && !exactCandidateProof)
   ) {
     write(
-      `  ${pal.YEL}final artifact present; status=needs-review (proof not satisfied)${pal.R}\n`,
+      `  ${pal.YEL}final artifact present; status=needs-review decision=${convergence?.decision ?? 'unavailable'} reasons=${convergence !== undefined && convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'unavailable'}${pal.R}\n`,
     );
-    return;
-  }
-  if (declaredStatus === 'blocked') {
-    write(`  ${pal.YEL}final artifact present; status=blocked${pal.R}\n`);
     return;
   }
   write(`  ${pal.YEL}final artifact present; convergence proof unavailable${pal.R}\n`);

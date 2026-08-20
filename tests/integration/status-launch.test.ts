@@ -64,7 +64,7 @@ function statusIssue(id: string, overrides: Record<string, unknown> = {}) {
   return {
     id,
     addresses: null,
-    severity: 'minor',
+    severity: 'major',
     category: 'testability',
     claim: `${id} claim`,
     evidence: '',
@@ -390,34 +390,55 @@ describe('status convergence proof', () => {
     expect(status.stdout).toContain('invariants=1/1/1');
     expect(status.stdout).toContain('relationships=1/1');
     expect(status.stdout).toContain('omitted=resolved-minor-history');
-    expect(status.stdout).toContain('status=needs-review (proof not satisfied)');
-    expect(status.stdout).not.toContain('✓ converged');
+    expect(status.stdout).toContain(
+      'final artifact present; status=needs-review decision=revision-required',
+    );
+    expect(status.stdout).not.toContain('✓ ready');
     expect(readFileSync(run.log, 'utf8')).not.toContain(RUN_INPUT_BODY_SENTINEL);
 
     writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Clean final');
     convergence.invariants = [];
     convergence.unresolvedCoverage = [];
+    convergence.decision = 'ready';
+    convergence.reasonCodes = [];
     convergence.satisfied = true;
-    convergence.stopReason = 'proof-satisfied';
+    convergence.stopReason = 'ready';
     convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
     writeConvergenceState(run.work, convergence, 'convergence.final.json');
     appendFileSync(path.join(run.work, 'plan.final.md'), '\nSame-version mutation\n');
     const staleProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(staleProof.status).toBe(0);
-    expect(staleProof.stdout).toContain('status=needs-review (proof not satisfied)');
-    expect(staleProof.stdout).not.toContain('✓ converged');
+    expect(staleProof.stdout).toContain(
+      'final artifact present; status=needs-review decision=ready',
+    );
+    expect(staleProof.stdout).not.toContain('✓ ready');
 
     convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
     writeConvergenceState(run.work, convergence, 'convergence.final.json');
     const exactProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(exactProof.status).toBe(0);
-    expect(exactProof.stdout).toContain('✓ converged (proof satisfied; final status clean)');
+    expect(exactProof.stdout).toContain('✓ ready (final status clean; exact plan bound)');
 
     writeFileSync(path.join(run.work, 'critique.v3.json'), '{"interrupted":');
     const interrupted = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(interrupted.status).toBe(0);
     expect(interrupted.stdout).toContain('proof: lineage=unavailable grounding=unavailable');
-    expect(interrupted.stdout).toContain('✓ converged (proof satisfied; final status clean)');
+    expect(interrupted.stdout).toContain('✓ ready (final status clean; exact plan bound)');
+
+    writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Blocked final', {
+      status: 'blocked',
+    });
+    convergence.decision = 'unable-to-decide';
+    convergence.reasonCodes = ['final-artifact-needs-review'];
+    convergence.satisfied = false;
+    convergence.stopReason = 'unable-to-decide:final-artifact-needs-review';
+    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    const blocked = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
+    expect(blocked.status).toBe(0);
+    expect(blocked.stdout).toContain(
+      'final artifact present; status=blocked decision=unable-to-decide reasons=legacy-proof-incomplete',
+    );
+    expect(blocked.stdout).not.toContain('final artifact present; status=needs-review');
 
     process.kill(run.pid, 'SIGTERM');
     await sleep(1500);

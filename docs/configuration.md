@@ -116,9 +116,15 @@ context, or downgrade convergence;
 `inputTokenLimit` remains readable for configuration and artifact compatibility
 until admission can use provider/model-appropriate token evidence.
 
-Quality promises are additive to the existing topology: `quick` is
-`best-effort`, `balanced` is cumulative system-aware coverage, and `thorough` is
-exhaustive in-scope coverage with no optional category omitted.
+Quality is the frozen assurance appetite for a run. `quick` uses compact
+context, the creator one-shot path, and standard-risk assurance without Judge;
+`balanced` uses cumulative applicable-domain context and permits targeted Judge
+gates for high risk; `thorough` additionally requires an exhaustive scan inside
+applicable domains and disables provider sessions. The compatibility promises
+remain `best-effort`, `cumulative`, and `exhaustive`. Applicability and risk,
+not the preset name alone, determine which proof gates are required. High-risk
+work under an appetite that cannot provide its required Judge/scan reports the
+`assurance-appetite` convergence limit.
 
 | Tool field (per role)                                                          | Applies to                             |
 | ------------------------------------------------------------------------------ | -------------------------------------- |

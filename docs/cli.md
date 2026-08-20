@@ -74,7 +74,7 @@ agent-quorum plan [--iters N] [--quality {quick,balanced,thorough}] [--no-fix] [
 | Flag                                  | Purpose                                                |
 | ------------------------------------- | ------------------------------------------------------ |
 | `--iters N` / `--max-iters N`         | Set the iteration cap.                                 |
-| `--quality {quick,balanced,thorough}` | Select the role-call topology and session behavior.    |
+| `--quality {quick,balanced,thorough}` | Select the cost/context/assurance appetite.            |
 | `--fix` / `--no-fix`                  | Enable or skip the post-loop reference fix pass.       |
 | `--locale <tag>`                      | Set the human-interaction locale; defaults to `en`.    |
 | `--translate` / `--no-translate`      | Enable or skip the companion final-plan localization.  |
@@ -88,12 +88,19 @@ the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
 keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
-`--quality` also controls Judge readiness. `balanced` and `thorough` enable an
-intermediate Judge call after a critic pass with no open blocker or major issue;
-`ready: true` is only one convergence prerequisite and cannot override
-unresolved invariant, system, scan, or limit evidence.
-After the fix pass, every non-blocked run at those quality levels evaluates the
-exact canonical `plan.final.md` again. `quick` skips Judge entirely.
+Before creating `plan.v0.md`, every run performs a read-only readiness
+assessment and freezes `readiness-contract.json`. Material questions reuse the
+Telegram clarification transport. With clarification disabled, the run still
+produces a plan, but unresolved material questions make the decision
+`unable-to-decide`.
+
+`--quality` is an assurance appetite rather than an unconditional Judge switch.
+`quick` supports standard-risk assurance without Judge; `balanced` permits
+targeted intermediate and final Judge calls for applicable high-risk domains;
+`thorough` adds an exhaustive scan inside applicable domains. A high-risk task
+whose appetite cannot supply a required gate reports `limits-exhausted` with
+reason code `assurance-appetite`. A Judge `ready: true` cannot override
+unresolved invariant, system, scan, boundary, or limit evidence.
 
 After the fix pass and before the single `FINAL:` status, a deterministic split
 policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
@@ -101,9 +108,10 @@ policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
 `plan.split.json` and, when it fires, emits and validates a `plan.package/`.
 `summary.md` adds a `split_decision` line and, when a package is present,
 `package_dir`, `package_documents`, and `package_validation` lines. Structural
-status is reported independently from final readiness. A broken plan/package
-blocks the run (exit 6) before final Judge; otherwise `ready: false` or an
-unknown verdict after provider retries produces `needs-review` with exit 0.
+status is reported independently from the four-way readiness decision. A broken
+plan/package blocks the run (exit 6) before final Judge; otherwise `ready` maps
+to frontmatter/status `clean`, while `revision-required`, `unable-to-decide`,
+and `limits-exhausted` map to `needs-review` with exit 0.
 `judge.final.meta.json` binds the reported result to the SHA-256 of the exact
 canonical plan, while `judge.final.json` exists only for a schema-valid verdict.
 The summary records `structural_status` and optional `structural_reason`; a
@@ -112,19 +120,18 @@ and `final_judge_metadata` path. The Judge rationale remains available in the
 structured readiness artifact and public result, but is not copied into normal
 logs or the summary.
 
-`quick`, `balanced`, and `thorough` promise best-effort, cumulative, and
-exhaustive coverage respectively. When the issue budget, iteration cap,
-or authoritative scope prevents proof, the latest usable plan is retained with
-frontmatter `status: needs-review`, exit 0, and explicit limit/coverage IDs in
-`summary.md` and `convergence.final.json`. Input byte estimates and configured
-token limits remain telemetry and do not currently block provider calls. Logs
-never call an unproved result clean or converged.
+The compatibility promises remain `best-effort`, `cumulative`, and `exhaustive`
+for `quick`, `balanced`, and `thorough`. New code should use `decision` and
+`reasonCodes`: `satisfied` is exactly `decision === 'ready'`. Missing required
+external evidence is an `unable-to-decide` reason, not a limit. Issue-budget,
+iteration-cap, and insufficient assurance appetite are limits. Input byte
+estimates and configured token limits remain telemetry and do not currently
+block provider calls.
 
-With a positional existing plan, the original request is explicitly
-unavailable and the plan becomes the declared scope. A direct-plan run can be
-`clean` only when the critic reports a complete scan and explicitly verifies
-`declared-scope` or `direct-plan-scope`; otherwise the latest plan is retained as
-`needs-review` with the `authoritative-scope` limitation.
+With a positional existing plan, the original request is explicitly unavailable
+and the creator assessment freezes the plan-derived boundary. The applicable
+domain scan, rather than a universal authoritative-scope requirement, decides
+whether that boundary is complete.
 
 Before the loop starts, every runner the effective config selects is
 preflighted: installation on `PATH`, then an authentication probe
@@ -196,10 +203,11 @@ process tree, artifact counts, an iteration table computed from the `$WORK`
 artifacts, interventions, the last log event, and follow/stop hints. Each
 completed iteration includes lineage and grounding classes, plan and retained
 context sizes, invariant and relationship coverage, optional omissions, and its
-continuation/stop reason. A final artifact is labelled converged only when
-`convergence.final.json` is proof-satisfied, its candidate digest matches the
+continuation/stop reason. Status also shows the decision, reason codes, and
+opportunity count. A final artifact is labelled ready only when
+`convergence.final.json` has `decision: ready`, its candidate digest matches the
 current `plan.final.md`, and that plan declares `status: clean`; artifact
-presence alone is never treated as convergence.
+presence alone is never treated as readiness.
 
 With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same

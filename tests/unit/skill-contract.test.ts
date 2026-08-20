@@ -22,6 +22,18 @@ const REQUIRED_CRITIC_CONTEXT = [
   'quality-and-limits',
 ] as const;
 const CRITIC_SCOPE_COVERAGE = ['original-scope', 'declared-scope', 'direct-plan-scope'] as const;
+const CRITIC_RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+] as const;
+const CRITIC_APPLICABILITY = ['applicable', 'not-applicable', 'unknown'] as const;
+const CRITIC_RISK_LEVELS = ['standard', 'high'] as const;
 const SYSTEMIC_DISPOSITION = {
   issue_id: 'C1',
   scope: 'local',
@@ -169,6 +181,63 @@ const schemaContracts: readonly SchemaContract[] = [
     },
   },
   {
+    name: 'bounded-readiness critique vocabulary',
+    schemaFile: skills.criticSchema,
+    valid: {
+      plan_version: 0,
+      summary: 'A high-risk applicable domain lacks required evidence.',
+      domain_assessments: [
+        {
+          domain: 'security-privacy-authorization',
+          applicability: 'applicable',
+          risk: 'high',
+          complete: false,
+          rationale: 'The plan changes authorization behavior.',
+          unavailable_evidence: ['deployed policy source'],
+          evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+        },
+      ],
+      boundary_challenges: [
+        {
+          id: 'B1',
+          kind: 'scope-expansion',
+          claim: 'The policy service must enter scope.',
+          rationale: 'The scoped implementation cannot enforce the policy alone.',
+          evidence: '## Out of Scope',
+          evidence_refs: [{ kind: 'plan-section', section: 'Out of Scope' }],
+        },
+      ],
+      opportunities: [
+        {
+          fingerprint: 'navigation-link',
+          claim: 'Add a navigation link.',
+          evidence: '## Verification',
+          suggested_improvement: 'Link the verification section.',
+          evidence_refs: [{ kind: 'plan-section', section: 'Verification' }],
+        },
+      ],
+      issues: [],
+    },
+    invalid: {
+      plan_version: 0,
+      summary: 'Uses an unsupported applicability token.',
+      domain_assessments: [
+        {
+          domain: 'security-privacy-authorization',
+          applicability: 'unresolved',
+          risk: 'high',
+          complete: false,
+          rationale: 'The plan changes authorization behavior.',
+          unavailable_evidence: [],
+          evidence_refs: [],
+        },
+      ],
+      boundary_challenges: [],
+      opportunities: [],
+      issues: [],
+    },
+  },
+  {
     name: 'fix review',
     schemaFile: skills.reviewerSchema,
     valid: { approval: 'accept', concerns: [] },
@@ -255,6 +324,24 @@ describe('critic proof vocabulary contract', () => {
     expect(schema.properties.review.properties.scope_coverage.items.enum).toEqual(
       CRITIC_SCOPE_COVERAGE,
     );
+  });
+
+  it('keeps bounded-readiness domain, applicability, and risk vocabularies aligned', () => {
+    const skill = skillText(skills.criticSkill);
+    for (const token of [...CRITIC_RISK_DOMAINS, ...CRITIC_APPLICABILITY, ...CRITIC_RISK_LEVELS]) {
+      expect(skill).toContain(`\`${token}\``);
+    }
+
+    const schema = JSON.parse(readFileSync(skills.criticSchema, 'utf8')) as {
+      $defs: {
+        riskDomain: { enum: string[] };
+        applicability: { enum: string[] };
+        riskLevel: { enum: string[] };
+      };
+    };
+    expect(schema.$defs.riskDomain.enum).toEqual(CRITIC_RISK_DOMAINS);
+    expect(schema.$defs.applicability.enum).toEqual(CRITIC_APPLICABILITY);
+    expect(schema.$defs.riskLevel.enum).toEqual(CRITIC_RISK_LEVELS);
   });
 });
 

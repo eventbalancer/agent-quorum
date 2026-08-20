@@ -18,6 +18,8 @@ import {
   recordCreatorUpdate,
   recordCritique,
   recordSystemCheck,
+  requiresReadinessJudge,
+  requiresSystemCoverage,
   writeConvergenceState,
 } from '../../core/convergence.js';
 import { validateSystemCoverage, writeSystemCheck } from '../../core/system-context.js';
@@ -149,6 +151,26 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
   const matrix = ctx.provider.matrix;
   let iter = startIter;
 
+  classifyTerminal(ctx.convergence);
+  if (
+    ctx.convergence.readinessContractDigest !== undefined &&
+    (ctx.convergence.decision === 'limits-exhausted' ||
+      (ctx.convergence.decision === 'unable-to-decide' &&
+        ctx.convergence.reasonCodes.some((reason) =>
+          [
+            'boundary-challenge',
+            'material-question-unresolved',
+            'risk-applicability-unresolved',
+            'required-evidence-unavailable',
+            'legacy-state-requires-review',
+          ].includes(reason),
+        )))
+  ) {
+    copyFileSync(path.join(ctx.work, `plan.v${iter}.md`), path.join(ctx.work, 'plan.final.md'));
+    writeConvergenceState(ctx.work, ctx.convergence);
+    return { iter, converged: false };
+  }
+
   while (iter < ctx.settings.maxIters) {
     const plan = path.join(ctx.work, `plan.v${iter}.md`);
     const critique = path.join(ctx.work, `critique.v${iter}.json`);
@@ -169,7 +191,11 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       work: ctx.work,
       projectRoot: ctx.provider.projectRoot,
     });
-    const systemCheck = validateSystemCoverage(ctx.systemContext, plan, iter);
+    const systemCheck = validateSystemCoverage(ctx.systemContext, plan, iter, {
+      required: requiresSystemCoverage(ctx.convergence),
+      inScope: ctx.readinessBoundary?.inScope ?? ctx.systemContext.declaredScope,
+      outOfScope: ctx.readinessBoundary?.outOfScope ?? [],
+    });
     recordSystemCheck(ctx.convergence, systemCheck);
     writeSystemCheck(ctx.work, systemCheck);
     const rawIssues =
@@ -186,7 +212,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
 
     logCritiqueHealth(ctx, iter, critique);
 
-    if (ctx.quality.judge === 1) {
+    if (requiresReadinessJudge(ctx.convergence) && ctx.convergence.judgeAllowed) {
       const { blockers, majors } = openBlockerMajor(critiqueJson);
       if (blockers === 0 && majors === 0) {
         log(
@@ -202,15 +228,18 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       }
     }
 
-    classifyTerminal(ctx.convergence, ctx.quality.judge === 1);
+    classifyTerminal(ctx.convergence);
     writeConvergenceState(ctx.work, ctx.convergence);
-    if (ctx.convergence.satisfied) {
-      log(`proof-satisfied at v${iter}`);
+    const decision = ctx.convergence.decision;
+    if (decision === 'ready') {
+      log(`ready at v${iter}`);
       copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
       break;
     }
-    if (issuesCount === 0) {
-      log(`v${iter} is usable but convergence proof is incomplete`);
+    if (decision === 'unable-to-decide' || decision === 'limits-exhausted') {
+      log(
+        `v${iter} retained with decision=${ctx.convergence.decision} reasons=${ctx.convergence.reasonCodes.join(',')}`,
+      );
       copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
       break;
     }
@@ -280,7 +309,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     copyFileSync(path.join(ctx.work, `plan.v${iter}.md`), path.join(ctx.work, 'plan.final.md'));
   }
 
-  classifyTerminal(ctx.convergence, ctx.quality.judge === 1);
+  classifyTerminal(ctx.convergence);
   writeConvergenceState(ctx.work, ctx.convergence);
 
   return { iter, converged: ctx.convergence.satisfied };

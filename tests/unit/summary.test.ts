@@ -31,7 +31,7 @@ function issue(id: string, overrides: Record<string, unknown> = {}) {
   return {
     id,
     addresses: null,
-    severity: 'minor',
+    severity: 'major',
     category: 'testability',
     claim: `${id} claim`,
     evidence: '',
@@ -86,7 +86,7 @@ describe('convergence summary', () => {
       issue('C3', { addresses: 'v0.C3' }),
       issue('C4', { addresses: 'v0.C2' }),
       issue('C5', { introduced_by_revision: 'plan.v2.md' }),
-      issue('C6', { severity: 'nit', duplicate_of: 'r1' }),
+      issue('C6', { duplicate_of: 'r1' }),
       issue('C7', {
         addresses: 'v9.C1',
         evidence_refs: [{ kind: 'repository', value: 'source.ts:2' }],
@@ -99,6 +99,11 @@ describe('convergence summary', () => {
       artifactPath: path.join(work, 'convergence.final.json'),
       exhaustedLimits: [],
       unresolvedCoverage: ['fixture-unproved'],
+      decision: 'unable-to-decide' as const,
+      reasonCodes: ['fixture-unproved'],
+      applicableRiskDomains: [],
+      highRiskDomains: [],
+      opportunityCount: 0,
     };
     writeSummary(ctx, {
       iter: 2,
@@ -120,7 +125,7 @@ describe('convergence summary', () => {
 
     const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
     expect(summary).toContain(
-      'lineage={"new":1,"refinement":1,"reopened":1,"recurring":1,"revision-regression":1,"rejected-duplicate":1,"invalid-lineage":1}',
+      'lineage={"new":1,"refinement":1,"reopened":1,"recurring":1,"revision-regression":1,"rejected-duplicate":0,"invalid-lineage":2}',
     );
     expect(summary).toContain('"format-mismatch":1');
     expect(summary).not.toContain('PROMPT_BODY_SENTINEL');

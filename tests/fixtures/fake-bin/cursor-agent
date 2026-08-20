@@ -56,7 +56,13 @@ if (( is_resume == 1 )) && [[ -n "${FAKE_CURSOR_FAIL_ON_RESUME:-}" ]]; then
   exit 1
 fi
 session_id="${FAKE_CURSOR_SESSION_ID:-cursor-session-fixture}"
-if (( is_json == 1 )); then
+if (( is_json == 1 )) && [[ "$prompt" == *$'\nstage: assessment\n'* ]]; then
+  if [[ -n "${FAKE_READINESS_ASSESSMENT:-}" ]]; then
+    result="$(cat "$FAKE_READINESS_ASSESSMENT")"
+  else
+    result='{"boundary":{"goal":"Produce the fixture implementation plan.","in_scope":["fixture implementation"],"out_of_scope":["unrelated fixture behavior"],"constraints":["preserve fixture contracts"]},"domain_assessments":[{"domain":"correctness","applicability":"applicable","risk":"standard","rationale":"Fixture correctness assessment.","evidence_refs":[]},{"domain":"public-compatibility","applicability":"not-applicable","risk":"standard","rationale":"Fixture compatibility assessment.","evidence_refs":[]},{"domain":"data-migrations","applicability":"not-applicable","risk":"standard","rationale":"Fixture migration assessment.","evidence_refs":[]},{"domain":"security-privacy-authorization","applicability":"not-applicable","risk":"standard","rationale":"Fixture security assessment.","evidence_refs":[]},{"domain":"concurrency-distributed-ordering","applicability":"not-applicable","risk":"standard","rationale":"Fixture concurrency assessment.","evidence_refs":[]},{"domain":"cross-repository-delivery","applicability":"not-applicable","risk":"standard","rationale":"Fixture delivery assessment.","evidence_refs":[]},{"domain":"production-operability","applicability":"not-applicable","risk":"standard","rationale":"Fixture operability assessment.","evidence_refs":[]},{"domain":"performance-cost","applicability":"not-applicable","risk":"standard","rationale":"Fixture performance assessment.","evidence_refs":[]}],"material_questions":[]}'
+  fi
+elif (( is_json == 1 )); then
   result_file="${FAKE_CURSOR_JSON_RESULT:-}"
   if [[ -n "${FAKE_CURSOR_JSON_CALLS:-}" ]]; then
     calls=0
@@ -79,7 +85,9 @@ else
   fi
   [[ -n "$result_file" ]] || { echo "fake cursor-agent: missing FAKE_CURSOR_MARKDOWN_RESULT" >&2; exit 2; }
 fi
-result="$(cat "$result_file")"
+if [[ -z "${result:-}" ]]; then
+  result="$(cat "$result_file")"
+fi
 # Liveness injection: stay alive and silent (no stdout) for the requested
 # seconds so the wall-clock heartbeat fires and the byte-idle watchdog can still
 # trigger, then emit the normal success result if not killed first.

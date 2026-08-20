@@ -228,6 +228,10 @@ describe('runPlanLoop (in-process)', () => {
     );
     const fixed = path.join(tmp, 'fixed.md');
     writeStructuredPlanFile(fixed, 'API Fixed');
+    writeFileSync(
+      fixed,
+      readFileSync(fixed, 'utf8').replace('status: clean', 'status: needs-review'),
+    );
     const review = path.join(tmp, 'review.json');
     writeFileSync(
       review,
@@ -265,6 +269,14 @@ describe('runPlanLoop (in-process)', () => {
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(fixed, 'utf8'),
     );
+    expect(result).toMatchObject({
+      status: 'needs-review',
+      convergence: {
+        decision: 'unable-to-decide',
+        satisfied: false,
+        reasonCodes: ['fresh-review-required'],
+      },
+    });
     expect(existsSync(path.join(work, 'plan.final.before-fix.md'))).toBe(true);
     expect(existsSync(path.join(work, 'plan.final.pt-BR.md'))).toBe(true);
     expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- final_localized:');
@@ -371,7 +383,7 @@ describe('runPlanLoop (in-process)', () => {
   });
 
   it.each(['needs-review', 'blocked'] as const)(
-    'keeps a structurally valid plan declaring %s usable but not clean',
+    'projects a structurally valid plan declaring %s from the readiness decision',
     async (declaredStatus) => {
       const input = path.join(tmp, `${declaredStatus}.md`);
       writeStructuredPlanFile(input, 'Declared Review State', { status: declaredStatus });
@@ -388,12 +400,10 @@ describe('runPlanLoop (in-process)', () => {
       );
 
       expect(result.exitCode).toBe(ExitCode.Ok);
-      expect(result.status).toBe('needs-review');
-      expect(result.structuralStatus).toBe('needs-review');
-      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain(
-        'status: needs-review',
-      );
-      expect(readFileSync(path.join(work, 'run.log'), 'utf8')).not.toContain('FINAL: clean');
+      expect(result.status).toBe('clean');
+      expect(result.structuralStatus).toBe('clean');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
+      expect(readFileSync(path.join(work, 'run.log'), 'utf8')).toContain('FINAL: clean');
     },
   );
 });

@@ -154,6 +154,39 @@ describe('run records', () => {
       HaltError,
     );
   });
+
+  it('projects a legacy convergence record conservatively without rewriting it', () => {
+    const written = writeRunRecord(stateDir, draft());
+    const file = runRecordPath(stateDir, written.runId);
+    const stored = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    stored.finalConvergence = {
+      promise: 'cumulative',
+      satisfied: true,
+      artifactPath: '/tmp/legacy-convergence.json',
+      exhaustedLimits: ['iteration-cap'],
+      unresolvedCoverage: ['legacy-proof-gap'],
+      legacyNote: 'preserve me',
+    };
+    writeFileSync(file, `${JSON.stringify(stored, null, 2)}\n`);
+    const before = readFileSync(file);
+
+    const convergence = readRunRecords(stateDir)[0]?.finalConvergence;
+
+    expect(convergence).toMatchObject({
+      promise: 'cumulative',
+      satisfied: false,
+      artifactPath: '/tmp/legacy-convergence.json',
+      exhaustedLimits: ['iteration-cap'],
+      unresolvedCoverage: ['legacy-proof-gap'],
+      decision: 'unable-to-decide',
+      reasonCodes: ['legacy-state-requires-review'],
+      applicableRiskDomains: [],
+      highRiskDomains: [],
+      opportunityCount: 0,
+      legacyNote: 'preserve me',
+    });
+    expect(readFileSync(file)).toEqual(before);
+  });
 });
 
 describe('readRunRecordsAcross', () => {

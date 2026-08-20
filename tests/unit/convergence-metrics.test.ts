@@ -17,7 +17,7 @@ function issue(id: string, evidenceRef: Record<string, unknown>) {
   return {
     id,
     addresses: null,
-    severity: 'minor',
+    severity: 'major',
     category: 'testability',
     claim: `${id} claim`,
     evidence: '',
@@ -174,7 +174,7 @@ describe('rich convergence health', () => {
           { ...issue('C3', evidence), addresses: 'v0.C3' },
           { ...issue('C4', evidence), addresses: 'v0.C2' },
           { ...issue('C5', evidence), introduced_by_revision: 'plan.v2.md' },
-          { ...issue('C6', evidence), severity: 'nit', duplicate_of: 'r1' },
+          { ...issue('C6', evidence), duplicate_of: 'r1' },
           { ...issue('C7', { kind: 'repository', value: 'source.ts:2' }), addresses: 'v9.C1' },
         ],
       }),
@@ -187,8 +187,8 @@ describe('rich convergence health', () => {
       reopened: 1,
       recurring: 1,
       'revision-regression': 1,
-      'rejected-duplicate': 1,
-      'invalid-lineage': 1,
+      'rejected-duplicate': 0,
+      'invalid-lineage': 2,
     });
     expect(health.grounding['format-mismatch']).toBe(1);
   });

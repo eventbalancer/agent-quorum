@@ -180,6 +180,34 @@ describe('renderListing', () => {
     const plain = renderListing(listCandidates(), { color: false });
     expect(plain).toContain('[finished]  final=needs-review readiness=not-ready');
   });
+
+  it('adds decision facts for terminal standard-risk runs without Judge readiness', () => {
+    const written = writeRunRecord(stateDir, draft({ name: 'standard' }));
+    finalizeRunRecord(stateDir, written.runId, {
+      state: 'finished',
+      exitCode: 0,
+      finalStatus: 'needs-review',
+      structuralStatus: 'clean',
+      finalConvergence: {
+        promise: 'cumulative',
+        satisfied: false,
+        artifactPath: path.join(written.workDir, 'convergence.final.json'),
+        exhaustedLimits: [],
+        unresolvedCoverage: ['canonical-plan:fresh-review-required'],
+        decision: 'unable-to-decide',
+        reasonCodes: ['fresh-review-required'],
+        applicableRiskDomains: ['correctness'],
+        highRiskDomains: [],
+        opportunityCount: 0,
+      },
+    });
+
+    const plain = renderListing(listCandidates(), { color: false });
+    expect(plain).toContain(
+      '[finished]  final=needs-review decision=unable-to-decide reasons=fresh-review-required',
+    );
+    expect(plain).not.toContain('readiness=');
+  });
 });
 
 describe('pickInteractive', () => {

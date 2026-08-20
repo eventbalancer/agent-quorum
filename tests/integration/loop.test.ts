@@ -12,6 +12,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runIterationLoop } from '../../src/stages/plan/loop.js';
 import type { RunContext } from '../../src/core/run-context.js';
+import { applyReadinessPolicy } from '../../src/core/convergence.js';
+import { RISK_DOMAINS } from '../../src/core/readiness-contract.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import {
   fixtureMatrix,
@@ -68,6 +70,22 @@ let capture: StderrCapture;
 
 function makeContext(options: TestContextOptions = {}): RunContext {
   return makeTestRunContext(tmp, work, scratch, options);
+}
+
+function applyHighRiskPolicy(ctx: RunContext): void {
+  applyReadinessPolicy(ctx.convergence, {
+    contractDigest: 'test-readiness-contract',
+    judgeAllowed: true,
+    exhaustiveApplicableDomains: false,
+    unresolvedMaterialQuestionIds: [],
+    riskDomains: RISK_DOMAINS.map((domain) => ({
+      domain,
+      applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+      risk: domain === 'correctness' ? 'high' : 'standard',
+      rationale: `Fixture assessment for ${domain}.`,
+      evidenceRefs: [],
+    })),
+  });
 }
 
 function seedWork(): void {
@@ -153,7 +171,7 @@ describe('iteration loop', () => {
     );
 
     expect(capture.text()).toContain('stable-diff telemetry at v1');
-    expect(capture.text()).toContain('proof-satisfied at v1');
+    expect(capture.text()).toContain('ready at v1');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
     );
@@ -351,7 +369,7 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('proof-satisfied at v1');
+    expect(capture.text()).toContain('ready at v1');
     expect(readFileSync(path.join(work, 'plan.revision.v0.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
@@ -429,7 +447,7 @@ describe('iteration loop', () => {
     expect(capture.text()).toContain(
       'WARNING: one-shot creator update failed; falling back to split update',
     );
-    expect(capture.text()).toContain('proof-satisfied at v1');
+    expect(capture.text()).toContain('ready at v1');
     expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
       readFileSync(revision, 'utf8'),
     );
@@ -545,7 +563,7 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('proof-satisfied at v0');
+    expect(capture.text()).toContain('ready at v0');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
       readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
     );
@@ -574,7 +592,7 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).not.toContain('proof-satisfied at v0');
+    expect(capture.text()).not.toContain('ready at v0');
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
   });
 
@@ -631,6 +649,7 @@ describe('iteration loop', () => {
       }),
     );
     const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
+    applyHighRiskPolicy(ctx);
 
     await withEnvAsync(
       {
@@ -643,7 +662,7 @@ describe('iteration loop', () => {
       () => runIterationLoop(ctx, 0),
     );
 
-    expect(capture.text()).toContain('proof-satisfied at v0');
+    expect(capture.text()).toContain('ready at v0');
     expect(capture.text()).not.toContain('implementation-ready');
     expect(JSON.parse(readFileSync(path.join(work, 'judge.v0.json'), 'utf8'))).toMatchObject({
       ready: true,
@@ -663,6 +682,7 @@ describe('iteration loop', () => {
     const invalidUpdate = path.join(tmp, 'invalid-update.json');
     writeFileSync(invalidUpdate, '');
     const ctx = makeContext({ quality: 'balanced', maxIters: 1 });
+    applyHighRiskPolicy(ctx);
     ctx.convergence.judgeApprovedPlanVersion = 0;
 
     await expect(
@@ -679,7 +699,7 @@ describe('iteration loop', () => {
 
     expect(capture.text()).toContain('intermediate judge skipped');
     expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
-    expect(capture.text()).not.toContain('proof-satisfied at v0');
+    expect(capture.text()).not.toContain('ready at v0');
   });
 
   it('judge is absent from log when quality is quick (AC-6)', async () => {

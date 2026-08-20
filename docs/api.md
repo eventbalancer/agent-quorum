@@ -31,6 +31,10 @@ import {
   type Runner,
   type Quality,
   type CompletenessPromise,
+  type ReadinessDecision,
+  type RiskApplicability,
+  type RiskLevel,
+  type RiskDomain,
   type ConvergenceLimit,
   type ConvergenceReport,
 } from 'agent-quorum';
@@ -95,10 +99,15 @@ const result = await runPlanLoop({
 //   readinessPath: '/abs/path/loop-my-plan/judge.final.meta.json',
 //   convergence: {
 //     promise: 'cumulative',
+//     decision: 'ready',
+//     reasonCodes: [],
 //     satisfied: true,
 //     artifactPath: '/abs/path/loop-my-plan/convergence.final.json',
 //     exhaustedLimits: [],
 //     unresolvedCoverage: [],
+//     applicableRiskDomains: ['correctness'],
+//     highRiskDomains: ['correctness'],
+//     opportunityCount: 0,
 //   },
 // }
 ```
@@ -117,22 +126,28 @@ callers are unaffected. `runId` and `name` identify the run (the same id the
 start surfaces report); they are additive on `RunResult`/`LaunchResult`.
 Completed runs add `status`/`reason` and the independent
 `structuralStatus`/`structuralReason`. A non-blocked `balanced` or `thorough`
-run also returns `readiness` and `readinessPath`. `readiness.ready` is `true` or
-`false` for a schema-valid final verdict; it is `null` with `evaluated: false`
-when the provider retry policy ends without a valid verdict. The SHA-256 binds
-that result to the exact bytes of `plan.final.md`. Negative and unknown
-readiness both return exit code 0 with `status: 'needs-review'`. Quick and
-structurally blocked runs omit the readiness fields. The durable `RunRecord`
+run with applicable high risk also returns `readiness` and `readinessPath`.
+Standard-risk runs omit those fields regardless of quality. `readiness.ready`
+is `true` or `false` for a schema-valid final verdict; it is `null` with
+`evaluated: false` when the provider retry policy ends without a valid verdict.
+The SHA-256 binds that result to the exact bytes of `plan.final.md`. Negative
+and unknown readiness both return exit code 0 with `status: 'needs-review'`.
+Structurally blocked runs omit the readiness fields. The durable `RunRecord`
 stores the same facts as `finalStatus`/`finalReason`,
 `structuralStatus`/`structuralReason`, and `finalReadiness`. `LaunchResult`
 remains unchanged because detachment occurs before completion.
-`RunResult.convergence` is an additive proof projection with the selected
-completeness promise, satisfaction flag, canonical artifact path, exhausted
-limits, and unresolved coverage IDs. The durable run record stores the same
-projection as `finalConvergence`. Missing fields on legacy records remain
-readable and mean unavailable, not implicitly satisfied.
+`RunResult.convergence` is an additive proof projection with the four-way
+`decision`, stable `reasonCodes`, applicable/high-risk domains, opportunity
+count, selected compatibility promise, satisfaction flag, canonical artifact
+path, exhausted limits, and unresolved coverage IDs. `satisfied` is retained
+for compatibility and is exactly `decision === 'ready'`. `ready` projects to
+final status `clean`; other non-structural decisions project to `needs-review`.
+The durable run record stores the same projection as `finalConvergence`.
+Missing fields on legacy records remain readable and mean unavailable, not
+implicitly satisfied.
 `ConvergenceLimit` identifies `issue-budget`, `iteration-cap`,
-`provider-context`, `unknown-provider-context`, or `authoritative-scope`.
+`provider-context`, `unknown-provider-context`, `authoritative-scope`, or
+`assurance-appetite`.
 The two provider-context values remain readable for legacy artifacts and future
 provider/model-aware admission; the current UTF-8 estimate is telemetry-only
 and does not emit them.
@@ -152,11 +167,21 @@ compatibility. The options are typed alternatives to mutating `process.env` — 
 environment; ambient `AGENT_QUORUM_*` env still fills any unset key (see
 [configuration.md](configuration.md)).
 
-When `input` is an existing plan rather than a prompt, the original request is
-reported as unavailable and the plan itself is the declared scope. Such a run
-can be `clean` only when an independent critic explicitly verifies the complete
-declared/direct-plan scope; otherwise `authoritative-scope` remains visible and
-the result is `needs-review`.
+Every new run performs a read-only creator assessment before `plan.v0.md` and
+writes an immutable `readiness-contract.json`. It freezes source/system digests,
+the implementation boundary, appetite, eight-domain applicability/risk,
+material questions, and operator-decision IDs. With clarification unavailable,
+unresolved material questions preserve a useful plan but force
+`unable-to-decide`. A positional existing plan supplies the assessment boundary
+even though the original request remains explicitly unavailable.
+
+`convergence.vN.json` and `convergence.final.json` use schema version 2. The
+reader migrates v1 conservatively and requires a fresh review before `ready`;
+legacy resumes without a frozen contract receive a legacy-derived contract and
+cannot be treated as automatically proven. `opportunities.json` stores
+non-blocking improvement fingerprints and first/last-seen versions. Those
+entries are reported by API/summary/status but do not trigger a creator update
+or affect readiness.
 
 When a bot token and chat id resolve (from `secrets`/`config`, the
 `<home>/secrets.json`+`config.json` store, or ambient env), `runPlanLoop` also

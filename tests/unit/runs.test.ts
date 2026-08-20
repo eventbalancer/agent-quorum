@@ -14,7 +14,12 @@ let tmp: string;
 let stateDir: string;
 let savedStateDir: string | undefined;
 
-function seed(name: string, withLog: boolean, withReadiness = false): string {
+function seed(
+  name: string,
+  withLog: boolean,
+  withReadiness = false,
+  withConvergence = false,
+): string {
   const workDir = path.join(tmp, 'plans', `loop-${name}`);
   mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
@@ -49,6 +54,24 @@ function seed(name: string, withLog: boolean, withReadiness = false): string {
             ready: false,
             rationale: 'missing acceptance gate',
             planSha256: 'a'.repeat(64),
+          },
+        }
+      : {}),
+    ...(withConvergence
+      ? {
+          finalStatus: 'clean' as const,
+          structuralStatus: 'clean' as const,
+          finalConvergence: {
+            promise: 'cumulative' as const,
+            satisfied: true,
+            artifactPath: path.join(workDir, 'convergence.final.json'),
+            exhaustedLimits: [],
+            unresolvedCoverage: [],
+            decision: 'ready' as const,
+            reasonCodes: [],
+            applicableRiskDomains: ['correctness' as const],
+            highRiskDomains: [],
+            opportunityCount: 1,
           },
         }
       : {}),
@@ -107,6 +130,17 @@ describe('runShowCli', () => {
     expect(sink.text()).toContain('structural: clean');
     expect(sink.text()).toContain('readiness: not-ready');
     expect(sink.text()).toContain('rationale: missing acceptance gate');
+  });
+
+  it('prints final decision facts for a standard-risk run without Judge readiness', () => {
+    seed('standard', true, false, true);
+    const sink = collect();
+    expect(runShowCli(['standard'], sink.out)).toBe(0);
+    expect(sink.text()).toContain('final:   clean');
+    expect(sink.text()).toContain('structural: clean');
+    expect(sink.text()).toContain('decision: ready');
+    expect(sink.text()).toContain('reasons: none');
+    expect(sink.text()).not.toContain('readiness:');
   });
 
   it('throws HaltError(2) when nothing resolves', () => {

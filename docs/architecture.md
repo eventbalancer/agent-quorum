@@ -12,7 +12,7 @@ config store (`override > env > store > default` per field):
 | fixer      | proposes/applies reference fixes after the bounded loop                       | markdown                |
 | reviewer   | reviews the fixer's proposal                                                  | JSON (review schema)    |
 | translator | renders the localized companion plan                                          | markdown                |
-| judge      | evaluates intermediate and canonical final readiness (balanced/thorough only) | JSON (readiness schema) |
+| judge      | evaluates intermediate and canonical final readiness for applicable high risk | JSON (readiness schema) |
 
 Three provider adapters share one entry point (`providerRun`) that owns the
 single retry wrapper:
@@ -70,22 +70,41 @@ disallowed tools.
 
 ## The loop
 
+Before `plan.v0.md`, a read-only creator assessment identifies the immutable
+goal, `inScope`, `outOfScope`, constraints, and the applicability and risk of
+eight fixed domains. Material questions use the existing clarification
+transport; the creator reassesses after answers, then the orchestrator freezes
+`readiness-contract.json` with source/system digests, assurance appetite, and
+operator-decision IDs. Disabled clarification does not prevent a useful plan,
+but an unresolved material question prevents `ready`. A later scope expansion,
+out-of-scope removal, appetite increase, or contract/digest mismatch is a
+boundary challenge and terminates the run as `unable-to-decide`; the frozen
+contract is never rewritten in place.
+
 Per iteration: critic → sanitize → schema-validate (exit 3) → lineage,
 grounding, invariant, and deterministic-system checks → optional intermediate
-Judge → creator update. Zero issues, Judge approval, accepted severity, and a
-`diff` below `diffThreshold` are telemetry or convergence candidates; none can
-finalize by itself. A plan converges only after an independent critic has
-reviewed that exact revision, the quality scan is complete, no blocker/major is
-open, every invariant occurrence is satisfied or evidence-backed
-not-applicable, deterministic system checks pass, no material bound is
-exhausted, and the required intermediate Judge approved it. The iteration cap
-preserves the latest revision but reports `needs-review` when it has not been
-re-reviewed.
-Quality shapes the topology: `quick` runs the creator one-shot (plan + metadata
-in one JSON call, with a split-call fallback), `balanced` splits markdown and
-metadata and enables both judge gates, `thorough` additionally disables provider
-sessions. Intermediate `judge.vN.json` evidence is historical and is never used
-as the final verdict.
+Judge → creator update. Critic `issues` contain only in-boundary blocker/major
+concerns. Legacy minor/nit findings are sanitized into `opportunities.json`
+before reduction and never cause a creator update. Zero issues, Judge approval,
+accepted severity, and a `diff` below `diffThreshold` are telemetry or gate
+inputs; none is an independent stop condition.
+
+One deterministic reducer has four outcomes, in order: a material boundary fork
+or unavailable required evidence is `unable-to-decide`; exhausted appetite with
+material work is `limits-exhausted`; in-boundary blocker/major work is
+`revision-required`; all applicable gates complete is `ready`. Only
+`revision-required` continues to creator revision. Every other outcome retains
+the latest usable version and terminates the loop. `satisfied` remains the
+compatibility projection `decision === 'ready'`.
+
+Quality is appetite, not a universal proof checklist. `quick` runs the creator
+one-shot and supports standard-risk assurance without Judge. `balanced` uses
+full cumulative context and targeted Judge calls for applicable high-risk
+domains. `thorough` additionally requires an exhaustive scan within applicable
+domains and disables provider sessions. A high-risk task under an appetite that
+cannot supply its required Judge or scan terminates as
+`limits-exhausted:assurance-appetite`. Intermediate `judge.vN.json` evidence is
+historical and is never used as the canonical final verdict.
 
 Every planning role receives one mandatory retained-context block: original
 scope (or an explicit direct-plan/unavailable marker), authoritative topology,
@@ -97,12 +116,17 @@ content is never reduced. Input byte estimates and configured token limits are
 recorded as telemetry but do not currently stop provider calls or prevent a
 completeness proof.
 
-For declared cross-repository scope, `system-context.json` resolves repository
+When the frozen `cross-repository-delivery` domain is applicable,
+`system-context.json` resolves repository
 names, aliases, and paths actually named by the prompt or direct plan, then
 extracts stable relationships from `ecosystem.yaml`, scoped package manifests,
 Compose files, and CI workflows. Repository paths must remain inside the
 project root after real-path resolution; traversal, absolute-path, and symlink
-escapes are excluded and become explicit coverage limitations. A
+escapes are excluded and become explicit coverage limitations. When the domain
+is not applicable, unavailable topology remains telemetry and cannot block
+readiness. When required topology evidence is unavailable, it is reported
+separately from plan mismatches and produces `unable-to-decide`, not a
+fabricated limit. A
 multi-repository ecosystem alone does not make a task cross-repository, and
 unrelated per-repository sources do not enter the scoped digest. An explicit
 multi-repository request whose repositories cannot be resolved records a
@@ -130,19 +154,24 @@ post-fix `plan.final.md` and records `plan.split.json` on every run; when the
 policy fires (size signal exceeded or a structural threshold met), the
 orchestrator emits a self-contained `plan.package/` derived from the post-fix
 plan and validates it into `package-findings.json`. Shape, reference, and package
-health first resolve an independent structural status. A structurally blocked
-run exits 6 without final Judge evaluation. Every other `balanced`/`thorough`
-run then evaluates the exact post-fix `plan.final.md`; schema-invalid output is
-retried inside the configured provider policy. A negative or unavailable final
-verdict preserves the plan and resolves the overall status to `needs-review`
-with exit 0. `quick` remains exempt. Metadata-only `STRUCTURAL`, `FINAL JUDGE`,
-and translation progress are logged without role bodies. When a locale is
+health first resolve an independent structural status. The orchestration then
+projects `ready` to frontmatter `clean` and every other non-structural decision
+to `needs-review`, runs applicable deterministic checks, obtains any required
+final high-risk Judge verdict, and binds the exact plan bytes. A structurally
+blocked run exits 6 without final Judge evaluation. A negative or unavailable
+required verdict preserves the plan and resolves the overall status to
+`needs-review` with exit 0. Standard-risk work remains Judge-exempt regardless
+of quality. Metadata-only `STRUCTURAL`, `FINAL JUDGE`, and translation progress
+are logged without role bodies. When a locale is
 requested, the non-fatal translate pass renders `plan.final.<locale>.md`; the
 orchestrator then rechecks the canonical plan digest before emitting the single
 overall `FINAL:` line and closing the run with `summary.md`. A clean result
 requires the canonical plan, deterministic system check, and applicable final
 Judge verdict to carry the same SHA-256; an intervening same-version mutation
 is retained as a usable `needs-review` result instead of being silently rebound.
+If the first final Judge result induces a status-only `needs-review` projection,
+the recheck must ignore that orchestration field; an inconsistent semantic
+verdict produces `unable-to-decide`.
 
 The package is a deterministic projection of the post-fix `plan.final.md`: its
 `plan.md` is a byte-for-byte copy and its phase docs are slices, so no role ever
@@ -165,7 +194,8 @@ normalized to the same contract by the packaged role skills.
 
 ## Artifact contract ($WORK)
 
-`system-context.json`, version-matched `convergence.vN.json` and
+`readiness-contract.json`, `opportunities.json`, `system-context.json`,
+version-matched `convergence.vN.json` and
 `system-check.vN.json`, canonical `convergence.final.json` and
 `system-check.final.json`, `plan.vN.md`, `critique.vN.json`, `update.vN.json`,
 `update-meta.vN.json`,
@@ -191,13 +221,19 @@ split, findings, and package artifacts). A registry copy of
 `clarify.offset` stores the run's cursor into the shared Telegram clarification
 journal, not a raw Telegram bot offset.
 
+`convergence.vN.json` and `convergence.final.json` use schema version 2. A v1
+reader migrates conservatively, preserves compatibility fields, and requires a
+fresh review before `ready`; legacy resumes without a frozen contract receive a
+legacy-derived contract and cannot be proven automatically.
+
 Each iteration line in `summary.md` reports lineage and grounding class counts,
 evidence-kind counts, plan lines and bytes, mandatory and optional retained
 bytes, issue-budget use, active/resolved invariant coverage, unresolved
 occurrences, deterministic relationship coverage, optional omissions, and the
-continuation or stop reason. The final convergence lines record the selected
-promise, whether it was satisfied, exhausted limits, unresolved coverage IDs,
-and the canonical convergence artifact. These fields are metadata only; prompt,
+continuation or stop reason. The final convergence lines record the decision,
+stable reason codes, applicable/high-risk domains, opportunity count, selected
+compatibility promise, whether it was satisfied, exhausted limits, unresolved
+coverage IDs, and the canonical convergence artifact. These fields are metadata only; prompt,
 plan, source, provider, and tool-argument bodies remain excluded.
 
 Lineage counts distinguish `new`, `refinement` of the immediately relevant
@@ -229,10 +265,12 @@ the runner exits 143 on signal.
 `AGENT_QUORUM_RESUME=1` finds the last stable plan. New-format revisions require
 their matching valid convergence state, which is committed only after that
 revision's rejected-disposition ledger entries; legacy revisions retain
-update-schema selection and bootstrap a conservative unproved state. Before mutating durable
-run artifacts, resume rejects a changed source, quality promise, or iteration
-contract. It restores the iteration, critique, finding/invariant, context, and
-limit ledger; rewinds rejected and intervention-migration views; and archives
+update-schema selection and bootstrap a conservative unproved state. Before
+mutating durable run artifacts, resume rejects a changed source or frozen
+appetite contract and verifies the readiness-contract digest. It restores the
+iteration, boundary, appetite, critique, finding/invariant, opportunities,
+context, and limit ledgers; rewinds rejected and intervention-migration views;
+and archives
 stale final, localized-final, convergence, system-check, Judge, findings, and
 package artifacts. Convergence and deterministic check artifacts carry SHA-256
 bindings to the exact versioned or canonical plan bytes. A same-version plan

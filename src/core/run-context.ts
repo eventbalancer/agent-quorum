@@ -7,6 +7,7 @@ import type { PassKnobs } from './knobs.js';
 import type { SplitPolicy } from './split-policy.js';
 import type { RunMode } from '../types.js';
 import type { ConvergenceState } from './convergence.js';
+import type { ReadinessBoundary } from './readiness-contract.js';
 import type { SystemContext } from './system-context.js';
 
 export interface SkillPaths {
@@ -15,6 +16,7 @@ export interface SkillPaths {
   creatorSkill: string;
   creatorSchema: string;
   creatorMetaSchema: string;
+  readinessContractSchema: string;
   clarifySchema: string;
   fixerSkill: string;
   reviewerSkill: string;
@@ -33,6 +35,7 @@ export function skillPaths(packageRootDir: string): SkillPaths {
     creatorSkill: path.join(skills, 'plan-creator', 'SKILL.md'),
     creatorSchema: path.join(skills, 'plan-creator', 'update.schema.json'),
     creatorMetaSchema: path.join(skills, 'plan-creator', 'update-meta.schema.json'),
+    readinessContractSchema: path.join(skills, 'plan-creator', 'readiness-contract.schema.json'),
     clarifySchema: path.join(skills, 'plan-creator', 'clarify.schema.json'),
     fixerSkill: path.join(skills, 'plan-fixer', 'SKILL.md'),
     reviewerSkill: path.join(skills, 'plan-fix-reviewer', 'SKILL.md'),
@@ -73,6 +76,7 @@ export interface RunContext {
   resume: ResumeState;
   convergence: ConvergenceState;
   systemContext: SystemContext;
+  readinessBoundary?: ReadinessBoundary;
 }
 
 // Command-substitution capture semantics: file content with trailing newlines

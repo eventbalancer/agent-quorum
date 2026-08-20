@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "title": "PlanReadinessAssessment",
+  "type": "object",
+  "required": ["boundary", "domain_assessments", "material_questions"],
+  "additionalProperties": false,
+  "properties": {
+    "boundary": {
+      "type": "object",
+      "required": ["goal", "in_scope", "out_of_scope", "constraints"],
+      "additionalProperties": false,
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "in_scope": {
+          "$ref": "#/$defs/unique_strings"
+        },
+        "out_of_scope": {
+          "$ref": "#/$defs/unique_strings"
+        },
+        "constraints": {
+          "$ref": "#/$defs/unique_strings"
+        }
+      }
+    },
+    "domain_assessments": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["domain", "applicability", "risk", "rationale", "evidence_refs"],
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "public-compatibility",
+              "data-migrations",
+              "security-privacy-authorization",
+              "concurrency-distributed-ordering",
+              "cross-repository-delivery",
+              "production-operability",
+              "performance-cost"
+            ]
+          },
+          "applicability": {
+            "type": "string",
+            "enum": ["applicable", "not-applicable", "unknown"]
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["standard", "high"]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_refs": {
+            "$ref": "#/$defs/unique_strings"
+          }
+        }
+      }
+    },
+    "material_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "rationale", "options"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "unique_strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
