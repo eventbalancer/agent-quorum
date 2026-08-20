@@ -265,11 +265,12 @@ pnpm run benchmark:planning -- score --results <file> --key <file> --review <fil
 
 The planning benchmark corpus, schemas, rubric, and deterministic scoring are
 committed; live provider calls and expert-reference approval remain local
-operator actions and are not part of CI. Live runs require a clean worktree and
-verify that source files match the manifest's pinned implementation revision;
-the follow-up commit that records that revision may change only the manifest.
-The live `--output` directory must be outside the source repository so one task
-cannot contaminate the pinned workspace used by later tasks.
+operator actions and are not part of CI. The committed balanced snapshot runs
+all six roles through Codex with `gpt-5.5`. Live runs require a clean worktree
+and verify that source files match the manifest's pinned implementation
+revision; the follow-up commit that records that revision may change only the
+manifest. The live `--output` directory must be outside the source repository
+so one task cannot contaminate the pinned workspace used by later tasks.
 
 Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).

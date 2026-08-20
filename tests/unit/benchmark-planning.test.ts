@@ -207,6 +207,19 @@ describe('planning benchmark corpus', () => {
     }).not.toThrow();
   });
 
+  it('pins every benchmark role to Codex', () => {
+    const config = JSON.parse(
+      readFileSync(path.join(BENCHMARK_ROOT, 'provider-config.balanced.json'), 'utf8'),
+    ) as { roles: Record<string, { runner: string; model: string }> };
+
+    expect(Object.keys(config.roles)).toHaveLength(6);
+    expect(
+      Object.values(config.roles).every(
+        (role) => role.runner === 'codex' && role.model === 'gpt-5.5',
+      ),
+    ).toBe(true);
+  });
+
   it('rejects a corpus that weakens the exact task-count contract', () => {
     const { manifest, root } = loadPlanningBenchmark();
     const incomplete: PlanningBenchmarkManifest = {
