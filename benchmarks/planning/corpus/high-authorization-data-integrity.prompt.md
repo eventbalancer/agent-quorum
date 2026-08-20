@@ -8,6 +8,11 @@ the existing CLI intervention path.
 
 Use the current durable intervention ledger and run identity rules rather than a
 parallel store. Define trust boundaries, failure semantics, audit fields,
-concurrency behavior, tests, rollout, and rollback. Authentication technology is
-not yet selected, so identify the required operator decision instead of choosing
-credentials implicitly.
+concurrency behavior, tests, rollout, and rollback.
+
+The operator has selected signed bearer tokens validated by an injected verifier.
+The verified token supplies a stable operator subject ID, and a local policy maps
+that subject to permitted run IDs and target roles. Signing keys, rotation, and
+revocation remain external to the repository. Keep the endpoint disabled until
+both the verifier and authorization policy are configured; do not invent a
+second credential store.

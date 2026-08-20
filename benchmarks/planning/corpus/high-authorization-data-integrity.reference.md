@@ -2,13 +2,13 @@
 
 # Authorized Remote Interventions
 
-## Boundary decision
+## Frozen operator decisions
 
-Freeze the authenticated subject and authorization-policy contract before
-implementation. Because the credential mechanism is not selected, endpoint
-readiness is `unable-to-decide` until the operator chooses an identity verifier,
-key rotation/revocation path, and subject-to-run authorization source. Do not
-store or invent credentials in repository config.
+Use signed bearer tokens behind an injected verifier. Treat the verifier's stable
+subject ID as the authenticated identity, and authorize it through a local policy
+mapping subjects to exact run IDs and target roles. Signing keys, rotation, and
+revocation stay outside the repository. Keep the endpoint disabled until both
+the verifier and policy are configured; do not add a second credential store.
 
 ## Security and integrity invariants
 
@@ -20,7 +20,7 @@ store or invent credentials in repository config.
 - Audit metadata contains subject ID, request ID, authorization result, run ID,
   role, message digest, and timestamp, never the secret or raw message.
 
-## Implementation after the decision
+## Implementation
 
 1. Add the verifier behind an injected boundary and fail closed on unavailable,
    expired, revoked, malformed, or wrong-audience credentials.

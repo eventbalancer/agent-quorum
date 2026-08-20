@@ -220,6 +220,21 @@ describe('planning benchmark corpus', () => {
     ).toBe(true);
   });
 
+  it('keeps at least four high-risk tasks decidable from the frozen input', () => {
+    const authPrompt = readFileSync(
+      path.join(BENCHMARK_ROOT, 'corpus/high-authorization-data-integrity.prompt.md'),
+      'utf8',
+    );
+    const authReference = readFileSync(
+      path.join(BENCHMARK_ROOT, 'corpus/high-authorization-data-integrity.reference.md'),
+      'utf8',
+    );
+
+    expect(authPrompt).toContain('selected signed bearer tokens');
+    expect(authPrompt).toContain('local policy maps');
+    expect(authReference).not.toContain('readiness is `unable-to-decide`');
+  });
+
   it('rejects a corpus that weakens the exact task-count contract', () => {
     const { manifest, root } = loadPlanningBenchmark();
     const incomplete: PlanningBenchmarkManifest = {
