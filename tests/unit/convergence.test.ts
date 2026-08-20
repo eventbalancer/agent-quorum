@@ -14,6 +14,7 @@ import {
 } from '../../src/core/convergence.js';
 import { qualityMatrix } from '../../src/core/quality.js';
 import type { JsonValue } from '../../src/core/json.js';
+import { sanitizeUpdateJson } from '../../src/core/schema.js';
 
 function state() {
   return createConvergenceState({
@@ -363,6 +364,63 @@ describe('convergence reducer', () => {
         { id: 'I-v0-C1', severity: 'major', disposition: { scope: 'local' } },
       ]);
       expect(current.unresolvedCoverage).not.toContain('I-v0-C1:systemic-disposition');
+    } finally {
+      rmSync(evidenceWork, { recursive: true, force: true });
+    }
+  });
+
+  it('grounds a local disposition after provider evidence fields are normalized by kind', () => {
+    const current = state();
+    const evidenceWork = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-mixed-evidence.'));
+    const updateFile = path.join(evidenceWork, 'update.v0.json');
+    writeFileSync(path.join(evidenceWork, 'plan.v1.md'), '# Plan\n\n## Work Plan\n');
+    writeFileSync(
+      updateFile,
+      `${JSON.stringify({
+        plan_version: 1,
+        plan_markdown: '# Plan\n\n## Work Plan\n',
+        issues: [
+          {
+            id: 'C1',
+            verdict: 'accept',
+            verdict_reason: 'The revised section covers the only scoped consumer.',
+            final_severity: 'major',
+            duplicate_of: null,
+          },
+        ],
+        applied: ['C1'],
+        systemic_dispositions: [
+          {
+            issue_id: 'C1',
+            scope: 'local',
+            rationale: 'The correction is local to the Work Plan.',
+            evidence_refs: [
+              {
+                kind: 'plan-section',
+                value: 'The planned phase now covers the consumer.',
+                section: 'Work Plan',
+                phase: 'P1 Work',
+              },
+            ],
+            invariant: null,
+          },
+        ],
+        rejected_append: [],
+      })}\n`,
+    );
+    recordCritique(current, MATERIAL_CRITIQUE, 0);
+    try {
+      sanitizeUpdateJson(updateFile, 1);
+      const update = JSON.parse(readFileSync(updateFile, 'utf8')) as JsonValue;
+      recordCreatorUpdate(current, MATERIAL_CRITIQUE, update, 0, {
+        work: evidenceWork,
+        projectRoot: evidenceWork,
+      });
+
+      expect(current.unresolvedCoverage).not.toContain('I-v0-C1:systemic-disposition');
+      expect(current.findings[0]?.disposition.evidenceRefs).toEqual([
+        { kind: 'plan-section', section: 'Work Plan' },
+      ]);
     } finally {
       rmSync(evidenceWork, { recursive: true, force: true });
     }

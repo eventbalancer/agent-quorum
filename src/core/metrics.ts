@@ -157,7 +157,10 @@ export function critiqueHealth(
     }
     const obj = isJsonObject(issue) ? issue : {};
     total += 1;
-    if (!evidenceIsAnchored(obj.evidence)) {
+    if (
+      !evidenceIsAnchored(obj.evidence) &&
+      !evidenceReferencesStructurallyValid(obj.evidence_refs)
+    ) {
       unanchored += 1;
     }
     if (!toText(obj.id)) {

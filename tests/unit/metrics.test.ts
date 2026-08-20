@@ -101,6 +101,21 @@ describe('critique_health', () => {
     });
   });
 
+  it('treats structurally valid typed evidence as anchored', () => {
+    const current = path.join(tmp, 'typed-evidence.json');
+    writeCritique(current, [
+      {
+        id: 'C1',
+        addresses: null,
+        duplicate_of: null,
+        evidence: 'The phase omits a gate.',
+        evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      },
+    ]);
+
+    expect(critiqueHealth(work, schema, 0, current).unanchored).toBe(0);
+  });
+
   it('reports unanchored equal to total when evidence has no anchors (AC-3b)', () => {
     const current = path.join(tmp, 'ac3b.json');
     writeCritique(current, [

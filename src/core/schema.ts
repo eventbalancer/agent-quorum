@@ -134,6 +134,91 @@ const CRITIQUE_OPPORTUNITY_KEYS = [
   'evidence_refs',
 ];
 
+function sanitizedEvidenceRef(value: JsonValue): JsonObject {
+  const ref = isJsonObject(value) ? value : {};
+  const kind = typeof ref.kind === 'string' ? ref.kind : null;
+  const fallback = typeof ref.value === 'string' ? ref.value : undefined;
+  const result: JsonObject = { kind };
+  const keepFallback = (): void => {
+    if (fallback !== undefined) {
+      result.value = fallback;
+    }
+  };
+
+  switch (kind) {
+    case 'file-line':
+      if (
+        typeof ref.path === 'string' &&
+        typeof ref.line === 'number' &&
+        Number.isInteger(ref.line)
+      ) {
+        result.path = ref.path;
+        result.line = ref.line;
+      } else {
+        keepFallback();
+      }
+      break;
+    case 'plan-section':
+      if (typeof ref.section === 'string') {
+        result.section = ref.section;
+      } else {
+        keepFallback();
+      }
+      break;
+    case 'phase-gate':
+      if (typeof ref.phase === 'string' && typeof ref.gate === 'string') {
+        result.phase = ref.phase;
+        result.gate = ref.gate;
+      } else {
+        keepFallback();
+      }
+      break;
+    case 'command':
+      if (typeof ref.command === 'string') {
+        result.command = ref.command;
+      } else {
+        keepFallback();
+      }
+      break;
+    case 'repository':
+      if (typeof ref.repository === 'string') {
+        result.repository = ref.repository;
+      } else {
+        keepFallback();
+      }
+      break;
+    case 'topology':
+      if (typeof ref.topology_id === 'string') {
+        result.topology_id = ref.topology_id;
+      } else {
+        keepFallback();
+      }
+      break;
+    default:
+      keepFallback();
+  }
+  return result;
+}
+
+function sanitizedEvidenceRefs(value: JsonValue | undefined): JsonValue {
+  return Array.isArray(value) ? value.map(sanitizedEvidenceRef) : (value ?? null);
+}
+
+function sanitizedSystemicDispositions(value: JsonValue): JsonValue {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  return value.map((entry) => {
+    if (!isJsonObject(entry) || !('evidence_refs' in entry)) {
+      return entry;
+    }
+    return {
+      ...entry,
+      evidence_refs: sanitizedEvidenceRefs(entry.evidence_refs),
+    };
+  });
+}
+
 function sanitizedCritiqueIssue(issue: JsonObject): JsonObject {
   return {
     id: typeof issue.id === 'string' ? issue.id.replace(/^v[0-9]+\./, '') : (issue.id ?? null),
@@ -145,7 +230,9 @@ function sanitizedCritiqueIssue(issue: JsonObject): JsonObject {
     suggested_fix: issue.suggested_fix ?? null,
     confidence: 'confidence' in issue ? issue.confidence : null,
     duplicate_of: 'duplicate_of' in issue ? issue.duplicate_of : null,
-    ...('evidence_refs' in issue ? { evidence_refs: issue.evidence_refs } : {}),
+    ...('evidence_refs' in issue
+      ? { evidence_refs: sanitizedEvidenceRefs(issue.evidence_refs) }
+      : {}),
     ...('invariant_id' in issue ? { invariant_id: issue.invariant_id } : {}),
     ...('introduced_by_revision' in issue
       ? { introduced_by_revision: issue.introduced_by_revision }
@@ -176,7 +263,9 @@ function sanitizedCritiqueOpportunity(opportunity: JsonObject): JsonObject {
     claim,
     evidence,
     suggested_improvement: suggestedImprovement,
-    evidence_refs: Array.isArray(opportunity.evidence_refs) ? opportunity.evidence_refs : [],
+    evidence_refs: Array.isArray(opportunity.evidence_refs)
+      ? sanitizedEvidenceRefs(opportunity.evidence_refs)
+      : [],
   };
 }
 
@@ -353,7 +442,9 @@ export function sanitizeUpdateJson(file: string, expectedVersion?: number | stri
     issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
     applied: jqAlt(obj.applied, []),
     rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
-    ...('systemic_dispositions' in obj ? { systemic_dispositions: obj.systemic_dispositions } : {}),
+    ...('systemic_dispositions' in obj
+      ? { systemic_dispositions: sanitizedSystemicDispositions(obj.systemic_dispositions) }
+      : {}),
   });
 }
 
@@ -380,7 +471,9 @@ export function sanitizeUpdateMetaJson(file: string, expectedVersion?: number | 
     issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
     applied: jqAlt(obj.applied, []),
     rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
-    ...('systemic_dispositions' in obj ? { systemic_dispositions: obj.systemic_dispositions } : {}),
+    ...('systemic_dispositions' in obj
+      ? { systemic_dispositions: sanitizedSystemicDispositions(obj.systemic_dispositions) }
+      : {}),
   });
 }
 

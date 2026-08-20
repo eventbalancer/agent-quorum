@@ -33,6 +33,7 @@ interface SanitizedUpdate {
 interface SanitizedCritiqueIssue {
   id: string;
   addresses: string | null;
+  evidence_refs?: unknown[];
 }
 
 interface SanitizedCritiqueOpportunity {
@@ -144,6 +145,14 @@ describe('sanitizers', () => {
           category: 'correctness',
           claim: 'c',
           evidence: 'e',
+          evidence_refs: [
+            {
+              kind: 'plan-section',
+              value: 'Descriptive evidence for the section.',
+              section: 'Work Plan',
+              phase: 'P1 Work',
+            },
+          ],
           suggested_fix: 'f',
           confidence: 0.9,
           duplicate_of: null,
@@ -172,6 +181,9 @@ describe('sanitizers', () => {
     expect(result.issues[1]?.id).toBe('C2');
     expect(result.issues[1]?.addresses).toBe('v0.C1');
     expect(result.issues.every((issue) => /^C[0-9]+$/.test(issue.id))).toBe(true);
+    expect(result.issues[0]?.evidence_refs).toEqual([
+      { kind: 'plan-section', section: 'Work Plan' },
+    ]);
     expect(result.domain_assessments).toEqual([]);
     expect(result.boundary_challenges).toEqual([]);
     expect(result.opportunities).toEqual([]);
@@ -315,7 +327,14 @@ describe('sanitizers', () => {
       issue_id: 'C1',
       scope: 'local',
       rationale: 'The evidence limits this finding to the Work Plan section.',
-      evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      evidence_refs: [
+        {
+          kind: 'plan-section',
+          value: 'The issue was corrected in the planned phase.',
+          section: 'Work Plan',
+          phase: 'P1 Work',
+        },
+      ],
       invariant: null,
     };
     const issue = {
@@ -350,9 +369,9 @@ describe('sanitizers', () => {
 
     for (const file of [update, meta, combined]) {
       const result = readJson(file) as SanitizedUpdate;
-      expect(result.systemic_dispositions?.[0]?.evidence_refs).toEqual(
-        systemicDisposition.evidence_refs,
-      );
+      expect(result.systemic_dispositions?.[0]?.evidence_refs).toEqual([
+        { kind: 'plan-section', section: 'Work Plan' },
+      ]);
     }
     expect(schemaValidQuiet(update, skills.creatorSchema)).toBe(true);
     expect(schemaValidQuiet(meta, skills.creatorMetaSchema)).toBe(true);
