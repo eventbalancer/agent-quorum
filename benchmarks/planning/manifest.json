@@ -28,7 +28,7 @@
       "prompt": "corpus/standard-local-cli-api.prompt.md",
       "reference": "corpus/standard-local-cli-api.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -45,7 +45,7 @@
       "prompt": "corpus/standard-config-artifact.prompt.md",
       "reference": "corpus/standard-config-artifact.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -62,7 +62,7 @@
       "prompt": "corpus/standard-internal-refactor.prompt.md",
       "reference": "corpus/standard-internal-refactor.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -79,7 +79,7 @@
       "prompt": "corpus/standard-metrics-reporting.prompt.md",
       "reference": "corpus/standard-metrics-reporting.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -96,7 +96,7 @@
       "prompt": "corpus/standard-package-export.prompt.md",
       "reference": "corpus/standard-package-export.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -113,7 +113,7 @@
       "prompt": "corpus/high-schema-storage-migration.prompt.md",
       "reference": "corpus/high-schema-storage-migration.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -135,7 +135,7 @@
       "prompt": "corpus/high-resume-hash-binding.prompt.md",
       "reference": "corpus/high-resume-hash-binding.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -157,7 +157,7 @@
       "prompt": "corpus/high-cross-repository-delivery.prompt.md",
       "reference": "corpus/high-cross-repository-delivery.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -179,7 +179,7 @@
       "prompt": "corpus/high-authorization-data-integrity.prompt.md",
       "reference": "corpus/high-authorization-data-integrity.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
@@ -201,7 +201,7 @@
       "prompt": "corpus/high-concurrency-process-lifecycle.prompt.md",
       "reference": "corpus/high-concurrency-process-lifecycle.reference.md",
       "referenceApproval": "operator-approval-required",
-      "workspaceRevision": "a83e38a552e24518ee95250e09179c5cea904f07",
+      "workspaceRevision": "0cf94fcd7a5bb06ca2ba7dbae09e81ddc63756a2",
       "providerConfig": "provider-config.balanced.json",
       "knownConcerns": [
         {
