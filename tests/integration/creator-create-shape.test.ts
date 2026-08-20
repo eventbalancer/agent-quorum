@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -181,6 +181,48 @@ describe('runCreatorCreate shape gate', () => {
     expect(halt.message).toContain('not a complete plan');
     expect(halt.message).not.toContain('plan mode');
     expect(halt.message).not.toContain('~/.claude/plans');
+  });
+
+  it('repairs one malformed Codex create response before enforcing the shape gate', async () => {
+    const partial = path.join(tmp, 'partial.json');
+    writeFileSync(
+      partial,
+      `${JSON.stringify({ plan_markdown: '# Partial Plan\n\n## At a Glance\n- Partial.\n' })}\n`,
+    );
+    const completeMarkdown = path.join(tmp, 'complete.md');
+    writeStructuredPlanFile(completeMarkdown, 'Repaired Complete Plan');
+    const complete = path.join(tmp, 'complete.json');
+    writeFileSync(
+      complete,
+      `${JSON.stringify({ plan_markdown: readFileSync(completeMarkdown, 'utf8') })}\n`,
+    );
+    const calls = path.join(tmp, 'codex.calls');
+    const prompt = path.join(tmp, 'codex.prompt');
+    const ctx = buildContext({
+      matrix: {
+        ...fixtureMatrix(),
+        creator: { runner: 'codex', model: 'gpt-5.5', reasoning: 'low' },
+      },
+    });
+    const out = path.join(work, 'plan.v0.md');
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT_CALLS: calls,
+        FAKE_CODEX_OUTPUT_1: partial,
+        FAKE_CODEX_OUTPUT_2: complete,
+        FAKE_CODEX_PROMPT: prompt,
+      },
+      () => runCreatorCreate(ctx, ctx.inputPath, out),
+    );
+
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(out, 'utf8')).toContain('# Repaired Complete Plan');
+    expect(existsSync(path.join(work, 'plan.v0.shape-invalid.md'))).toBe(true);
+    expect(readFileSync(prompt, 'utf8')).toContain('stage: create-shape-repair');
+    expect(readFileSync(prompt, 'utf8')).toContain('missing ## Context');
+    expect(capture.text()).toContain('creator plan shape repair');
   });
 
   it('a shape-valid plan passes the gate in default mode (no throw)', async () => {

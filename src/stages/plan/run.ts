@@ -739,11 +739,11 @@ function recordCanonicalProofHashBinding(
   return mismatch;
 }
 
-function statusInvariantPlan(file: string): string {
-  return readFileSync(file, 'utf8').replace(
-    /^status:\s+(?:clean|needs-review|blocked)\s*$/m,
-    'status: <orchestration-projection>',
-  );
+function proofInvariantPlan(file: string, projectRoot: string): string {
+  const repositoryPrefix = `file-line:${path.resolve(projectRoot).replaceAll('\\', '/')}/`;
+  return readFileSync(file, 'utf8')
+    .replace(/^status:\s+(?:clean|needs-review|blocked)\s*$/m, 'status: <orchestration-projection>')
+    .replaceAll(repositoryPrefix, 'file-line:');
 }
 
 function recordFinalArtifactProof(
@@ -765,7 +765,8 @@ function recordFinalArtifactProof(
     reviewedVersion === ctx.convergence.planVersion &&
     reviewedPlan !== undefined &&
     existsSync(reviewedPlan) &&
-    statusInvariantPlan(reviewedPlan) === statusInvariantPlan(finalPlan);
+    proofInvariantPlan(reviewedPlan, ctx.provider.projectRoot) ===
+      proofInvariantPlan(finalPlan, ctx.provider.projectRoot);
   if (reviewedVersion === ctx.convergence.planVersion && !exactReviewedCandidate) {
     ctx.convergence.unresolvedCoverage.push(DELIVERED_PLAN_FRESH_REVIEW_REQUIRED);
   }
@@ -1290,7 +1291,8 @@ export async function runPlanLoopCli(
         const reviewedPlan = path.join(work, `plan.v${ctx.convergence.planVersion}.md`);
         const sameSemanticPlan =
           existsSync(reviewedPlan) &&
-          statusInvariantPlan(reviewedPlan) === statusInvariantPlan(finalPlan);
+          proofInvariantPlan(reviewedPlan, ctx.provider.projectRoot) ===
+            proofInvariantPlan(finalPlan, ctx.provider.projectRoot);
         log(
           `final Judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
         );

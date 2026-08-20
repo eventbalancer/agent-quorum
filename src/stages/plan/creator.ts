@@ -8,7 +8,12 @@ import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
   normalizePlanDocument,
+  PLAN_DOCUMENT_REQUIRED_SECTIONS,
   planDocumentShapeOk,
+  planHasFrontmatter,
+  planHasHeading,
+  planHasImpactGraphMermaid,
+  planHasTitleHeading,
   requirePlanDocumentShape,
   validatePlanDocumentShape,
 } from './plan-shape.js';
@@ -89,6 +94,61 @@ function requireCreatorCreateShape(ctx: RunContext, outFile: string): void {
   requirePlanDocumentShape(outFile);
 }
 
+function creatorShapeProblems(file: string): string[] {
+  return [
+    ...(planHasTitleHeading(file) ? [] : ['missing level-1 title']),
+    ...PLAN_DOCUMENT_REQUIRED_SECTIONS.filter((heading) => !planHasHeading(file, heading)).map(
+      (heading) => `missing ## ${heading}`,
+    ),
+    ...(planHasImpactGraphMermaid(file) ? [] : ['missing Mermaid flowchart in ## Impact Graph']),
+    ...(planHasFrontmatter(file) ? [] : ['missing valid leading YAML frontmatter']),
+  ];
+}
+
+async function repairCreatorCreateShape(ctx: RunContext, outFile: string): Promise<void> {
+  const invalidFile = path.join(
+    path.dirname(outFile),
+    `${path.basename(outFile, path.extname(outFile))}.shape-invalid.md`,
+  );
+  copyFileSync(outFile, invalidFile);
+  const problems = creatorShapeProblems(invalidFile);
+  log(`creator plan shape repair — ${problems.join('; ')}`);
+  const basePrompt =
+    '## Output mode: plan shape repair\n' +
+    'Return the full corrected implementation plan as clean Markdown only. Do not return a summary, commentary, or an external-file pointer.\n' +
+    'Preserve the prior plan facts, scope, phases, implementation details, and acceptance gates. Repair the deterministic Plan Document Contract violations listed below. Every required section must use its exact level-2 heading, and the final ## Impact Graph section must contain a Mermaid flowchart.\n' +
+    `\n## Deterministic shape violations\n${problems.map((problem) => `- ${problem}`).join('\n')}\n` +
+    `\n## Invalid plan\n${readStripped(invalidFile)}`;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'create-shape-repair',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: '',
+    basePrompt,
+  });
+  const status = await providerRun(
+    ctx.provider,
+    'creator',
+    'markdown',
+    outFile,
+    ctx.skills.creatorSkill,
+    '',
+    ctx.permissions.creator.createTools,
+    ctx.permissions.creator.createDisallowedTools,
+    prompt,
+  );
+  if (status !== 0) {
+    throw new HaltError(`creator plan shape repair failed (${status})`, status, true);
+  }
+  if (!nonEmptyFile(outFile)) {
+    throw new HaltError('creator plan shape repair produced an empty plan', 4, true);
+  }
+  normalizePlanDocument(outFile);
+  validatePlanDocumentShape(outFile);
+}
+
 export async function runCreatorCreate(
   ctx: RunContext,
   _promptFile: string,
@@ -131,6 +191,9 @@ export async function runCreatorCreate(
   }
   normalizePlanDocument(outFile);
   validatePlanDocumentShape(outFile);
+  if (!planDocumentShapeOk(outFile) && !isClaudeCreatorPlanMode(ctx)) {
+    await repairCreatorCreateShape(ctx, outFile);
+  }
   requireCreatorCreateShape(ctx, outFile);
 }
 

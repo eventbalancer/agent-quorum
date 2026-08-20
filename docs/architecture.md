@@ -169,6 +169,10 @@ overall `FINAL:` line and closing the run with `summary.md`. A clean result
 requires the canonical plan, deterministic system check, and applicable final
 Judge verdict to carry the same SHA-256; an intervening same-version mutation
 is retained as a usable `needs-review` result instead of being silently rebound.
+Exact-version comparison ignores only the orchestration-owned frontmatter status
+and deterministic normalization of an absolute in-repository `file-line:` prefix
+to its repository-relative form. All other post-critique changes still require a
+fresh critic review.
 If the first final Judge result induces a status-only `needs-review` projection,
 the recheck must ignore that orchestration field; an inconsistent semantic
 verdict produces `unable-to-decide`.
@@ -190,7 +194,11 @@ Facts, Target State, Scope, Work Plan, Files and Interfaces, Verification, STOP
 Triggers, and a final `## Impact Graph` with a Mermaid flowchart. Consistency
 between the frontmatter header and the Work Plan (phase count, names, effort) is
 enforced by the critic, not the gate. Prompt-created and revised plans are
-normalized to the same contract by the packaged role skills.
+normalized to the same contract by the packaged role skills. If a prompt-created
+Codex or Cursor plan fails the deterministic shape gate, the creator receives one
+bounded corrective call with the invalid output preserved as
+`plan.v0.shape-invalid.md`; a second failure exits with code 4. Existing plan
+inputs and Claude plan-mode diagnostics do not use this repair path.
 
 ## Artifact contract ($WORK)
 

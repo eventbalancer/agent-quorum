@@ -120,6 +120,42 @@ describe('delivered-plan readiness proof', () => {
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
   });
 
+  it('preserves critic proof across repository-relative file-line normalization', async () => {
+    writeStructuredPlanFile(input, 'Reference-normalization Input');
+    const repositoryPrefix = `${process.cwd()}/`;
+    writeFileSync(
+      input,
+      `${readFileSync(input, 'utf8')}\n- Verified anchor: \`file-line:${repositoryPrefix}package.json:1\`.\n`,
+    );
+    const critique = path.join(tmp, 'clean.json');
+    emptyCritique(critique);
+    const fixed = path.join(tmp, 'relative-reference.md');
+    writeFileSync(
+      fixed,
+      readFileSync(input, 'utf8').replaceAll(`file-line:${repositoryPrefix}`, 'file-line:'),
+    );
+    const review = path.join(tmp, 'review.json');
+    writeAcceptedReview(review);
+
+    const result = await run(
+      {
+        FAKE_CODEX_OUTPUT: review,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'reference-codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: review,
+        FAKE_CLAUDE_MARKDOWN_RESULT: fixed,
+      },
+      true,
+    );
+
+    expect(result.status).toBe('clean');
+    expect(result.convergence).toMatchObject({ decision: 'ready', satisfied: true });
+    expect(result.convergence?.reasonCodes).not.toContain('fresh-review-required');
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain(
+      '`file-line:package.json:1`',
+    );
+  });
+
   it('requires a fresh independent review after a substantive standard-risk fix pass', async () => {
     writeStructuredPlanFile(input, 'Pre-fix Input');
     writeFileSync(
