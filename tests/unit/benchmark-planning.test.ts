@@ -229,10 +229,18 @@ describe('planning benchmark corpus', () => {
       path.join(BENCHMARK_ROOT, 'corpus/high-authorization-data-integrity.reference.md'),
       'utf8',
     );
+    const concurrencyPrompt = readFileSync(
+      path.join(BENCHMARK_ROOT, 'corpus/high-concurrency-process-lifecycle.prompt.md'),
+      'utf8',
+    );
 
     expect(authPrompt).toContain('selected signed bearer tokens');
     expect(authPrompt).toContain('local policy maps');
     expect(authReference).not.toContain('readiness is `unable-to-decide`');
+    expect(concurrencyPrompt).toContain('selector-backed `intervene --stop`');
+    expect(concurrencyPrompt).toContain('additive `stopRun` public helper');
+    expect(concurrencyPrompt).toContain('`interveneRun` signature must');
+    expect(concurrencyPrompt).toContain('remain unchanged');
   });
 
   it('rejects a corpus that weakens the exact task-count contract', () => {
