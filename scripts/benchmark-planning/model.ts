@@ -77,6 +77,57 @@ export interface BenchmarkRunResults {
   readonly tasks: readonly BenchmarkTaskRunResult[];
 }
 
+export type PlanningSmokeInputMode = 'prompt' | 'plan';
+
+export type PlanningSmokeJudgeExpectation = 'forbidden' | 'required';
+
+export interface PlanningSmokeExpectation {
+  readonly decision: 'ready';
+  readonly minimumCritiqueIterations: number;
+  readonly maximumCritiqueIterations: number;
+  readonly minimumPlanVersion: number;
+  readonly judge: PlanningSmokeJudgeExpectation;
+}
+
+export interface PlanningSmokeSentinel {
+  readonly id: string;
+  readonly risk: BenchmarkRisk;
+  readonly inputMode: PlanningSmokeInputMode;
+  readonly input: string;
+  readonly quality: 'quick' | 'balanced';
+  readonly maxIterations: number;
+  readonly expected: PlanningSmokeExpectation;
+}
+
+export interface PlanningSmokeManifest {
+  readonly schemaVersion: 1;
+  readonly suiteId: string;
+  readonly workspaceRevision: string;
+  readonly providerConfig: string;
+  readonly sentinels: readonly PlanningSmokeSentinel[];
+}
+
+export interface PlanningSmokeSentinelResult {
+  readonly taskId: string;
+  readonly passed: boolean;
+  readonly decision: BenchmarkDecision;
+  readonly critiqueIterations: number;
+  readonly planVersion?: number;
+  readonly exitCode: number;
+  readonly failures: readonly string[];
+  readonly finalPlan?: string;
+  readonly finalPlanSha256?: string;
+}
+
+export interface PlanningSmokeResults {
+  readonly schemaVersion: 1;
+  readonly suiteId: string;
+  readonly workspaceRevision: string;
+  readonly providerConfigSha256: string;
+  readonly passed: boolean;
+  readonly tasks: readonly PlanningSmokeSentinelResult[];
+}
+
 export interface BlindAssignment {
   readonly taskId: string;
   readonly candidateLabel: BlindLabel;

@@ -97,6 +97,8 @@ When facts conflict, trust in this order:
 | Local web workspace          | `pnpm run run:web` (bare: loopback chat page)                                                                                                     |
 | Local CLI                    | `pnpm run run:cli` (bare: help); subcommands via `pnpm run run:cli -- <command>`                                                                  |
 | Public API smoke             | `pnpm run build` then import from `agent-quorum`                                                                                                  |
+| Planning merge smoke         | `pnpm run benchmark:planning:smoke -- --output <outside-repository-dir>` after committing and pinning the smoke manifest                          |
+| Planning release calibration | `pnpm run benchmark:planning -- run --output <outside-repository-dir>` plus blind review and scoring                                              |
 | Self-planning dogfood        | `pnpm run run:cli -- plan --prompt <prompt.md>` (foreground, session-bound)                                                                       |
 | Agent-initiated detached run | `pnpm run run:cli -- launch --prompt <prompt.md>` (detached, survives session close)                                                              |
 | Repo-local binaries          | `pnpm exec <bin>`                                                                                                                                 |

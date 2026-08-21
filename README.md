@@ -258,20 +258,27 @@ pnpm install --frozen-lockfile
 pnpm run check          # build + format/lint autofix + format/lint/types checks (no tests)
 pnpm run test           # vitest run
 pnpm run test:coverage  # tests with V8 coverage thresholds (also enforced in CI)
-pnpm run benchmark:planning -- run --output <dir>                 # opt-in live candidate runs
+pnpm run benchmark:planning:smoke -- --output <dir>               # two live merge sentinels
+pnpm run benchmark:planning -- run --output <dir>                 # full release calibration
 pnpm run benchmark:planning -- run --output <dir> --task <id>     # selected diagnostic runs
 pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text>
 pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file>
 ```
 
-The planning benchmark corpus, schemas, rubric, and deterministic scoring are
-committed; live provider calls and expert-reference approval remain local
-operator actions and are not part of CI. The committed balanced snapshot runs
-all six roles through Codex with `gpt-5.5`. Live runs require a clean worktree
-and verify that source files match the manifest's pinned implementation
-revision; the follow-up commit that records that revision may change only the
-manifest. The live `--output` directory must be outside the source repository
-so one task cannot contaminate the pinned workspace used by later tasks.
+The planning benchmark has two gates. The merge smoke runs one quick
+standard-risk prompt through create/critic/finalization without Judge and one
+balanced high-risk direct plan through a seeded material revision plus
+intermediate/final Judge and exact SHA-256 binding. The ten-task corpus, blind
+review, rubric, and scoring remain the opt-in release calibration for model,
+prompt, risk-policy, and major planner changes. Live provider calls and expert
+approval remain local operator actions and are not part of CI.
+
+The committed provider snapshot runs every role through Codex with
+`gpt-5.6-luna`. Live smoke and release runs require a clean worktree and verify
+that source files match their manifest's pinned implementation revision; the
+follow-up commit that records that revision may change only the manifest. Every
+live `--output` directory must be outside the source repository so generated
+artifacts cannot contaminate the pinned workspace.
 
 Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).

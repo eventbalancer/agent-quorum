@@ -7,13 +7,15 @@ import {
   runPlanningBenchmark,
   scorePlanningBenchmark,
 } from './benchmark-planning/benchmark.js';
+import { runPlanningSmoke } from './benchmark-planning/smoke.js';
 
 const USAGE = `usage:
+  pnpm run benchmark:planning -- smoke --output <dir> [--manifest <file>]
   pnpm run benchmark:planning -- run --output <dir> [--task <id>]... [--manifest <file>]
   pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text> [--manifest <file>]
   pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file> [--output <file>] [--manifest <file>]
 
-Only the explicit run command invokes the source planning CLI and configured providers.
+Smoke and run invoke the source planning CLI and configured providers.
 Blind and score are deterministic local artifact operations.
 `;
 
@@ -98,6 +100,34 @@ function runCommand(options: ParsedOptions): number {
   return failed.length === 0 ? 0 : 1;
 }
 
+function smokeCommand(options: ParsedOptions): number {
+  ensureAllowedOptions(options, ['--output', '--manifest']);
+  if (options.reviews.length > 0) {
+    throw new Error('--review is not valid for smoke');
+  }
+  if (options.tasks.length > 0) {
+    throw new Error('--task is not valid for smoke');
+  }
+  const outputDir = value(options, '--output');
+  if (outputDir === undefined) {
+    throw new Error('--output is required');
+  }
+  const selectedManifest = value(options, '--manifest', false);
+  const results = runPlanningSmoke({
+    outputDir,
+    repositoryRoot: repositoryRoot(),
+    ...(selectedManifest === undefined ? {} : { manifestFile: selectedManifest }),
+  });
+  for (const task of results.tasks) {
+    const detail = task.passed ? 'passed' : `failed: ${task.failures.join('; ')}`;
+    process.stdout.write(`${task.taskId}: ${detail}\n`);
+  }
+  process.stdout.write(
+    `planning smoke completed: ${results.tasks.filter((task) => task.passed).length}/${results.tasks.length} sentinels passed\n`,
+  );
+  return results.passed ? 0 : 1;
+}
+
 function blindCommand(options: ParsedOptions): number {
   ensureAllowedOptions(options, ['--results', '--output', '--key', '--seed', '--manifest']);
   if (options.reviews.length > 0) {
@@ -165,11 +195,22 @@ function scoreCommand(options: ParsedOptions): number {
 export function runPlanningBenchmarkCli(args: readonly string[]): number {
   const normalizedArgs = args[0] === '--' ? args.slice(1) : args;
   const command = normalizedArgs[0];
-  if (command === undefined || command === '--help' || command === '-h') {
+  const commandArgs =
+    normalizedArgs[1] === '--' ? normalizedArgs.slice(2) : normalizedArgs.slice(1);
+  if (
+    command === undefined ||
+    command === '--help' ||
+    command === '-h' ||
+    commandArgs[0] === '--help' ||
+    commandArgs[0] === '-h'
+  ) {
     process.stdout.write(USAGE);
     return 0;
   }
-  const options = parseOptions(normalizedArgs.slice(1));
+  const options = parseOptions(commandArgs);
+  if (command === 'smoke') {
+    return smokeCommand(options);
+  }
   if (command === 'run') {
     return runCommand(options);
   }

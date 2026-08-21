@@ -211,7 +211,7 @@ function assertExactSet(
   }
 }
 
-function declaredFile(root: string, relativeFile: string): string {
+export function declaredFile(root: string, relativeFile: string): string {
   if (path.isAbsolute(relativeFile)) {
     throw new Error(`benchmark paths must be relative: ${relativeFile}`);
   }

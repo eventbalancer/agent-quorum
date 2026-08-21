@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "bounded-readiness-smoke-v1",
+  "workspaceRevision": "603aad51dd03412e2d8158d911a741ebfd8534ec",
+  "providerConfig": "provider-config.balanced.json",
+  "sentinels": [
+    {
+      "id": "standard-create-ready",
+      "risk": "standard",
+      "inputMode": "prompt",
+      "input": "corpus/standard-local-cli-api.prompt.md",
+      "quality": "quick",
+      "maxIterations": 2,
+      "expected": {
+        "decision": "ready",
+        "minimumCritiqueIterations": 1,
+        "maximumCritiqueIterations": 2,
+        "minimumPlanVersion": 0,
+        "judge": "forbidden"
+      }
+    },
+    {
+      "id": "high-revise-judge-ready",
+      "risk": "high",
+      "inputMode": "plan",
+      "input": "smoke/high-revise-judge-ready.plan.md",
+      "quality": "balanced",
+      "maxIterations": 3,
+      "expected": {
+        "decision": "ready",
+        "minimumCritiqueIterations": 2,
+        "maximumCritiqueIterations": 3,
+        "minimumPlanVersion": 1,
+        "judge": "required"
+      }
+    }
+  ]
+}

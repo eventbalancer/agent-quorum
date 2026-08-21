@@ -108,6 +108,7 @@ pnpm run format:check   # prettier --check .
 pnpm run test           # vitest run
 pnpm run test:coverage  # vitest run --coverage (lines/functions >=80%, branches >=69%)
 pnpm run check          # build && format:write && format:check && lint:fix && lint:check && types:check (no tests)
+pnpm run benchmark:planning:smoke -- --output <outside-repository-dir> # two live planning merge sentinels
 pnpm run run:web        # tsx src/cli/main.ts — bare: local web workspace (127.0.0.1)
 pnpm run run:cli        # bare: CLI help; subcommands via pnpm run run:cli -- <command>
 ```

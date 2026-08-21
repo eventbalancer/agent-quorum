@@ -186,6 +186,15 @@ If the first final Judge result induces a status-only `needs-review` projection,
 the recheck must ignore that orchestration field; an inconsistent semantic
 verdict produces `unable-to-decide`.
 
+Live verification is split by purpose. The merge smoke uses two provider-backed
+sentinels: a quick standard prompt that must reach `ready` without Judge, and a
+balanced high-risk direct plan with a seeded material defect that must exercise
+critic finding, creator revision, fresh exact-version review, targeted Judge,
+and final digest binding. Deterministic tests own reducer branch coverage. The
+ten-task corpus and blind human comparison remain the broader release
+calibration for model, prompt, schema, and risk-policy changes rather than an
+every-merge gate.
+
 The package is a deterministic projection of the post-fix `plan.final.md`: its
 `plan.md` is a byte-for-byte copy and its phase docs are slices, so no role ever
 gains write tools (the orchestrator writes the package) and the split decision
