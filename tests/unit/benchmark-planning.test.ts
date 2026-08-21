@@ -210,7 +210,11 @@ describe('planning benchmark corpus', () => {
   it('pins every benchmark role to Codex', () => {
     const config = JSON.parse(
       readFileSync(path.join(BENCHMARK_ROOT, 'provider-config.balanced.json'), 'utf8'),
-    ) as { roles: Record<string, { runner: string; model: string }> };
+    ) as {
+      settings: { retryCount: number };
+      roles: Record<string, { runner: string; model: string }>;
+      knobs: { codex: { callTimeoutSeconds: number } };
+    };
 
     expect(Object.keys(config.roles)).toHaveLength(6);
     expect(
@@ -218,6 +222,8 @@ describe('planning benchmark corpus', () => {
         (role) => role.runner === 'codex' && role.model === 'gpt-5.5',
       ),
     ).toBe(true);
+    expect(config.settings.retryCount).toBe(1);
+    expect(config.knobs.codex.callTimeoutSeconds).toBe(900);
   });
 
   it('keeps at least four high-risk tasks decidable from the frozen input', () => {
