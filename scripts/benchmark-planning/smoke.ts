@@ -378,7 +378,7 @@ export function evaluatePlanningSmokeSentinel(
     }
     if (existsSync(finalJudgeMetaFile) && finalPlanSha256 !== undefined) {
       const meta = parseJson(finalJudgeMetaFile);
-      if (!isJsonObject(meta) || meta.planSha256 !== finalPlanSha256) {
+      if (!isJsonObject(meta) || meta.plan_sha256 !== finalPlanSha256) {
         failures.push('final Judge metadata is not bound to the final plan SHA-256');
       }
     }

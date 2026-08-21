@@ -138,7 +138,7 @@ describe('planning live smoke manifest', () => {
     writeJson(path.join(workDir, 'update-meta.v0.json'), { applied: ['C1'] });
     writeJson(path.join(workDir, 'judge.v1.json'), { ready: true });
     writeJson(path.join(workDir, 'judge.final.json'), { ready: true });
-    writeJson(path.join(workDir, 'judge.final.meta.json'), { planSha256: digest });
+    writeJson(path.join(workDir, 'judge.final.meta.json'), { plan_sha256: digest });
 
     const result = evaluatePlanningSmokeSentinel({
       sentinel: sentinel('high-revise-judge-ready'),
