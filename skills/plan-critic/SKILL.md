@@ -43,6 +43,8 @@ Emit exactly one `domain_assessments[]` entry for each fixed domain:
 
 Use only `applicable`, `not-applicable`, or `unknown` for applicability and only `standard` or `high` for risk. Risk describes the material consequence if the domain is mishandled; it does not measure review effort. Mark `complete: true` only after checking the evidence needed for this exact plan version. Put every indispensable source that could not be obtained in `unavailable_evidence`; otherwise use an empty array. Explain the classification in `rationale` and ground it with typed `evidence_refs` when evidence is available.
 
+Do not raise a frozen `standard` domain to `high` merely because the plan has a material issue, exact compatibility matters, or the review is demanding. Additive or behavior-preserving local public-surface work remains `standard` unless this exact plan version introduces concrete evidence of migration, authorization, data-integrity, distributed-ordering, irreversible-delivery, production-safety, or comparable high-impact consequences. A real newly discovered consequence can change the risk profile, but cite that evidence and distinguish it from the severity of the plan-writing defect.
+
 Use `boundary_challenges[]` only when a correct decision requires one of these changes to the frozen readiness contract:
 
 - `scope-expansion` — add work to `in_scope`;

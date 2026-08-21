@@ -1,149 +1,150 @@
 ---
-phase_count: 3
-effort_total: '~1d'
+phase_count: 2
+effort_total: '~4h'
 phases:
-  - name: 'P1 - Versioned read contract'
+  - name: 'P1 - Extract record replacement'
     effort: '~2h'
-  - name: 'P2 - Lazy migration writer'
-    effort: '~3h'
-  - name: 'P3 - Compatibility and fault verification'
-    effort: '~3h'
+  - name: 'P2 - Prove preserved finalization'
+    effort: '~2h'
 status: needs-review
 ---
 
-# Run Record v2 Lazy Migration
+# Preserve Atomic Run Record Finalization
 
 ## At a Glance
 
-Add a versioned run-record reader and lazy v1-to-v2 migration while preserving
-public compatibility, conservative readiness projection, and crash-safe storage.
-The change stays inside this repository and keeps existing record paths and CLI
-selectors stable.
+Extract the durable-record replacement statements in `finalizeRunRecord` into
+one private helper without changing its public or failure behavior. The work is
+limited to the run store and its unit tests. The high-risk invariant is that an
+interrupted terminal update must never expose partial JSON to status and run
+readers.
 
 ## Context
 
-Run records under the configured state directory are durable process and
-readiness projections. Existing installations may contain v1 records while new
-runs need v2 decision and reason-code fields. Reads, selectors, status, pruning,
-and finalization must continue to operate on a mixed store.
+`finalizeRunRecord` updates the already reserved record that represents a live
+or terminal planning run. The operator has fixed this as a local refactor: no
+other repository, delivery relationship, schema migration, or new writer
+protocol is part of the implementation boundary.
 
 ## Verified Facts
 
-- `src/core/run-store.ts` owns record parsing, listing, updates, and pruning.
-- `src/core/convergence.ts` owns readiness decisions and stable reason codes.
-- `src/cli/status.ts` and `src/cli/runs.ts` project stored records without owning
-  readiness truth.
-- New writes already have one store boundary through which atomic replacement
-  can remain centralized.
+- `src/core/run-store.ts:336-348` reads the reserved record, returns on a missing
+  or unreadable target, merges `RunRecordPatch`, writes a same-directory
+  temporary file, and renames it over the target.
+- `src/core/run-store.ts:308-333` separately owns exclusive record creation; the
+  refactor must not move or reuse that collision logic.
+- `tests/unit/run-store.test.ts:103-136` covers a create/finalize/read round trip
+  and the terminal readiness projection.
+- `readRunRecords` considers only `.json` entries, so the current temporary
+  suffix is invisible to readers until rename.
 
 ## Target State
 
-- New records declare schema version 2 and store the additive terminal decision
-  and reason-code projection.
-- Readable v1 records remain addressable but project
-  `unable-to-decide:legacy-state-requires-review` until fresh exact-plan review.
-- Unknown future versions and malformed files are skipped without rewriting
-  their bytes.
-- A v1 record is upgraded only when an existing write path next changes it.
-- Record replacement remains atomic and a process interruption never exposes
-  partial JSON to concurrent readers.
+- A private `replaceRunRecord(target: string, record: RunRecord): void` helper in
+  `src/core/run-store.ts` owns serialization and the existing replacement
+  sequence.
+- `finalizeRunRecord` continues to own target lookup, best-effort parse, patch
+  merge, and the single helper call.
+- Replacement remains same-directory temporary write followed by `renameSync`;
+  readers observe either the complete previous record or the complete merged
+  record.
+- Missing or unreadable targets remain no-ops. Serialization, temporary-write,
+  and rename failures continue to propagate exactly as they do today.
+- Temporary naming, cleanup behavior, writer ownership, record schema, public
+  types, exports, paths, selectors, output, and exit codes do not change.
 
 ## Scope
 
 In scope:
 
-- Version-specific parsing and normalization in `src/core/run-store.ts`.
-- Additive exported terminal-readiness types and existing compatibility fields.
-- Lazy v2 emission through the existing record writer.
-- Mixed-store CLI and API projections.
-- Atomic replacement, interruption, retry, and concurrent-reader tests.
+- Extract the replacement helper inside `src/core/run-store.ts`.
+- Route only `finalizeRunRecord` through it.
+- Add focused regression assertions in `tests/unit/run-store.test.ts`.
 
 Out of scope:
 
-- An eager migration command or bulk rewrite.
-- Changing run IDs, record locations, selectors, retention policy, or exit codes.
-- Promoting legacy `clean` or `satisfied` fields to trusted readiness.
-- Cross-repository delivery or a new storage backend.
+- Record creation, schema/version changes, lazy migration, retry semantics, new
+  locking, concurrent-writer guarantees, or temporary-file cleanup changes.
+- Public API, CLI, configuration, artifacts, package exports, paths, selectors,
+  retention, and exit-code changes.
 
 ## Work Plan
 
-| Phase | Work                                                   | Gate                                                             |
-| ----- | ------------------------------------------------------ | ---------------------------------------------------------------- |
-| P1    | Add versioned parsing and conservative normalization.  | Mixed v1/v2 fixtures parse without legacy promotion.             |
-| P2    | Upgrade records lazily through the existing writer.    | A v1 update emits schema-valid v2 and preserves identity fields. |
-| P3    | Project compatibility surfaces and add fault coverage. | Static checks and all tests pass.                                |
+| Phase                             | Effort | Work                                                                                   | Acceptance gate                                                                                                    |
+| --------------------------------- | ------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| P1 - Extract record replacement   | ~2h    | Add the private helper and call it after the existing parse-and-merge path.            | The existing run-store suite passes and source review confirms the same parse, merge, write, and rename ownership. |
+| P2 - Prove preserved finalization | ~2h    | Add focused old-or-new JSON and no-op regression coverage, then run repository checks. | Focused and full verification pass with no public or artifact diff.                                                |
 
-### P1 - Versioned read contract
+### P1 - Extract record replacement
 
-1. Extend the internal run-record model with `schemaVersion`, terminal decision,
-   and reason-code fields while retaining existing optional compatibility fields.
-2. Parse persisted JSON as unknown and dispatch to explicit v1 and v2 validators.
-3. Normalize v1 terminal state to `unable-to-decide` with the stable legacy review
-   reason. Do not infer readiness from `finalStatus`, `satisfied`, or artifact
-   presence.
-4. Skip malformed and unsupported future versions, retaining diagnostics without
-   changing source bytes.
+1. Keep `finalizeRunRecord`'s target resolution, `readFileSync`/`JSON.parse`
+   guard, and `{ ...current, ...patch }` merge unchanged.
+2. Implement `replaceRunRecord` by using `serializeRecord(record)` and write the
+   complete payload directly to the final record path with writeFileSync before
+   returning; do not introduce a second writer owner.
+3. Call the helper exactly once with the merged record. Do not route
+   `writeRunRecord` or read-only consumers through it.
+4. Run `pnpm exec vitest run tests/unit/run-store.test.ts` before adding new
+   assertions so the extraction is independently checked against the existing
+   contract.
 
-### P2 - Lazy migration writer
+Acceptance gate: the private helper has one call site, record creation is
+unchanged, missing/unreadable targets still return without writing, and the
+existing focused suite passes.
 
-1. Keep create and patch operations behind the current run-store writer.
-2. When a valid v1 record is patched, serialize the normalized v2 record directly
-   to its final `state/runs/<id>.json` path with `writeFileSync`; a retry can parse
-   whatever bytes remain if the process stops during the write.
-3. Preserve run ID, timestamps, process identity, work and log paths, ordering,
-   and compatibility fields during the upgrade.
-4. Leave records untouched on pure list, select, status, show, log, and prune
-   reads.
+### P2 - Prove preserved finalization
 
-### P3 - Compatibility and fault verification
+1. Extend the existing finalize round-trip test to capture the target bytes
+   before and after finalization and assert both parse as complete `RunRecord`
+   values with identity fields unchanged and patch fields updated.
+2. Add a malformed-target case that records the original bytes, calls
+   `finalizeRunRecord`, and proves the target remains byte-identical.
+3. Add a focused replacement-order test using a hoisted `node:fs` Vitest mock in
+   a separate unit-test module. Delegate to the real filesystem while recording
+   `writeFileSync` and `renameSync`; assert the write target is the current
+   same-directory temporary path, rename is later, and rename targets the
+   reserved `.json` record. Keep the helper private.
+4. Run `pnpm exec vitest run tests/unit/run-store.test.ts` plus the focused mock
+   module, followed by `pnpm run check` and `pnpm run test`.
 
-1. Keep `listRuns`, `getRun`, selectors, status, show, logs, and pruning compatible
-   with mixed v1/v2 stores.
-2. Add golden fixtures for active and terminal v1, valid v2, malformed JSON,
-   missing legacy fields, and unsupported future versions.
-3. Add interruption and concurrent-reader coverage around lazy migration, plus
-   retry assertions that preserve one logical update.
-4. Run `pnpm run check` and `pnpm run test`.
+Acceptance gate: tests prove complete old/new JSON, byte-preserving malformed
+no-op behavior, temporary-write-before-rename ordering, the unchanged round
+trip, and a green repository verification floor.
 
 ## Files and Interfaces
 
-- `src/core/run-store.ts`: versioned parser, conservative normalization, and lazy
-  migration writer.
-- `src/types.ts`: additive terminal-readiness record fields.
-- `src/index.ts`: additive type exports through the existing package root.
-- `src/cli/status.ts`, `src/cli/runs.ts`, and `src/cli/picker.ts`: compatibility
-  projections only.
-- `tests/unit/run-store.test.ts` and `tests/integration/runs.test.ts`: mixed-store,
-  atomicity, interruption, and public-surface coverage.
-
-No existing CLI flag, package export, exit code, record path, or selector grammar
-is removed or renamed.
+| Surface                               | Planned change                                                            | Preserved contract                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/core/run-store.ts`               | Add one private replacement helper and one call from `finalizeRunRecord`. | Exported signatures, parse/merge behavior, temporary path, error propagation, and atomic rename stay unchanged. |
+| `tests/unit/run-store.test.ts`        | Strengthen round-trip and malformed-target assertions.                    | Existing fixtures and public calls remain valid.                                                                |
+| `tests/unit/run-store-atomic.test.ts` | Observe filesystem call order through a delegating hoisted mock.          | No runtime test seam or public export is added.                                                                 |
 
 ## Verification
 
-- Unit tests prove conservative v1 projection and exact v2 round trips.
-- Byte snapshots prove malformed and future-version files are not rewritten.
-- Fault injection interrupts migration before replacement and confirms readers
-  observe either complete v1 or complete v2.
-- Concurrent listing and pruning ignore temporary migration files.
-- Package import tests compile existing `RunRecord` object literals.
-- `pnpm run check` and `pnpm run test` pass.
+- Focused run-store tests prove the existing create/finalize/read contract.
+- The malformed fixture proves an unreadable reserved record is never replaced.
+- The delegating filesystem mock proves serialization is written away from the
+  final `.json` path and rename publishes only after that write succeeds.
+- `pnpm run check` proves build, formatting, lint, and types.
+- `pnpm run test` proves repository integration remains intact.
 
 ## STOP Triggers
 
-- Stop if compatibility requires deriving trusted readiness from legacy fields.
-- Stop if the upgrade cannot preserve run identity and selector ordering.
-- Stop if a reader must mutate records or unknown versions.
-- Stop if crash safety cannot guarantee complete JSON before replacement.
-- Stop if the change requires a bulk migration or a new storage backend.
+- Stop if the extraction writes serialized bytes to the final path before an
+  atomic rename.
+- Stop if record creation or any read-only path must use the helper.
+- Stop if missing/malformed handling or filesystem error propagation changes.
+- Stop if correct extraction requires a new public export, storage schema,
+  locking protocol, temporary naming scheme, or cleanup policy.
 
 ## Impact Graph
 
 ```mermaid
 flowchart TD
-  A["v1 or v2 record bytes"] -->|"parse by version"| B["normalized RunRecord"]
-  B -->|"read-only projection"| C["CLI and API consumers"]
-  B -->|"existing patch path"| D["v2 serialization"]
-  D -->|"replace record"| E["state/runs/<id>.json"]
-  E -->|"subsequent read"| B
+  A["finalizeRunRecord parse + merge"] -->|"one private call"| B["replaceRunRecord"]
+  B -->|"serialize complete record"| C["same-directory temporary file"]
+  C -->|"renameSync after write"| D["reserved run .json path"]
+  D -->|"complete bytes only"| E["readRunRecords and status consumers"]
+  F["run-store focused tests"] -.->|"round trip + malformed no-op"| A
+  G["delegating fs mock test"] -.->|"write then rename ordering"| B
 ```

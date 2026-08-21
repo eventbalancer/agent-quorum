@@ -343,6 +343,13 @@ describe('critic proof vocabulary contract', () => {
     expect(schema.$defs.applicability.enum).toEqual(CRITIC_APPLICABILITY);
     expect(schema.$defs.riskLevel.enum).toEqual(CRITIC_RISK_LEVELS);
   });
+
+  it('keeps critic risk calibration aligned with the frozen assessment policy', () => {
+    const skill = skillText(skills.criticSkill);
+    expect(skill).toContain('Do not raise a frozen `standard` domain to `high` merely because');
+    expect(skill).toContain('Additive or behavior-preserving local public-surface work');
+    expect(skill).toContain('migration, authorization, data-integrity, distributed-ordering');
+  });
 });
 
 describe('Judge final-readiness contract', () => {

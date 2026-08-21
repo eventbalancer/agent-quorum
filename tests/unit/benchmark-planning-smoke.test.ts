@@ -103,7 +103,7 @@ describe('planning live smoke manifest', () => {
     ]);
     expect(
       readFileSync(path.join(BENCHMARK_ROOT, 'smoke/high-revise-judge-ready.plan.md'), 'utf8'),
-    ).toContain('serialize the normalized v2 record directly');
+    ).toContain('complete payload directly to the final record path with writeFileSync');
   });
 
   it('accepts the standard create-to-ready flow without Judge', () => {
