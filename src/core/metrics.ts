@@ -259,7 +259,7 @@ export function evidenceReferencesGrounded(
   return (
     evidenceReferencesStructurallyValid(value) &&
     Array.isArray(value) &&
-    value.every(
+    value.some(
       (entry) =>
         isJsonObject(entry) &&
         typedEvidenceTargetExists(entry, context.work, planVersion, context.projectRoot),
@@ -477,10 +477,7 @@ function issueGrounding(
       return { kind: 'format-mismatch', evidenceKinds: kinds };
     }
     return {
-      kind: refs.every(
-        (ref) =>
-          typedEvidenceSyntax(ref) && typedEvidenceTargetExists(ref, work, iter, projectRoot),
-      )
+      kind: evidenceReferencesGrounded(issue.evidence_refs, { work, projectRoot }, iter)
         ? 'grounded'
         : 'malformed',
       evidenceKinds: kinds,

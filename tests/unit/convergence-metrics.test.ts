@@ -146,6 +146,53 @@ describe('rich convergence health', () => {
     ).toEqual({ grounded: 1, malformed: 0, 'format-mismatch': 0, unanchored: 0 });
   });
 
+  it('grounds a structurally valid evidence list when any typed target exists', () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-partial-evidence.'));
+    roots.push(project);
+    const work = path.join(project, 'work');
+    mkdirSync(work);
+    writeFileSync(
+      path.join(work, 'plan.v0.md'),
+      '# Plan\n\n## Verified Facts\n\nFacts.\n\n## Work Plan\n\n### P4 Focused Coverage\n',
+    );
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+    const critique = path.join(work, 'critique.v0.json');
+    writeFileSync(
+      critique,
+      JSON.stringify({
+        plan_version: 0,
+        summary: 'partial evidence target coverage',
+        issues: [
+          {
+            ...issue('C1', { kind: 'plan-section', section: 'Original scope' }),
+            evidence_refs: [
+              { kind: 'plan-section', section: 'Original scope' },
+              { kind: 'plan-section', section: 'P4 Focused Coverage' },
+              { kind: 'plan-section', section: 'Verified Facts' },
+            ],
+          },
+          {
+            ...issue('C2', { kind: 'plan-section', section: 'Original scope' }),
+            evidence_refs: [
+              { kind: 'plan-section', section: 'Original scope' },
+              { kind: 'plan-section', section: 'Still missing' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      convergenceHealth(
+        work,
+        path.join(REPO_ROOT, 'skills', 'plan-critic', 'critique.schema.json'),
+        0,
+        critique,
+        project,
+      ).grounding,
+    ).toEqual({ grounded: 1, malformed: 1, 'format-mismatch': 0, unanchored: 0 });
+  });
+
   it('distinguishes revision regressions from ordinary refinements', () => {
     const work = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-lineage.'));
     roots.push(work);
