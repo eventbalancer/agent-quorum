@@ -134,6 +134,11 @@ const CRITIQUE_OPPORTUNITY_KEYS = [
   'evidence_refs',
 ];
 
+function canonicalPhaseId(value: string): string {
+  const match = /^\s*(P[0-9]+)(?=\s|[-–—:]|$)/i.exec(value);
+  return match?.[1]?.toUpperCase() ?? value;
+}
+
 function sanitizedEvidenceRef(value: JsonValue): JsonObject {
   const ref = isJsonObject(value) ? value : {};
   const kind = typeof ref.kind === 'string' ? ref.kind : null;
@@ -167,7 +172,7 @@ function sanitizedEvidenceRef(value: JsonValue): JsonObject {
       break;
     case 'phase-gate':
       if (typeof ref.phase === 'string' && typeof ref.gate === 'string') {
-        result.phase = ref.phase;
+        result.phase = canonicalPhaseId(ref.phase);
         result.gate = ref.gate;
       } else {
         keepFallback();

@@ -152,6 +152,11 @@ describe('sanitizers', () => {
               section: 'Work Plan',
               phase: 'P1 Work',
             },
+            {
+              kind: 'phase-gate',
+              phase: 'P3 - Report and Status Projection',
+              gate: 'Acceptance gate',
+            },
           ],
           suggested_fix: 'f',
           confidence: 0.9,
@@ -183,6 +188,7 @@ describe('sanitizers', () => {
     expect(result.issues.every((issue) => /^C[0-9]+$/.test(issue.id))).toBe(true);
     expect(result.issues[0]?.evidence_refs).toEqual([
       { kind: 'plan-section', section: 'Work Plan' },
+      { kind: 'phase-gate', phase: 'P3', gate: 'Acceptance gate' },
     ]);
     expect(result.domain_assessments).toEqual([]);
     expect(result.boundary_challenges).toEqual([]);

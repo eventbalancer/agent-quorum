@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { convergenceHealth } from '../../src/core/metrics.js';
+import { sanitizeCritiqueJson } from '../../src/core/schema.js';
 import { REPO_ROOT } from '../helpers/harness.js';
 
 const roots: string[] = [];
@@ -100,6 +101,49 @@ describe('rich convergence health', () => {
       repository: 4,
       topology: 1,
     });
+  });
+
+  it('grounds provider phase labels after sanitizing them to stable phase ids', () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-phase-evidence.'));
+    roots.push(project);
+    const work = path.join(project, 'work');
+    mkdirSync(work);
+    writeFileSync(
+      path.join(work, 'plan.v0.md'),
+      '# Plan\n\n## Work Plan\n\n### P3 - Report and Status Projection\n\nAcceptance gate covers every status branch.\n',
+    );
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+    const critique = path.join(work, 'critique.v0.json');
+    writeFileSync(
+      critique,
+      JSON.stringify({
+        plan_version: 0,
+        summary: 'phase evidence',
+        issues: [
+          issue('C1', {
+            kind: 'phase-gate',
+            phase: 'P3 - Report and Status Projection',
+            gate: 'Acceptance gate',
+          }),
+        ],
+      }),
+    );
+
+    sanitizeCritiqueJson(critique, 0);
+
+    const sanitized = JSON.parse(readFileSync(critique, 'utf8')) as {
+      issues: { evidence_refs: { phase: string }[] }[];
+    };
+    expect(sanitized.issues[0]?.evidence_refs[0]?.phase).toBe('P3');
+    expect(
+      convergenceHealth(
+        work,
+        path.join(REPO_ROOT, 'skills', 'plan-critic', 'critique.schema.json'),
+        0,
+        critique,
+        project,
+      ).grounding,
+    ).toEqual({ grounded: 1, malformed: 0, 'format-mismatch': 0, unanchored: 0 });
   });
 
   it('distinguishes revision regressions from ordinary refinements', () => {
