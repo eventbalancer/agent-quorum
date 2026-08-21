@@ -9,6 +9,10 @@ subject ID as the authenticated identity, and authorize it through a local polic
 mapping subjects to exact run IDs and target roles. Signing keys, rotation, and
 revocation stay outside the repository. Keep the endpoint disabled until both
 the verifier and policy are configured; do not add a second credential store.
+Expose an additive reusable authenticated HTTP handler factory for embedders to
+mount in an existing server. Do not extend the loopback web workspace or add a
+new CLI server or daemon; remote hosting, bind lifecycle, and TLS termination
+remain outside the repository.
 
 ## Security and integrity invariants
 

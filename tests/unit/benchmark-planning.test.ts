@@ -242,6 +242,11 @@ describe('planning benchmark corpus', () => {
 
     expect(authPrompt).toContain('selected signed bearer tokens');
     expect(authPrompt).toContain('local policy maps');
+    expect(authPrompt).toContain('reusable authenticated HTTP handler');
+    expect(authPrompt).toContain('Do not add the route to');
+    expect(authPrompt).toContain('do not add a new CLI server or daemon');
+    expect(authReference).toContain('reusable authenticated HTTP handler');
+    expect(authReference).toContain('Do not extend the loopback web workspace');
     expect(authReference).not.toContain('readiness is `unable-to-decide`');
     expect(concurrencyPrompt).toContain('selector-backed `intervene --stop`');
     expect(concurrencyPrompt).toContain('additive `stopRun` public helper');

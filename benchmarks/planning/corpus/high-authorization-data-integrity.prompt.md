@@ -16,3 +16,8 @@ that subject to permitted run IDs and target roles. Signing keys, rotation, and
 revocation remain external to the repository. Keep the endpoint disabled until
 both the verifier and authorization policy are configured; do not invent a
 second credential store.
+
+The operator has selected an additive reusable authenticated HTTP handler
+factory for embedders to mount in their existing server. Do not add the route to
+the loopback web workspace and do not add a new CLI server or daemon. Remote
+hosting, bind lifecycle, and TLS termination remain outside this repository.
