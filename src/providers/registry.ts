@@ -25,6 +25,7 @@ export const RUNNER_META = {
     defaultModel: 'gpt-5.5',
     install: { message: 'codex is required' },
     auth: { args: ['login', 'status'], remedy: () => 'codex login' },
+    stream: { envPrefix: 'CODEX', requirePositivePoll: true },
     usesSession: false,
   },
   claude: {
@@ -50,9 +51,8 @@ export type Runner = keyof typeof RUNNER_META;
 export const RUNNERS = Object.keys(RUNNER_META) as readonly Runner[];
 
 // Runners whose registry entry carries a `stream` block. Derived from the
-// literal RUNNER_META shape (preserved by `satisfies`), so codex — which has no
-// stream — is excluded at the type level; the plain Runner union would wrongly
-// include it.
+// literal RUNNER_META shape (preserved by `satisfies`) so the config and runtime
+// watchdog maps stay exhaustive when a runner is added.
 export type StreamingRunner = {
   [R in Runner]: (typeof RUNNER_META)[R] extends { stream: object } ? R : never;
 }[Runner];
@@ -68,10 +68,10 @@ export function isRunner(value: string): value is Runner {
   return (RUNNERS as readonly string[]).includes(value);
 }
 
-// All-zero sentinel for non-streaming runners (codex): the watchdog treats it
-// as a no-op and the streamKnobs map entry is never read, keeping the
-// Record<Runner, StreamKnobs> total. Frozen because this one instance is shared
-// by reference across every ProviderRuntime, so a stray mutation cannot leak.
+// All-zero sentinel for runners without watchdog metadata. The watchdog treats
+// it as a no-op, keeping the Record<Runner, StreamKnobs> total. Frozen because
+// this one instance is shared by reference across every ProviderRuntime, so a
+// stray mutation cannot leak.
 export const DISABLED_STREAM_KNOBS: StreamKnobs = Object.freeze({
   stallStatus: 0,
   pollSeconds: 0,

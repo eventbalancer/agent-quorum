@@ -146,8 +146,9 @@ permission mode and may still stub), codex `gpt-5.5`, cursor `composer-2.5`.
 
 ### Watchdog knobs (`knobs`)
 
-Stream knobs for `knobs.claude` and `knobs.cursor` (env prefix
-`AGENT_QUORUM_CLAUDE_` / `AGENT_QUORUM_CURSOR_`):
+Provider watchdog knobs for `knobs.codex`, `knobs.claude`, and `knobs.cursor`
+(env prefix `AGENT_QUORUM_CODEX_`, `AGENT_QUORUM_CLAUDE_`, or
+`AGENT_QUORUM_CURSOR_`):
 
 | Store key                    | Env suffix                      | Default |
 | ---------------------------- | ------------------------------- | ------- |
@@ -156,6 +157,11 @@ Stream knobs for `knobs.claude` and `knobs.cursor` (env prefix
 | `stallInterruptGraceSeconds` | `STALL_INTERRUPT_GRACE_SECONDS` | `20`    |
 | `callTimeoutSeconds`         | `CALL_TIMEOUT_SECONDS`          | `1800`  |
 | `semanticIdleTimeoutSeconds` | `SEMANTIC_IDLE_TIMEOUT_SECONDS` | `900`   |
+
+Codex is commonly silent while it works, so its byte-idle and semantic-idle
+defaults are `0` (disabled); its `callTimeoutSeconds` wall-clock limit remains
+`1800`. Claude and Cursor use the table defaults for all five knobs. A watchdog
+timeout is a provider transport failure and does not become a convergence limit.
 
 Pass knobs for `knobs.fixPass` and `knobs.translatePass` (env prefix
 `AGENT_QUORUM_FIX_PASS_` / `AGENT_QUORUM_TRANSLATE_PASS_`): `timeoutSeconds`

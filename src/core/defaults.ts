@@ -69,6 +69,13 @@ export const DEFAULT_CONFIG: OperatorConfig = {
     },
   },
   knobs: {
+    codex: {
+      stallTimeoutSeconds: 0,
+      stallPollSeconds: 5,
+      stallInterruptGraceSeconds: 20,
+      callTimeoutSeconds: 1800,
+      semanticIdleTimeoutSeconds: 0,
+    },
     claude: {
       stallTimeoutSeconds: 600,
       stallPollSeconds: 5,
