@@ -12,6 +12,7 @@ import {
   DEFAULT_MANIFEST_FILE,
   loadPlanningBenchmark,
   scorePlanningBenchmark,
+  selectBenchmarkTasks,
   validatePlanningBenchmark,
   verifyBenchmarkOutputLocation,
   verifyBenchmarkWorkspace,
@@ -219,11 +220,34 @@ describe('planning benchmark corpus', () => {
     expect(Object.keys(config.roles)).toHaveLength(6);
     expect(
       Object.values(config.roles).every(
-        (role) => role.runner === 'codex' && role.model === 'gpt-5.5',
+        (role) => role.runner === 'codex' && role.model === 'gpt-5.6-luna',
       ),
     ).toBe(true);
     expect(config.settings.retryCount).toBe(1);
     expect(config.knobs.codex.callTimeoutSeconds).toBe(900);
+  });
+
+  it('selects only requested tasks in caller order', () => {
+    const { manifest } = loadPlanningBenchmark();
+    const selected = selectBenchmarkTasks(manifest.tasks, [
+      'high-concurrency-process-lifecycle',
+      'high-resume-hash-binding',
+    ]);
+
+    expect(selected.map((task) => task.id)).toEqual([
+      'high-concurrency-process-lifecycle',
+      'high-resume-hash-binding',
+    ]);
+    expect(selectBenchmarkTasks(manifest.tasks)).toEqual(manifest.tasks);
+    expect(() => selectBenchmarkTasks(manifest.tasks, ['missing-task'])).toThrow(
+      'unknown benchmark task: missing-task',
+    );
+    expect(() =>
+      selectBenchmarkTasks(manifest.tasks, [
+        'high-resume-hash-binding',
+        'high-resume-hash-binding',
+      ]),
+    ).toThrow('benchmark task IDs must be unique');
   });
 
   it('keeps at least four high-risk tasks decidable from the frozen input', () => {

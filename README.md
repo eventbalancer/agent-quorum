@@ -259,6 +259,7 @@ pnpm run check          # build + format/lint autofix + format/lint/types checks
 pnpm run test           # vitest run
 pnpm run test:coverage  # tests with V8 coverage thresholds (also enforced in CI)
 pnpm run benchmark:planning -- run --output <dir>                 # opt-in live candidate runs
+pnpm run benchmark:planning -- run --output <dir> --task <id>     # selected diagnostic runs
 pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text>
 pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file>
 ```

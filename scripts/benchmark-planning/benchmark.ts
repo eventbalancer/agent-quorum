@@ -72,6 +72,7 @@ interface RunPlanningBenchmarkOptions {
   readonly manifestFile?: string;
   readonly outputDir: string;
   readonly repositoryRoot: string;
+  readonly taskIds?: readonly string[];
 }
 
 interface CreateBlindBundleOptions {
@@ -614,8 +615,30 @@ function ensureNewPath(target: string, label: string): void {
   }
 }
 
+export function selectBenchmarkTasks(
+  tasks: readonly BenchmarkTask[],
+  taskIds: readonly string[] = [],
+): readonly BenchmarkTask[] {
+  if (taskIds.length === 0) {
+    return tasks;
+  }
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const selected = taskIds.map((taskId) => {
+    const task = taskById.get(taskId);
+    if (task === undefined) {
+      throw new Error(`unknown benchmark task: ${taskId}`);
+    }
+    return task;
+  });
+  if (new Set(taskIds).size !== taskIds.length) {
+    throw new Error('benchmark task IDs must be unique');
+  }
+  return selected;
+}
+
 export function runPlanningBenchmark(options: RunPlanningBenchmarkOptions): BenchmarkRunResults {
   const benchmark = loadPlanningBenchmark(options.manifestFile);
+  const selectedTasks = selectBenchmarkTasks(benchmark.manifest.tasks, options.taskIds);
   const outputDir = path.resolve(options.outputDir);
   const repositoryRoot = realpathSync(options.repositoryRoot);
   verifyBenchmarkOutputLocation(repositoryRoot, outputDir);
@@ -637,7 +660,7 @@ export function runPlanningBenchmark(options: RunPlanningBenchmarkOptions): Benc
   const providerConfigText = readFileSync(providerConfigFile, 'utf8');
   mkdirSync(outputDir, { recursive: true });
   const taskResults: BenchmarkTaskRunResult[] = [];
-  for (const task of benchmark.manifest.tasks) {
+  for (const task of selectedTasks) {
     const taskRoot = path.join(outputDir, task.id);
     const workDir = path.join(taskRoot, 'run');
     const stateDir = path.join(taskRoot, 'state');

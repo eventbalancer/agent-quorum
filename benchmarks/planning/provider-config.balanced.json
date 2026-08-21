@@ -13,7 +13,7 @@
   "roles": {
     "creator": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "createTools": ["Read", "Grep", "Glob"],
       "createDisallowedTools": [
         "Write",
@@ -39,7 +39,7 @@
     },
     "critic": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -54,7 +54,7 @@
     },
     "fixer": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -69,7 +69,7 @@
     },
     "reviewer": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -84,7 +84,7 @@
     },
     "translator": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",
@@ -99,7 +99,7 @@
     },
     "judge": {
       "runner": "codex",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-luna",
       "tools": ["Read", "Grep", "Glob"],
       "disallowedTools": [
         "Write",

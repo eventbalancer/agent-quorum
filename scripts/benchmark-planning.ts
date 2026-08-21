@@ -9,7 +9,7 @@ import {
 } from './benchmark-planning/benchmark.js';
 
 const USAGE = `usage:
-  pnpm run benchmark:planning -- run --output <dir> [--manifest <file>]
+  pnpm run benchmark:planning -- run --output <dir> [--task <id>]... [--manifest <file>]
   pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text> [--manifest <file>]
   pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file> [--output <file>] [--manifest <file>]
 
@@ -20,11 +20,13 @@ Blind and score are deterministic local artifact operations.
 interface ParsedOptions {
   readonly values: ReadonlyMap<string, string>;
   readonly reviews: readonly string[];
+  readonly tasks: readonly string[];
 }
 
 function parseOptions(args: readonly string[]): ParsedOptions {
   const values = new Map<string, string>();
   const reviews: string[] = [];
+  const tasks: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index] ?? '';
     if (!flag.startsWith('--')) {
@@ -36,6 +38,8 @@ function parseOptions(args: readonly string[]): ParsedOptions {
     }
     if (flag === '--review') {
       reviews.push(value);
+    } else if (flag === '--task') {
+      tasks.push(value);
     } else {
       if (values.has(flag)) {
         throw new Error(`duplicate option: ${flag}`);
@@ -44,7 +48,7 @@ function parseOptions(args: readonly string[]): ParsedOptions {
     }
     index += 1;
   }
-  return { values, reviews };
+  return { values, reviews, tasks };
 }
 
 function value(options: ParsedOptions, flag: string, required = true): string | undefined {
@@ -85,6 +89,7 @@ function runCommand(options: ParsedOptions): number {
     outputDir,
     manifestFile: manifestFile(options),
     repositoryRoot: repositoryRoot(),
+    taskIds: options.tasks,
   });
   const failed = results.tasks.filter((task) => task.decision === 'run-failed');
   process.stdout.write(
@@ -97,6 +102,9 @@ function blindCommand(options: ParsedOptions): number {
   ensureAllowedOptions(options, ['--results', '--output', '--key', '--seed', '--manifest']);
   if (options.reviews.length > 0) {
     throw new Error('--review is not valid for blind');
+  }
+  if (options.tasks.length > 0) {
+    throw new Error('--task is not valid for blind');
   }
   const resultsFile = value(options, '--results');
   const outputDir = value(options, '--output');
@@ -124,6 +132,9 @@ function blindCommand(options: ParsedOptions): number {
 }
 
 function scoreCommand(options: ParsedOptions): number {
+  if (options.tasks.length > 0) {
+    throw new Error('--task is not valid for score');
+  }
   ensureAllowedOptions(options, ['--results', '--key', '--output', '--manifest']);
   const resultsFile = value(options, '--results');
   const keyFile = value(options, '--key');
