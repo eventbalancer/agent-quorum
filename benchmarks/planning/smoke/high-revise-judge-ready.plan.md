@@ -104,20 +104,30 @@ existing focused suite passes.
    `writeFileSync` and `renameSync`; assert the write target is the current
    same-directory temporary path, rename is later, and rename targets the
    reserved `.json` record. Keep the helper private.
-4. Run `pnpm exec vitest run tests/unit/run-store.test.ts` plus the focused mock
+4. Make failure propagation unconditional and observable. Create an accepted
+   test record whose enumerable nested `finalReadiness` value contains a
+   self-reference through a narrowly scoped test-only cast; native
+   `JSON.stringify` must throw before either filesystem mock is called. Configure
+   the same hoisted mock to throw a sentinel error once from the temporary
+   `writeFileSync` and once from `renameSync`. For all three cases, assert the
+   original error reaches the caller, the final `.json` bytes stay unchanged,
+   and no later filesystem operation occurs. Preserve the current temporary-file
+   residue behavior after rename failure rather than adding cleanup semantics.
+5. Run `pnpm exec vitest run tests/unit/run-store.test.ts` plus the focused mock
    module, followed by `pnpm run check` and `pnpm run test`.
 
 Acceptance gate: tests prove complete old/new JSON, byte-preserving malformed
-no-op behavior, temporary-write-before-rename ordering, the unchanged round
-trip, and a green repository verification floor.
+no-op behavior, temporary-write-before-rename ordering, unconditional
+serializer/write/rename error propagation without final-path publication, the
+unchanged round trip, and a green repository verification floor.
 
 ## Files and Interfaces
 
-| Surface                               | Planned change                                                            | Preserved contract                                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `src/core/run-store.ts`               | Add one private replacement helper and one call from `finalizeRunRecord`. | Exported signatures, parse/merge behavior, temporary path, error propagation, and atomic rename stay unchanged. |
-| `tests/unit/run-store.test.ts`        | Strengthen round-trip and malformed-target assertions.                    | Existing fixtures and public calls remain valid.                                                                |
-| `tests/unit/run-store-atomic.test.ts` | Observe filesystem call order through a delegating hoisted mock.          | No runtime test seam or public export is added.                                                                 |
+| Surface                               | Planned change                                                                                                      | Preserved contract                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/core/run-store.ts`               | Add one private replacement helper and one call from `finalizeRunRecord`.                                           | Exported signatures, parse/merge behavior, temporary path, error propagation, and atomic rename stay unchanged. |
+| `tests/unit/run-store.test.ts`        | Strengthen round-trip and malformed-target assertions.                                                              | Existing fixtures and public calls remain valid.                                                                |
+| `tests/unit/run-store-atomic.test.ts` | Observe filesystem call order and deterministic serializer/write/rename failures through a delegating hoisted mock. | No runtime test seam or public export is added, and current residue behavior remains unchanged.                 |
 
 ## Verification
 
@@ -125,6 +135,9 @@ trip, and a green repository verification floor.
 - The malformed fixture proves an unreadable reserved record is never replaced.
 - The delegating filesystem mock proves serialization is written away from the
   final `.json` path and rename publishes only after that write succeeds.
+- The cyclic nested-value case proves serialization failure occurs before any
+  write, while sentinel write/rename errors prove unchanged propagation and
+  final-path bytes for both filesystem failure boundaries.
 - `pnpm run check` proves build, formatting, lint, and types.
 - `pnpm run test` proves repository integration remains intact.
 
@@ -145,6 +158,7 @@ flowchart TD
   B -->|"serialize complete record"| C["same-directory temporary file"]
   C -->|"renameSync after write"| D["reserved run .json path"]
   D -->|"complete bytes only"| E["readRunRecords and status consumers"]
+  B -.->|"native serializer or filesystem error"| H["unchanged caller-visible failure"]
   F["run-store focused tests"] -.->|"round trip + malformed no-op"| A
-  G["delegating fs mock test"] -.->|"write then rename ordering"| B
+  G["delegating fs mock test"] -.->|"ordering + deterministic failures"| B
 ```
