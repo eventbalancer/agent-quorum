@@ -110,7 +110,7 @@ describe('rich convergence health', () => {
     mkdirSync(work);
     writeFileSync(
       path.join(work, 'plan.v0.md'),
-      '# Plan\n\n## Work Plan\n\n### P3 - Report and Status Projection\n\nAcceptance gate covers every status branch.\n',
+      '# Plan\n\n## Work Plan\n\n### P3 - Report and Status Projection\n\nAcceptance gate includes `critique_iterations` in every status branch.\n',
     );
     writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
     const critique = path.join(work, 'critique.v0.json');
@@ -123,7 +123,7 @@ describe('rich convergence health', () => {
           issue('C1', {
             kind: 'phase-gate',
             phase: 'P3 - Report and Status Projection',
-            gate: 'Acceptance gate',
+            gate: 'Acceptance gate includes critique_iterations in every status branch.',
           }),
         ],
       }),

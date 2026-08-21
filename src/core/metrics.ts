@@ -282,12 +282,15 @@ function evidenceFormatMismatch(ref: Record<string, JsonValue>): boolean {
 }
 
 function containsEvidenceToken(text: string, token: string): boolean {
-  const normalized = token.trim();
+  const comparableText = text.replace(/`+/g, '');
+  const normalized = token.replace(/`+/g, '').trim();
   if (normalized === '') {
     return false;
   }
   const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|[^A-Za-z0-9_@/.:-])${escaped}(?=$|[^A-Za-z0-9_@/.:-])`, 'i').test(text);
+  return new RegExp(`(?:^|[^A-Za-z0-9_@/.:-])${escaped}(?=$|[^A-Za-z0-9_@/.:-])`, 'i').test(
+    comparableText,
+  );
 }
 
 export function planPhaseGateExists(plan: string, phase: string, gate: string): boolean {
