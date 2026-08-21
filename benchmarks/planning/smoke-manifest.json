@@ -8,7 +8,7 @@
       "id": "standard-create-ready",
       "risk": "standard",
       "inputMode": "prompt",
-      "input": "corpus/standard-local-cli-api.prompt.md",
+      "input": "smoke/standard-create-ready.prompt.md",
       "quality": "quick",
       "maxIterations": 2,
       "expected": {

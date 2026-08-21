@@ -805,6 +805,55 @@ function declaredRepositories(
   return entries.filter((entry) => repositoryPath(projectRoot, entry) === projectRoot);
 }
 
+function implementationScopeSource(source: string): string {
+  let excludedHeadingDepth: number | undefined;
+  let excludedLabel = false;
+  return source
+    .split(/\r?\n/)
+    .map((line) => {
+      const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+      if (heading !== null) {
+        const depth = heading[1]?.length ?? 0;
+        if (excludedHeadingDepth !== undefined && depth <= excludedHeadingDepth) {
+          excludedHeadingDepth = undefined;
+        }
+        excludedLabel = false;
+        if (
+          /^(?:out[- ]of[- ]scope|non[- ]goals?|exclusions?)\s*:?[\s#]*$/i.test(heading[2] ?? '')
+        ) {
+          excludedHeadingDepth = depth;
+          return '';
+        }
+      }
+      if (excludedHeadingDepth !== undefined) {
+        return '';
+      }
+      if (
+        /^\s*(?:\*\*)?(?:out[- ]of[- ]scope|non[- ]goals?|exclusions?)(?:\*\*)?\s*:\s*$/i.test(line)
+      ) {
+        excludedLabel = true;
+        return '';
+      }
+      if (/^\s*(?:\*\*)?in[- ]scope(?:\*\*)?\s*:\s*$/i.test(line)) {
+        excludedLabel = false;
+      }
+      if (excludedLabel) {
+        return '';
+      }
+      if (
+        /\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(line) &&
+        (/\b(?:not|no|without)\b.{0,48}\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(line) ||
+          /\b(?:cross|multi)[- ]repositor(?:y|ies)\b.{0,48}\b(?:excluded|not applicable|not required|out[- ]of[- ]scope)\b/i.test(
+            line,
+          ))
+      ) {
+        return '';
+      }
+      return line;
+    })
+    .join('\n');
+}
+
 function explicitlyRequestsCrossRepositoryScope(source: string): boolean {
   return (
     /\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(source) ||
@@ -841,14 +890,15 @@ export function buildSystemContext(input: BuildSystemContextInput): SystemContex
     sourceRaw = readFileSync(sourceFile, 'utf8');
     sources.push({ path: sourceFile, sha256: sha256(sourceRaw) });
   }
-  const explicitlyCrossRepository = explicitlyRequestsCrossRepositoryScope(sourceRaw);
+  const scopedSource = implementationScopeSource(sourceRaw);
+  const explicitlyCrossRepository = explicitlyRequestsCrossRepositoryScope(scopedSource);
   const ecosystem = path.join(input.projectRoot, 'ecosystem.yaml');
   if (existsSync(ecosystem)) {
     const raw = addSource(sources, ecosystem) ?? '';
     try {
       const root = yamlObject(raw);
       const repoEntries = repositories(root);
-      const scopedRepositories = declaredRepositories(input.projectRoot, sourceRaw, repoEntries);
+      const scopedRepositories = declaredRepositories(input.projectRoot, scopedSource, repoEntries);
       declaredScope.push(...scopedRepositories.map((repo) => repo.name));
       regions.push(...strings(root.regions));
       migrationCommands.push(...strings(root.migration_commands));

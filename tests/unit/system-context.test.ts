@@ -397,6 +397,65 @@ describe('authoritative system context', () => {
     expect(afterScopedChange.digest).not.toBe(context.digest);
   });
 
+  it('does not promote excluded repositories or delivery domains into scope', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-system-excluded-scope.'));
+    roots.push(root);
+    mkdirSync(path.join(root, 'producer'));
+    mkdirSync(path.join(root, 'consumer'));
+    writeFileSync(
+      path.join(root, 'ecosystem.yaml'),
+      [
+        'repositories:',
+        '  producer:',
+        '    path: producer',
+        '  consumer:',
+        '    path: consumer',
+        '    depends_on: [producer]',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(root, 'producer', 'package.json'),
+      JSON.stringify({ name: '@fixture/producer' }),
+    );
+    writeFileSync(
+      path.join(root, 'consumer', 'package.json'),
+      JSON.stringify({ name: '@fixture/consumer' }),
+    );
+    const input = path.join(root, 'input.md');
+    writeFileSync(
+      input,
+      [
+        '# Local producer change',
+        '',
+        '## Scope',
+        '',
+        'In scope:',
+        '',
+        '- Update producer parsing.',
+        '',
+        'Out of scope:',
+        '',
+        '- Consumer changes.',
+        '- Cross-repository delivery.',
+        '',
+        '## Verification',
+        '',
+        'Run producer tests.',
+      ].join('\n'),
+    );
+
+    const context = buildSystemContext({ projectRoot: root, mode: 'plan', inputFile: input });
+
+    expect(context.declaredScope).toEqual(['producer']);
+    expect(context.crossRepository).toBe(false);
+    expect(context.relationships).toEqual([]);
+    expect(context.limitations).not.toContain('declared-cross-repository-scope-unresolved');
+    expect(context.limitations).not.toContain(
+      'declared-cross-repository-relationships-unavailable',
+    );
+  });
+
   it('treats unavailable topology as telemetry unless cross-repository delivery requires it', () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-system-applicability.'));
     roots.push(root);
