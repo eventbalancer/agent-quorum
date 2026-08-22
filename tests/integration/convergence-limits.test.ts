@@ -76,7 +76,7 @@ describe('honest convergence limits', () => {
     expect(existsSync(path.join(tmp, 'codex.prompt'))).toBe(true);
     expect(readFileSync(path.join(work, 'plan.v0.md'), 'utf8')).toContain('status: clean');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
-    expect(capture.text()).toContain('proof-satisfied');
+    expect(capture.text()).toContain('ready at v0');
   });
 
   it('does not downgrade convergence solely because the model context bound is unknown', async () => {
@@ -113,7 +113,7 @@ describe('honest convergence limits', () => {
       Array.from({ length: 8 }, (_, index) => ({
         id: `C${index + 1}`,
         addresses: null,
-        severity: 'nit',
+        severity: 'major',
         category: 'convention',
         claim: `duplicate ${index + 1}`,
         evidence: '## Work Plan',
@@ -136,18 +136,14 @@ describe('honest convergence limits', () => {
     expect(result.exitCode).toBe(0);
     expect(result.status).toBe('needs-review');
     expect(result.convergence?.exhaustedLimits).toContain('issue-budget');
-    expect(result.convergence?.unresolvedCoverage).toContain('plan.v0:scan-incomplete');
-    expect(capture.text()).not.toContain('proof-satisfied');
+    expect(result.convergence?.decision).toBe('limits-exhausted');
+    expect(result.convergence?.reasonCodes).toContain('issue-budget');
+    expect(capture.text()).not.toContain('ready at v0');
   });
 
-  it('makes an incomplete direct-plan scope explicit without fabricating a request', async () => {
-    const critique = path.join(tmp, 'incomplete-scope.json');
+  it('uses the frozen assessment as the direct-plan boundary without fabricating a request', async () => {
+    const critique = path.join(tmp, 'direct-plan-scope.json');
     emptyCritique(critique);
-    const parsed = JSON.parse(readFileSync(critique, 'utf8')) as {
-      review: { scope_coverage: string[] };
-    };
-    parsed.review.scope_coverage = [];
-    writeFileSync(critique, `${JSON.stringify(parsed, null, 2)}\n`);
 
     const result = await withEnvAsync(env(critique), () =>
       runPlanLoop({
@@ -161,9 +157,12 @@ describe('honest convergence limits', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('needs-review');
-    expect(result.convergence?.exhaustedLimits).toContain('authoritative-scope');
-    expect(result.convergence?.unresolvedCoverage).toContain('direct-plan:declared-scope-unproved');
+    expect(result.status).toBe('clean');
+    expect(result.convergence?.decision).toBe('ready');
+    expect(result.convergence?.exhaustedLimits).not.toContain('authoritative-scope');
+    expect(result.convergence?.unresolvedCoverage).not.toContain(
+      'direct-plan:declared-scope-unproved',
+    );
     const prompt = readFileSync(path.join(tmp, 'codex.prompt'), 'utf8');
     expect(prompt).toContain('scope_source: direct-plan');
     expect(prompt).toContain('original_request: unavailable');

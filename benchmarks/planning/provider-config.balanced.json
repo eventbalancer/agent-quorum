@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "settings": {
+    "iters": 5,
+    "quality": "balanced",
+    "fix": true,
+    "translate": false,
+    "locale": "",
+    "diffThreshold": 5,
+    "retryCount": 1,
+    "retryDelaySeconds": 10
+  },
+  "roles": {
+    "creator": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "createTools": ["Read", "Grep", "Glob"],
+      "createDisallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ],
+      "updateTools": ["Read"],
+      "updateDisallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "critic": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "fixer": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "reviewer": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "translator": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    },
+    "judge": {
+      "runner": "codex",
+      "model": "gpt-5.6-luna",
+      "tools": ["Read", "Grep", "Glob"],
+      "disallowedTools": [
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "AskUserQuestion"
+      ]
+    }
+  },
+  "knobs": {
+    "codex": {
+      "stallTimeoutSeconds": 0,
+      "stallPollSeconds": 5,
+      "stallInterruptGraceSeconds": 20,
+      "callTimeoutSeconds": 900,
+      "semanticIdleTimeoutSeconds": 0
+    },
+    "claude": {
+      "stallTimeoutSeconds": 600,
+      "stallPollSeconds": 5,
+      "stallInterruptGraceSeconds": 20,
+      "callTimeoutSeconds": 1800,
+      "semanticIdleTimeoutSeconds": 900
+    },
+    "cursor": {
+      "stallTimeoutSeconds": 600,
+      "stallPollSeconds": 5,
+      "stallInterruptGraceSeconds": 20,
+      "callTimeoutSeconds": 1800,
+      "semanticIdleTimeoutSeconds": 900
+    },
+    "fixPass": {
+      "timeoutSeconds": 900,
+      "semanticIdleTimeoutSeconds": 900,
+      "retryCount": 1
+    },
+    "translatePass": {
+      "timeoutSeconds": 900,
+      "semanticIdleTimeoutSeconds": 900,
+      "retryCount": 1
+    }
+  },
+  "split": { "mode": "auto", "minPhases": 5 },
+  "retention": { "keepCount": 50, "maxAgeDays": 30 },
+  "telegram": {
+    "chatId": "",
+    "clarify": "auto",
+    "clarifyDeadlineSeconds": 86400,
+    "pollTimeoutSeconds": 50,
+    "httpTimeoutSeconds": 70,
+    "receiveFailureWindowSeconds": 120,
+    "receiveBackoffSeconds": 2
+  },
+  "providers": {
+    "livenessHeartbeatSeconds": 30,
+    "claudeThinkingEvery": 3,
+    "cursorBin": "cursor-agent",
+    "providerDiagnostics": false
+  },
+  "status": { "maxPlanLines": 900 },
+  "claudePermissionMode": "default"
+}

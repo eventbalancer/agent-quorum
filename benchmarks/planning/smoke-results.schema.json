@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "suiteId",
+    "workspaceRevision",
+    "providerConfigSha256",
+    "passed",
+    "tasks"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "workspaceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "providerConfigSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "passed": { "type": "boolean" },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["taskId", "passed", "decision", "critiqueIterations", "exitCode", "failures"],
+        "properties": {
+          "taskId": { "type": "string", "minLength": 1 },
+          "passed": { "type": "boolean" },
+          "decision": {
+            "enum": [
+              "ready",
+              "revision-required",
+              "unable-to-decide",
+              "limits-exhausted",
+              "run-failed"
+            ]
+          },
+          "critiqueIterations": { "type": "integer", "minimum": 0 },
+          "planVersion": { "type": "integer", "minimum": 0 },
+          "exitCode": { "type": "integer", "minimum": 0 },
+          "failures": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "finalPlan": { "type": "string", "minLength": 1 },
+          "finalPlanSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  }
+}

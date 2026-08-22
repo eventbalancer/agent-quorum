@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   normalizePlanDocument,
+  normalizeRepositoryFileLineReferences,
   planDocumentShapeHealth,
   planDocumentShapeOk,
   planFirstTitleLine,
@@ -284,6 +285,21 @@ describe('title and fence detection', () => {
     expect(planHasTitleHeading(target)).toBe(true);
     expect(readFileSync(`${target}.raw`, 'utf8')).not.toContain('STALE RAW');
     expect(readFileSync(`${target}.raw`, 'utf8')).toContain('Leaked preamble');
+  });
+
+  it('normalizes only absolute file-line references rooted in the repository', () => {
+    const target = file('references.md');
+    const projectRoot = file('project');
+    writeFileSync(
+      target,
+      `Inside: \`file-line:${projectRoot}/src/core.ts:4\`. Outside: \`file-line:/other/repo/core.ts:4\`.\n`,
+    );
+
+    expect(normalizeRepositoryFileLineReferences(target, projectRoot)).toBe(1);
+    expect(readFileSync(target, 'utf8')).toBe(
+      'Inside: `file-line:src/core.ts:4`. Outside: `file-line:/other/repo/core.ts:4`.\n',
+    );
+    expect(normalizeRepositoryFileLineReferences(target, projectRoot)).toBe(0);
   });
   it('normalize_plan_document strips outer code fence wrapping the entire plan', () => {
     const target = file('outer-fence.md');

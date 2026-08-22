@@ -82,6 +82,29 @@ pnpm run build
 npm publish --dry-run --access public
 ```
 
+Planner, provider, role-contract, readiness-policy, and finalization changes also
+run the two-sentinel live merge gate after their implementation commit and smoke
+manifest pin are clean:
+
+```bash
+pnpm run benchmark:planning:smoke -- --output <outside-repository-dir>
+```
+
+The standard sentinel covers prompt assessment, creation, exact critic review,
+Judge exemption, and `ready` to `clean` finalization. The high-risk sentinel
+starts from a structured plan with one seeded material storage fault and must
+produce a creator revision, fresh critic proof, intermediate and final Judge
+approval, and exact final SHA-256 binding. Reducer branches such as boundary
+challenges, unavailable evidence, limits, opportunities, migration, and resume
+invalidation stay in deterministic tests rather than provider-dependent merge
+gates.
+
+The ten-task `benchmark:planning -- run`, blind bundle, independent reviews, and
+scoring are release calibration, not an every-merge check. Run that full flow
+when changing the provider model, planning prompts or schemas, risk policy, or a
+major planning-loop contract, and periodically when preparing a release whose
+scope includes those surfaces.
+
 The dry run verifies the package contents generated from `files`, `main`,
 `types`, `exports`, and `bin` in `package.json`. Inspect the dry-run file list
 before committing if the release changes package contents.

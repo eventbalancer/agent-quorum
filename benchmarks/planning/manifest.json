@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "bounded-readiness-v1",
+  "corpusApproval": "operator-approval-required",
+  "thresholds": {
+    "standard": {
+      "minimumReady": 4,
+      "total": 5,
+      "maximumCritiqueIterations": 2
+    },
+    "high": {
+      "minimumReady": 4,
+      "total": 5,
+      "maximumCritiqueIterations": 3
+    },
+    "comparison": {
+      "minimumMajorityPreferred": 6,
+      "maximumMajorityWorse": 0,
+      "maximumMissedMaterialConcerns": 0,
+      "minimumIndependentReviewsPerTask": 2
+    }
+  },
+  "tasks": [
+    {
+      "id": "standard-local-cli-api",
+      "risk": "standard",
+      "category": "local-cli-api-change",
+      "prompt": "corpus/standard-local-cli-api.prompt.md",
+      "reference": "corpus/standard-local-cli-api.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "cli-api-preserve-existing-inputs",
+          "severity": "major",
+          "claim": "The plan must preserve positional and --prompt parsing while adding the new additive flag through both CLI and library entry points."
+        }
+      ]
+    },
+    {
+      "id": "standard-config-artifact",
+      "risk": "standard",
+      "category": "config-artifact-projection",
+      "prompt": "corpus/standard-config-artifact.prompt.md",
+      "reference": "corpus/standard-config-artifact.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "config-projection-single-source",
+          "severity": "major",
+          "claim": "The plan must keep the config resolver as the single source and project the resolved value consistently into metadata, status, and summaries."
+        }
+      ]
+    },
+    {
+      "id": "standard-internal-refactor",
+      "risk": "standard",
+      "category": "internal-refactor",
+      "prompt": "corpus/standard-internal-refactor.prompt.md",
+      "reference": "corpus/standard-internal-refactor.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "refactor-preserve-cleanup-semantics",
+          "severity": "major",
+          "claim": "The extracted lifecycle helper must preserve cleanup, exit-code, and completion-notification ordering on every existing branch."
+        }
+      ]
+    },
+    {
+      "id": "standard-metrics-reporting",
+      "risk": "standard",
+      "category": "metrics-reporting",
+      "prompt": "corpus/standard-metrics-reporting.prompt.md",
+      "reference": "corpus/standard-metrics-reporting.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "metrics-derived-not-authoritative",
+          "severity": "major",
+          "claim": "The new metric must be a derived projection and must not become a second source of convergence truth."
+        }
+      ]
+    },
+    {
+      "id": "standard-package-export",
+      "risk": "standard",
+      "category": "package-export-compatibility",
+      "prompt": "corpus/standard-package-export.prompt.md",
+      "reference": "corpus/standard-package-export.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "export-additive-esm-cjs",
+          "severity": "major",
+          "claim": "The plan must keep the root export and bin stable and verify the additive helper through the built package in both declared import surfaces."
+        }
+      ]
+    },
+    {
+      "id": "high-schema-storage-migration",
+      "risk": "high",
+      "category": "schema-storage-migration",
+      "prompt": "corpus/high-schema-storage-migration.prompt.md",
+      "reference": "corpus/high-schema-storage-migration.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "migration-conservative-legacy-read",
+          "severity": "blocker",
+          "claim": "Legacy records must migrate conservatively without being promoted to the new trusted state before fresh validation."
+        },
+        {
+          "id": "migration-atomic-write",
+          "severity": "major",
+          "claim": "The plan must preserve atomic record replacement and crash-safe retry behavior during migration."
+        }
+      ]
+    },
+    {
+      "id": "high-resume-hash-binding",
+      "risk": "high",
+      "category": "resume-hash-binding",
+      "prompt": "corpus/high-resume-hash-binding.prompt.md",
+      "reference": "corpus/high-resume-hash-binding.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "resume-reject-stale-proof",
+          "severity": "blocker",
+          "claim": "Resume must never reuse critique, system, or Judge proof whose version and SHA-256 do not match the exact candidate bytes."
+        },
+        {
+          "id": "resume-idempotent-reconciliation",
+          "severity": "major",
+          "claim": "A crash between artifact write and state update must reconcile idempotently without repeating provider work or consuming limits twice."
+        }
+      ]
+    },
+    {
+      "id": "high-cross-repository-delivery",
+      "risk": "high",
+      "category": "cross-repository-delivery",
+      "prompt": "corpus/high-cross-repository-delivery.prompt.md",
+      "reference": "corpus/high-cross-repository-delivery.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "delivery-contract-ordering",
+          "severity": "blocker",
+          "claim": "Producer and consumer changes need an explicit compatible rollout order with a versioned wire contract and rollback point."
+        },
+        {
+          "id": "delivery-unavailable-topology",
+          "severity": "major",
+          "claim": "Unavailable downstream topology must become a decision blocker only for relationships needed to prove this delivery."
+        }
+      ]
+    },
+    {
+      "id": "high-authorization-data-integrity",
+      "risk": "high",
+      "category": "authorization-data-integrity",
+      "prompt": "corpus/high-authorization-data-integrity.prompt.md",
+      "reference": "corpus/high-authorization-data-integrity.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "authorization-bind-subject",
+          "severity": "blocker",
+          "claim": "Authorization must bind every intervention to the authenticated operator, target run, and permitted role before ledger mutation."
+        },
+        {
+          "id": "authorization-replay-integrity",
+          "severity": "major",
+          "claim": "Duplicate or replayed intervention requests must be idempotent and must not reorder the durable operator ledger."
+        }
+      ]
+    },
+    {
+      "id": "high-concurrency-process-lifecycle",
+      "risk": "high",
+      "category": "concurrency-process-lifecycle",
+      "prompt": "corpus/high-concurrency-process-lifecycle.prompt.md",
+      "reference": "corpus/high-concurrency-process-lifecycle.reference.md",
+      "referenceApproval": "operator-approval-required",
+      "workspaceRevision": "32fdd65d33b1ad5dc04978b8022c9aabe684dee2",
+      "providerConfig": "provider-config.balanced.json",
+      "knownConcerns": [
+        {
+          "id": "lifecycle-pid-reuse",
+          "severity": "blocker",
+          "claim": "Process targeting must validate PID, process-group identity, and start token so PID reuse cannot signal an unrelated process."
+        },
+        {
+          "id": "lifecycle-terminal-race",
+          "severity": "major",
+          "claim": "Concurrent stop, natural exit, and registry cleanup must converge on one terminal record without orphaning children."
+        }
+      ]
+    }
+  ]
+}

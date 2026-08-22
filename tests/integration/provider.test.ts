@@ -807,6 +807,43 @@ describe('claude watchdog', () => {
 });
 
 describe('codex argv and retries', () => {
+  it('wall-clock timeout terminates a silent codex call', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const providerRuntime = makeRuntime({
+      retry: { retryCount: 0, retryDelaySeconds: 0 },
+      streamKnobs: {
+        codex: { ...BASE_STREAM_KNOBS, wallTimeoutSeconds: 2 },
+        claude: BASE_STREAM_KNOBS,
+        cursor: BASE_STREAM_KNOBS,
+      },
+    });
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_SILENT_SECONDS: '30',
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'P\n',
+        ),
+    );
+
+    expect(status).toBe(124);
+    expect(capture.text()).toContain('codex stream stalled: wall-clock timeout');
+  }, 10_000);
+
   it('argv byte-matches the stateless read-only contract', async () => {
     const critique = path.join(tmp, 'critique.json');
     emptyCritique(critique);

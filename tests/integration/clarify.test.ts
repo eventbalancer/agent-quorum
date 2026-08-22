@@ -6,13 +6,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clarifyGateEnabled, runClarificationGate } from '../../src/stages/plan/clarify.js';
 import type { ResolvedTelegram } from '../../src/core/config.js';
 import type { TelegramRuntime } from '../../src/channels/telegram/index.js';
-import { ExitCode, runPlanLoop } from '../../src/index.js';
+import { runPlanLoop } from '../../src/index.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import {
   captureStderr,
   withEnvAsync,
   writeStoreConfig,
   writeFakeBin,
+  writeReadinessAssessment,
+  writeStructuredPlanFile,
   type StderrCapture,
 } from '../helpers/harness.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
@@ -570,11 +572,18 @@ describe('run-level clarify transport mapping', () => {
     rmSync(runTmp, { recursive: true, force: true });
   });
 
-  it('maps a persistent clarify receive failure to ExitCode.ClarifyTransportFailure', async () => {
-    writeFileSync(
-      path.join(runWork, 'clarify-questions.json'),
-      JSON.stringify(singleQuestion('Region?')),
-    );
+  it('keeps a useful non-ready plan when readiness clarification transport fails', async () => {
+    const input = path.join(runTmp, 'prompt.md');
+    writeStructuredPlanFile(input, 'Clarification Fallback Plan');
+    const assessment = path.join(runTmp, 'readiness-with-question.json');
+    writeReadinessAssessment(assessment, false, [
+      {
+        id: 'deployment-region',
+        question: 'Region?',
+        rationale: 'The selected region changes the deployment boundary.',
+        options: ['Region A', 'Region B'],
+      },
+    ]);
     runStub.failNext({ status: 401, errorCode: 401, times: 1000 });
 
     const result = await withEnvAsync(
@@ -587,6 +596,7 @@ describe('run-level clarify transport mapping', () => {
         AGENT_QUORUM_RETRY_COUNT: '0',
         AGENT_QUORUM_RESUME: undefined,
         FAKE_CODEX_PROMPT: path.join(runTmp, 'codex.prompt'),
+        FAKE_READINESS_ASSESSMENT: assessment,
         AGENT_QUORUM_TELEGRAM_BOT_TOKEN: 't',
         AGENT_QUORUM_TELEGRAM_CHAT_ID: '42',
         AGENT_QUORUM_TELEGRAM_API_BASE: runStub.baseUrl,
@@ -600,8 +610,7 @@ describe('run-level clarify transport mapping', () => {
       },
       () =>
         runPlanLoop({
-          input: path.join(runTmp, 'prompt.md'),
-          prompt: true,
+          input,
           iters: 1,
           quality: 'quick',
           fix: false,
@@ -609,7 +618,18 @@ describe('run-level clarify transport mapping', () => {
         }),
     );
 
-    expect(result.exitCode).toBe(ExitCode.ClarifyTransportFailure);
-    expect(runStub.sent.join('\n')).toContain('FAILED (exit 8)');
+    expect(result.exitCode).toBe(0);
+    expect(result.status).toBe('needs-review');
+    expect(result.convergence).toMatchObject({
+      decision: 'unable-to-decide',
+      satisfied: false,
+    });
+    expect(result.convergence?.reasonCodes).toContain('material-question-unresolved');
+    expect(existsSync(path.join(runWork, 'readiness-contract.json'))).toBe(true);
+    expect(existsSync(path.join(runWork, 'clarify.done'))).toBe(false);
+    expect(readFileSync(path.join(runWork, 'plan.final.md'), 'utf8')).toContain(
+      '# Clarification Fallback Plan',
+    );
+    expect(runCapture.text()).toContain('freezing unresolved material questions');
   }, 30_000);
 });

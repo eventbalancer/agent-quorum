@@ -26,13 +26,16 @@ than trust a single pass.
 ## How the loop works
 
 You hand agent-quorum a prompt or a rough plan. A **creator** writes the first
-draft. A **critic** then reviews it and reports concrete issues; the creator
-revises the draft to address them. A clean result requires more than an empty
-issue list: the exact revision must have an independent, complete review; its
-invariants and authoritative system relationships must be covered; required
-Judge evidence must agree; and no material limit may be exhausted. If that proof
-cannot be completed, agent-quorum still keeps the latest usable plan but marks
-it `needs-review`. A reference validator and optional fix pass repair pointed
+draft only after a read-only assessment freezes the implementation boundary,
+assurance appetite, and applicability/risk profile. A **critic** then reviews
+it and reports concrete material issues; the creator revises the draft to
+address them. A clean result requires more than an empty issue list: the exact
+revision must have an independent, complete review; its applicable risk domains
+and cross-cutting invariants must be covered; required Judge evidence must agree
+for high-risk work; and no material limit may be exhausted. Non-blocking
+improvements are retained separately as opportunities. If readiness cannot be
+decided, agent-quorum still keeps the latest usable plan but marks it
+`needs-review`. A reference validator and optional fix pass repair pointed
 reference defects, and large or multi-phase plans can be emitted as a
 self-contained `plan.package/` for phase-by-phase execution.
 
@@ -45,7 +48,8 @@ intermediate convergence candidates and the canonical final plan.
 ```text
 prompt.md
     │
-    │  clarify gate · operator answers blocking questions (Telegram)
+    │  creator assessment · freeze boundary, appetite, risk applicability
+    │  clarify gate · operator answers material questions (Telegram)
     │
     ▼
 creator ──► plan.v0.md
@@ -59,7 +63,7 @@ creator ──► plan.v0.md
 reference validator ──► fix pass ──► plan.final.md
                                            │
                                            ├── deterministic system check
-                                           ├── final judge (balanced/thorough)
+                                           ├── final judge (applicable high risk)
                                            ├── split policy (large/complex) ──► plan.package/
                                            └── locale pass ──► plan.final.<locale>.md
 ```
@@ -73,12 +77,16 @@ process group under a byte-idle / semantic-idle / wall-clock watchdog.
 - **role** — one job in the loop (creator, critic, fixer, reviewer, translator,
   judge), each bound to a provider and a prompt skill.
 - **runner** — the provider CLI a role calls: `codex`, `claude`, or `cursor`.
-- **quality** — a preset (`quick`, `balanced`, `thorough`) that selects the
-  role-call topology and promises best-effort, cumulative, or exhaustive
-  in-scope coverage.
+- **quality** — an assurance appetite (`quick`, `balanced`, `thorough`) that
+  controls cost, retained context, Judge availability, and whether applicable
+  domains receive an exhaustive scan; risk applicability decides which gates
+  are actually required.
+- **readiness decision** — one of `ready`, `revision-required`,
+  `unable-to-decide`, or `limits-exhausted`; only `revision-required` sends the
+  plan back to the creator.
 - **convergence** — proof that the current revision was independently reviewed,
-  its scan promise and invariant occurrences are complete, deterministic system
-  relationships pass, and no material bound is exhausted.
+  every applicable-domain gate and required invariant occurrence is complete,
+  and no material bound is exhausted.
 - **split** — emitting the latest canonical plan as a multi-file `plan.package/`
   when it is large or has enough phases, so even a `needs-review` result remains
   usable one phase at a time.
@@ -109,9 +117,14 @@ you care about are:
 
 - `plan.final.md` — the latest usable canonical plan; always the entry point and
   marked `needs-review` when convergence cannot be proved.
+- `readiness-contract.json` — immutable source/system digests, implementation
+  boundary, assurance appetite, risk applicability, and unresolved material
+  questions for this run.
 - `convergence.final.json` / `system-check.final.json` — the canonical proof and
   deterministic relationship verdict, SHA-256-bound to the delivered plan
   bytes.
+- `opportunities.json` — deduplicated non-blocking improvements; they are
+  observable but never trigger creator revision or block readiness.
 - `summary.md` — a one-page run summary (iterations, health, structural status,
   final readiness, and artifact paths).
 - `plan.package/` — present only when the split policy fires; a self-contained
@@ -159,8 +172,8 @@ if (result.exitCode === ExitCode.Ok && result.status === 'clean') {
 
 The API returns results — only the CLI calls `process.exit`. `runPlanLoop`
 returns a structured result (`workDir`, `finalPlanPath`, `summaryPath`,
-`iterations`, `health`, final/structural status, and readiness) built from the
-same data as `summary.md`. See
+`iterations`, `health`, final/structural status, readiness, and the four-way
+convergence decision) built from the same data as `summary.md`. See
 [`docs/api.md`](docs/api.md) for the full surface, including CommonJS use.
 
 ## Configuration
@@ -245,7 +258,27 @@ pnpm install --frozen-lockfile
 pnpm run check          # build + format/lint autofix + format/lint/types checks (no tests)
 pnpm run test           # vitest run
 pnpm run test:coverage  # tests with V8 coverage thresholds (also enforced in CI)
+pnpm run benchmark:planning:smoke -- --output <dir>               # two live merge sentinels
+pnpm run benchmark:planning -- run --output <dir>                 # full release calibration
+pnpm run benchmark:planning -- run --output <dir> --task <id>     # selected diagnostic runs
+pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text>
+pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file>
 ```
+
+The planning benchmark has two gates. The merge smoke runs one quick
+standard-risk prompt through create/critic/finalization without Judge and one
+balanced high-risk direct plan through a seeded material revision plus
+intermediate/final Judge and exact SHA-256 binding. The ten-task corpus, blind
+review, rubric, and scoring remain the opt-in release calibration for model,
+prompt, risk-policy, and major planner changes. Live provider calls and expert
+approval remain local operator actions and are not part of CI.
+
+The committed provider snapshot runs every role through Codex with
+`gpt-5.6-luna`. Live smoke and release runs require a clean worktree and verify
+that source files match their manifest's pinned implementation revision; the
+follow-up commit that records that revision may change only the manifest. Every
+live `--output` directory must be outside the source repository so generated
+artifacts cannot contaminate the pinned workspace.
 
 Code style, git, and verification rules live in
 [`docs/development/conventions.md`](docs/development/conventions.md).

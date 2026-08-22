@@ -12,12 +12,13 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { archiveResumeStale, lastStablePlan, prepareResume } from '../../src/stages/plan/resume.js';
 import { resolveResumeWorkdir } from '../../src/core/resume.js';
-import type { ResumeState } from '../../src/core/run-context.js';
+import type { ResumeState, RunContext } from '../../src/core/run-context.js';
 import { HaltError } from '../../src/runtime/halt.js';
 import { captureStderr, writeStructuredPlanFile, writeUpdate } from '../helpers/harness.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
 import {
+  applyReadinessPolicy,
   classifyTerminal,
   createConvergenceState,
   fileSha256,
@@ -29,6 +30,11 @@ import {
 } from '../../src/core/convergence.js';
 import { qualityMatrix } from '../../src/core/quality.js';
 import { validateSystemCoverage, writeSystemCheck } from '../../src/core/system-context.js';
+import {
+  buildReadinessContract,
+  RISK_DOMAINS,
+  writeFrozenReadinessContract,
+} from '../../src/core/readiness-contract.js';
 
 let tmp: string;
 let work: string;
@@ -48,6 +54,35 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
+
+function bindFrozenReadinessContract(ctx: RunContext, state = ctx.convergence): void {
+  const contract = buildReadinessContract({
+    assessment: {
+      boundary: {
+        goal: 'Preserve the bounded resume fixture.',
+        in_scope: ['Fixture repository'],
+        out_of_scope: ['Unrequested changes'],
+        constraints: ['Keep the frozen contract stable'],
+      },
+      domain_assessments: RISK_DOMAINS.map((domain) => ({
+        domain,
+        applicability: 'not-applicable',
+        risk: 'standard',
+        rationale: `Fixture assessment for ${domain}.`,
+        evidence_refs: [],
+      })),
+      material_questions: [],
+    },
+    sourceDigest: state.sourceDigest,
+    systemDigest: state.authoritativeDigest,
+    quality: state.quality,
+    iterationLimit: state.iterationLimit,
+    issueBudget: state.issueBudget.limit,
+    operatorDecisionIds: state.operatorDecisionIds,
+  });
+  state.readinessContractDigest = contract.contractDigest;
+  writeFrozenReadinessContract(path.join(ctx.work, 'readiness-contract.json'), contract);
+}
 
 describe('last stable plan', () => {
   it('treats v0 as always stable', () => {
@@ -218,6 +253,88 @@ describe('stale artifact archive', () => {
 });
 
 describe('convergence-aware resume', () => {
+  it.each([
+    ['missing', undefined],
+    ['legacy-derived', 'legacy-derived:source'],
+  ] as const)(
+    'invalidates %s readiness proof before freezing a resume contract',
+    (_label, contractDigest) => {
+      const scratch = Scratch.create('resume-unbound-readiness-proof');
+      try {
+        writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
+        writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
+        writeUpdate(path.join(work, 'update.v0.json'), 1);
+        const ctx = makeTestRunContext(tmp, work, scratch, {
+          quality: 'balanced',
+          maxIters: 3,
+        });
+        ctx.convergence.planVersion = 1;
+        applyReadinessPolicy(ctx.convergence, {
+          contractDigest: 'previous-contract',
+          judgeAllowed: true,
+          exhaustiveApplicableDomains: false,
+          unresolvedMaterialQuestionIds: [],
+          riskDomains: RISK_DOMAINS.map((domain) => ({
+            domain,
+            applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+            risk: domain === 'correctness' ? 'high' : 'standard',
+            rationale: `Prior assessment for ${domain}.`,
+            evidenceRefs: [],
+          })),
+        });
+        if (contractDigest === undefined) {
+          delete ctx.convergence.readinessContractDigest;
+        } else {
+          ctx.convergence.readinessContractDigest = contractDigest;
+        }
+        ctx.convergence.lastCritiquedPlanVersion = 1;
+        ctx.convergence.scanComplete = true;
+        ctx.convergence.systemCheckPassed = true;
+        ctx.convergence.judgeEvaluatedPlanVersion = 1;
+        ctx.convergence.judgeApprovedPlanVersion = 1;
+        ctx.convergence.judgeReady = true;
+        for (const domain of ctx.convergence.riskDomains) {
+          domain.complete = true;
+          domain.lastAssessedPlanVersion = 1;
+        }
+        writeConvergenceState(work, ctx.convergence);
+        writeSystemCheck(
+          work,
+          validateSystemCoverage(ctx.systemContext, path.join(work, 'plan.v1.md'), 1),
+        );
+
+        expect(prepareResume(ctx)).toBe(1);
+        expect(ctx.lastCritiqueIter).toBe(0);
+        expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
+        expect(ctx.convergence.scanComplete).toBe(false);
+        expect(ctx.convergence.systemCheckPassed).toBe(false);
+        expect(ctx.convergence.judgeEvaluatedPlanVersion).toBeUndefined();
+        expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
+        expect(ctx.convergence.judgeReady).toBeUndefined();
+        expect(ctx.convergence.riskDomains.every((domain) => !domain.complete)).toBe(true);
+        expect(
+          ctx.convergence.riskDomains.every(
+            (domain) => domain.lastAssessedPlanVersion === undefined,
+          ),
+        ).toBe(true);
+        expect(ctx.convergence.unresolvedCoverage).toEqual(
+          expect.arrayContaining([
+            'plan.v1:readiness-contract-proof-unbound',
+            'plan.v1:not-independently-reviewed',
+            'plan.v1:scan-incomplete',
+            'plan.v1:system-check',
+          ]),
+        );
+        expect(existsSync(path.join(work, 'system-check.v1.json'))).toBe(false);
+        expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+          expect.arrayContaining(['convergence.v1.json', 'system-check.v1.json']),
+        );
+      } finally {
+        scratch.sweep();
+      }
+    },
+  );
+
   it('keeps the active rejected ledger intact when atomic reconciliation cannot commit', () => {
     const scratch = Scratch.create('resume-ledger-atomicity-test');
     const temporaryLedger = path.join(work, `rejected-log.jsonl.resume-${process.pid}`);
@@ -334,6 +451,63 @@ describe('convergence-aware resume', () => {
       expect(() => prepareResume(current)).toThrow(HaltError);
       expect(capture.text()).toContain(`resume failed: ${fixture.name}`);
       expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
+      expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects a mismatched frozen readiness contract before archiving artifacts', () => {
+    const scratch = Scratch.create('resume-readiness-contract-digest');
+    const capture = captureStderr();
+    try {
+      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
+      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
+      writeUpdate(path.join(work, 'update.v0.json'), 1);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+      const current = makeTestRunContext(tmp, work, scratch);
+      const prior = createConvergenceState({
+        quality: 'balanced',
+        matrix: qualityMatrix('balanced'),
+        mode: 'plan',
+        sourceDigest: current.convergence.sourceDigest,
+        authoritativeDigest: current.systemContext.digest,
+        relationshipIds: [],
+        maxIters: 3,
+      });
+      prior.planVersion = 1;
+      prior.readinessContractDigest = 'different-frozen-contract';
+      writeConvergenceState(work, prior);
+      const contract = buildReadinessContract({
+        assessment: {
+          boundary: {
+            goal: 'Preserve the bounded resume contract.',
+            in_scope: ['Current repository plan'],
+            out_of_scope: ['Unrequested scope'],
+            constraints: ['Keep the contract immutable'],
+          },
+          domain_assessments: RISK_DOMAINS.map((domain) => ({
+            domain,
+            applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+            risk: 'standard',
+            rationale: `Fixture assessment for ${domain}.`,
+            evidence_refs: [],
+          })),
+          material_questions: [],
+        },
+        sourceDigest: current.convergence.sourceDigest,
+        systemDigest: current.systemContext.digest,
+        quality: 'balanced',
+        iterationLimit: 3,
+        issueBudget: prior.issueBudget.limit,
+        operatorDecisionIds: [],
+      });
+      writeFrozenReadinessContract(path.join(work, 'readiness-contract.json'), contract);
+
+      expect(() => prepareResume(current)).toThrow(HaltError);
+      expect(capture.text()).toContain('readiness contract digest');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
       expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
     } finally {
       capture.restore();
@@ -503,6 +677,7 @@ describe('convergence-aware resume', () => {
       });
       recordCreatorUpdate(ctx.convergence, critique, update, 0);
       const uninterruptedLastCritiqueIter = ctx.lastCritiqueIter;
+      bindFrozenReadinessContract(ctx);
       writeConvergenceState(work, ctx.convergence);
       const uninterruptedState = structuredClone(ctx.convergence);
       writeFileSync(path.join(work, 'system-check.v0.json'), '{"passed":true}\n');
@@ -654,6 +829,7 @@ describe('convergence-aware resume', () => {
           ],
         },
       ];
+      bindFrozenReadinessContract(ctx);
       writeConvergenceState(work, ctx.convergence);
       const originalPlanSha256 = ctx.convergence.planSha256;
       writeSystemCheck(
@@ -729,6 +905,7 @@ describe('convergence-aware resume', () => {
       ctx.convergence.systemCheckPassed = true;
       ctx.convergence.satisfied = true;
       ctx.convergence.stopReason = 'proof-satisfied';
+      bindFrozenReadinessContract(ctx);
       writeConvergenceState(work, ctx.convergence);
       const selectedPlanSha256 = fileSha256(path.join(work, 'plan.v1.md'));
       const mismatchedPlanSha256 = '0'.repeat(64);
@@ -782,6 +959,7 @@ describe('convergence-aware resume', () => {
       ctx.convergence.systemCheckPassed = true;
       ctx.convergence.satisfied = true;
       ctx.convergence.stopReason = 'proof-satisfied';
+      bindFrozenReadinessContract(ctx);
       const stateFile = writeConvergenceState(work, ctx.convergence);
       const legacy = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
       delete legacy.planSha256;

@@ -33,7 +33,8 @@ import {
   writeRunRecord,
   type RunState,
 } from '../../core/run-store.js';
-import { runClarificationGate } from './clarify.js';
+import { clarifyDoneFile, runClarificationGate } from './clarify.js';
+import { ExitCode } from '../../exit-codes.js';
 import {
   resolveConfig,
   resolveRoleConfig,
@@ -46,7 +47,7 @@ import {
 } from '../../core/config.js';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { handoffDir } from '../../core/store.js';
-import { runCreatorCreate } from './creator.js';
+import { runCreatorCreate, runCreatorReadinessAssessment } from './creator.js';
 import { qualityMatrix } from '../../core/quality.js';
 import { runFixPass } from './fix-pass.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
@@ -67,6 +68,7 @@ import {
   type SplitDecision,
 } from './plan-package.js';
 import {
+  normalizeRepositoryFileLineReferences,
   planDocumentShapeHealth,
   planFrontmatterStatus,
   planHasTitleHeading,
@@ -77,14 +79,27 @@ import { prepareResume } from './resume.js';
 import { skillPaths, type RunContext } from '../../core/run-context.js';
 import {
   CANONICAL_PROOF_HASH_MISMATCH,
+  DELIVERED_PLAN_FRESH_REVIEW_REQUIRED,
+  FINAL_ARTIFACT_REVIEW_REQUIRED,
+  applyReadinessPolicy,
   classifyTerminal,
   convergenceReport,
   CRITIC_ISSUE_BUDGET,
   createConvergenceState,
   fileSha256,
   recordSystemCheck,
+  requiresReadinessJudge,
+  requiresSystemCoverage,
   writeConvergenceState,
 } from '../../core/convergence.js';
+import {
+  RISK_DOMAINS as READINESS_RISK_DOMAINS,
+  buildReadinessContract,
+  readReadinessContract,
+  writeFrozenReadinessContract,
+  type ReadinessAssessment,
+  type ReadinessContract,
+} from '../../core/readiness-contract.js';
 import {
   buildSystemContext,
   validateSystemCoverage,
@@ -259,6 +274,186 @@ function filesEqual(a: string, b: string): boolean {
     return false;
   }
   return readFileSync(a).equals(readFileSync(b));
+}
+
+const READINESS_CONTRACT_FILE = 'readiness-contract.json';
+
+type ReadinessPreparation =
+  | { readonly ok: true; readonly contract: ReadinessContract }
+  | { readonly ok: false; readonly exitCode: number; readonly reason: string };
+
+function writeAssessmentQuestions(work: string, assessment: ReadinessAssessment): void {
+  const questions = assessment.unresolvedMaterialQuestions.map((question, index) => ({
+    id: `Q${index + 1}`,
+    question: question.question,
+    why: question.rationale,
+    options: question.options,
+  }));
+  writeFileSync(
+    path.join(work, 'clarify-questions.json'),
+    `${JSON.stringify({ questions }, null, 2)}\n`,
+  );
+}
+
+function legacyReadinessAssessment(ctx: RunContext): JsonValue {
+  return {
+    boundary: {
+      goal: 'Preserve the existing resumed plan as a useful artifact pending a fresh assessment.',
+      in_scope: [`Existing plan boundary from ${path.basename(ctx.inputPath)}`],
+      out_of_scope: ['Automatic expansion or reinterpretation of the legacy plan boundary'],
+      constraints: ['A fresh planning run is required before this legacy state can be ready.'],
+    },
+    domain_assessments: READINESS_RISK_DOMAINS.map((domain) => ({
+      domain,
+      applicability: 'unknown',
+      risk: 'standard',
+      rationale: 'The legacy run did not persist an applicability assessment for this domain.',
+      evidence_refs: [`source-digest:${ctx.convergence.sourceDigest}`],
+    })),
+    material_questions: [
+      {
+        id: 'legacy-fresh-assessment',
+        question: 'How should the legacy run be continued?',
+        rationale: 'Its implementation boundary and risk applicability were not frozen.',
+        options: [
+          'Start a new planning run with a fresh assessment',
+          'Keep this plan as needs-review without claiming readiness',
+        ],
+      },
+    ],
+  };
+}
+
+function buildContract(ctx: RunContext, assessment: string | JsonValue): ReadinessContract {
+  return buildReadinessContract({
+    assessment,
+    sourceDigest: ctx.convergence.sourceDigest,
+    systemDigest: ctx.systemContext.digest,
+    quality: ctx.settings.quality,
+    iterationLimit: ctx.settings.maxIters,
+    issueBudget: ctx.convergence.issueBudget.limit,
+    operatorDecisionIds: ctx.convergence.operatorDecisionIds,
+  });
+}
+
+async function createReadinessContract(ctx: RunContext): Promise<ReadinessPreparation> {
+  const initialFile = path.join(ctx.work, 'readiness-assessment.initial.json');
+  log(
+    `readiness assessment (${ctx.provider.matrix.creator.runner} ${ctx.provider.matrix.creator.model})`,
+  );
+  const assessment = await runCreatorReadinessAssessment(ctx, initialFile);
+  let selectedFile = initialFile;
+  writeAssessmentQuestions(ctx.work, assessment);
+  if (assessment.unresolvedMaterialQuestions.length > 0) {
+    const gate = await runClarificationGate(ctx, ctx.inputPath);
+    if (!gate.ok && gate.exitCode !== ExitCode.ClarifyTransportFailure) {
+      return gate;
+    }
+    if (!gate.ok) {
+      log(
+        `readiness assessment: clarification unavailable (${gate.reason}); freezing unresolved material questions`,
+      );
+    }
+    if (existsSync(clarifyDoneFile(ctx.work))) {
+      const finalFile = path.join(ctx.work, 'readiness-assessment.final.json');
+      log('readiness assessment: re-evaluating after operator clarification');
+      await runCreatorReadinessAssessment(ctx, finalFile);
+      selectedFile = finalFile;
+    }
+  }
+  const contract = buildContract(ctx, readFileSync(selectedFile, 'utf8'));
+  writeFrozenReadinessContract(path.join(ctx.work, READINESS_CONTRACT_FILE), contract);
+  return { ok: true, contract };
+}
+
+async function prepareReadinessContract(
+  ctx: RunContext,
+  resuming: boolean,
+): Promise<ReadinessPreparation> {
+  const contractFile = path.join(ctx.work, READINESS_CONTRACT_FILE);
+  let contract: ReadinessContract;
+  if (existsSync(contractFile)) {
+    contract = readReadinessContract(contractFile);
+  } else if (resuming) {
+    contract = buildContract(ctx, legacyReadinessAssessment(ctx));
+    writeFrozenReadinessContract(contractFile, contract);
+  } else {
+    const created = await createReadinessContract(ctx);
+    if (!created.ok) {
+      return created;
+    }
+    contract = created.contract;
+  }
+
+  ctx.readinessBoundary = contract.boundary;
+
+  const priorContractDigest = ctx.convergence.readinessContractDigest;
+  applyReadinessPolicy(ctx.convergence, {
+    contractDigest: contract.contractDigest,
+    judgeAllowed: contract.appetite.judgeAllowed,
+    exhaustiveApplicableDomains: contract.appetite.exhaustiveApplicableDomains,
+    unresolvedMaterialQuestionIds: contract.unresolvedMaterialQuestions.map(
+      (question) => question.id,
+    ),
+    riskDomains: contract.domainAssessments,
+  });
+  ctx.convergence.operatorDecisionIds = [...contract.operatorDecisionIds];
+
+  const challenges: {
+    readonly id: string;
+    readonly kind: 'scope-expansion' | 'assurance-appetite';
+    readonly claim: string;
+    readonly evidenceRefs: readonly JsonValue[];
+  }[] = [];
+  if (contract.sourceDigest !== ctx.convergence.sourceDigest) {
+    challenges.push({
+      id: 'frozen-source-digest-changed',
+      kind: 'scope-expansion',
+      claim: 'The source input changed after the readiness boundary was frozen.',
+      evidenceRefs: [contract.sourceDigest, ctx.convergence.sourceDigest],
+    });
+  }
+  if (contract.systemDigest !== ctx.systemContext.digest) {
+    challenges.push({
+      id: 'frozen-system-digest-changed',
+      kind: 'scope-expansion',
+      claim: 'Authoritative system facts changed after the readiness boundary was frozen.',
+      evidenceRefs: [contract.systemDigest, ctx.systemContext.digest],
+    });
+  }
+  if (
+    contract.appetite.quality !== ctx.settings.quality ||
+    contract.appetite.iterationLimit !== ctx.settings.maxIters ||
+    contract.appetite.issueBudget !== ctx.convergence.issueBudget.limit
+  ) {
+    challenges.push({
+      id: 'frozen-assurance-appetite-changed',
+      kind: 'assurance-appetite',
+      claim: 'The requested assurance appetite differs from the frozen readiness contract.',
+      evidenceRefs: [contract.contractDigest],
+    });
+  }
+  if (
+    priorContractDigest !== undefined &&
+    !priorContractDigest.startsWith('legacy-derived:') &&
+    priorContractDigest !== contract.contractDigest
+  ) {
+    challenges.push({
+      id: 'frozen-contract-digest-changed',
+      kind: 'scope-expansion',
+      claim: 'The resumed convergence state is bound to a different readiness contract.',
+      evidenceRefs: [priorContractDigest, contract.contractDigest],
+    });
+  }
+  ctx.convergence.boundaryChallenges.push(
+    ...challenges.map((challenge) => ({
+      ...challenge,
+      rationale: 'A new run is required to establish a coherent immutable boundary and appetite.',
+      planVersion: ctx.convergence.planVersion,
+    })),
+  );
+  classifyTerminal(ctx.convergence);
+  return { ok: true, contract };
 }
 
 export interface RunOutcome {
@@ -516,7 +711,11 @@ function recordFinalJudgeProof(
 }
 
 function refreshFinalSystemCheck(ctx: RunContext, finalPlan: string) {
-  const check = validateSystemCoverage(ctx.systemContext, finalPlan, ctx.convergence.planVersion);
+  const check = validateSystemCoverage(ctx.systemContext, finalPlan, ctx.convergence.planVersion, {
+    required: requiresSystemCoverage(ctx.convergence),
+    inScope: ctx.readinessBoundary?.inScope ?? ctx.systemContext.declaredScope,
+    outOfScope: ctx.readinessBoundary?.outOfScope ?? [],
+  });
   writeSystemCheck(ctx.work, check, 'system-check.final.json');
   recordSystemCheck(ctx.convergence, check);
   return check;
@@ -539,6 +738,40 @@ function recordCanonicalProofHashBinding(
   }
   ctx.convergence.canonicalPlanSha256 = canonicalPlanSha256;
   return mismatch;
+}
+
+function proofInvariantPlan(file: string, projectRoot: string): string {
+  const repositoryPrefix = `file-line:${path.resolve(projectRoot).replaceAll('\\', '/')}/`;
+  return readFileSync(file, 'utf8')
+    .replace(/^status:\s+(?:clean|needs-review|blocked)\s*$/m, 'status: <orchestration-projection>')
+    .replaceAll(repositoryPrefix, 'file-line:');
+}
+
+function recordFinalArtifactProof(
+  ctx: RunContext,
+  finalPlan: string,
+  structural: FinalStatusResult,
+): void {
+  const markers = new Set([DELIVERED_PLAN_FRESH_REVIEW_REQUIRED, FINAL_ARTIFACT_REVIEW_REQUIRED]);
+  ctx.convergence.unresolvedCoverage = ctx.convergence.unresolvedCoverage.filter(
+    (entry) => !markers.has(entry),
+  );
+  if (structural.status !== 'clean') {
+    ctx.convergence.unresolvedCoverage.push(FINAL_ARTIFACT_REVIEW_REQUIRED);
+  }
+  const reviewedVersion = ctx.convergence.lastCritiquedPlanVersion;
+  const reviewedPlan =
+    reviewedVersion === undefined ? undefined : path.join(ctx.work, `plan.v${reviewedVersion}.md`);
+  const exactReviewedCandidate =
+    reviewedVersion === ctx.convergence.planVersion &&
+    reviewedPlan !== undefined &&
+    existsSync(reviewedPlan) &&
+    proofInvariantPlan(reviewedPlan, ctx.provider.projectRoot) ===
+      proofInvariantPlan(finalPlan, ctx.provider.projectRoot);
+  if (reviewedVersion === ctx.convergence.planVersion && !exactReviewedCandidate) {
+    ctx.convergence.unresolvedCoverage.push(DELIVERED_PLAN_FRESH_REVIEW_REQUIRED);
+  }
+  classifyTerminal(ctx.convergence);
 }
 
 function finalStatusLogDetails(facts: RunReportFinalFacts): string {
@@ -837,6 +1070,7 @@ export async function runPlanLoopCli(
       skills.creatorSkill,
       skills.creatorSchema,
       skills.creatorMetaSchema,
+      skills.readinessContractSchema,
       skills.clarifySchema,
       skills.criticSkill,
       skills.criticSchema,
@@ -858,12 +1092,7 @@ export async function runPlanLoopCli(
     }
 
     const binaries = { ...resolveRunnerBinaries(), cursor: resolved.providers.cursorBin };
-    const required = runnersInUse(
-      matrix,
-      settings.fixPass,
-      settings.translatePass,
-      qualityKnobs.judge,
-    );
+    const required = runnersInUse(matrix, settings.fixPass, settings.translatePass, 0);
     const preflightFailure = preflightRunners(required, binaries);
     if (preflightFailure !== undefined) {
       process.stderr.write(`${preflightFailure.message}\n`);
@@ -943,17 +1172,37 @@ export async function runPlanLoopCli(
       let startIter = 0;
       if (resuming) {
         startIter = prepareResume(ctx);
-      } else {
-        writeConvergenceState(work, convergence);
       }
       writeSystemContext(work, systemContext);
-
       if (qualityKnobs.sessionMode === 1) {
         rmSync(creatorSessionFile, { force: true });
       }
       const rejectedLog = path.join(work, 'rejected-log.jsonl');
       if (!existsSync(rejectedLog)) {
         writeFileSync(rejectedLog, '');
+      }
+      const readinessPreparation = await prepareReadinessContract(ctx, resuming);
+      if (!readinessPreparation.ok) {
+        finalizeRun('failed', readinessPreparation.exitCode);
+        await notifyCompletion({
+          exitCode: readinessPreparation.exitCode,
+          reason: readinessPreparation.reason,
+        });
+        return {
+          exitCode: readinessPreparation.exitCode,
+          report: { workDir: work, runId, name },
+        };
+      }
+      writeConvergenceState(work, ctx.convergence);
+
+      if (requiresReadinessJudge(ctx.convergence) && ctx.convergence.judgeAllowed) {
+        const judgePreflightFailure = preflightRunners([matrix.judge.runner], binaries);
+        if (judgePreflightFailure !== undefined) {
+          process.stderr.write(`${judgePreflightFailure.message}\n`);
+          finalizeRun('failed', 1);
+          await notifyCompletion({ exitCode: 1, reason: judgePreflightFailure.message });
+          return { exitCode: 1, report: { workDir: work, runId, name } };
+        }
       }
 
       if (parsed.mode === 'prompt') {
@@ -963,12 +1212,6 @@ export async function runPlanLoopCli(
         }
         const v0 = path.join(work, 'plan.v0.md');
         if (!existsSync(v0) || statSync(v0).size === 0) {
-          const gate = await runClarificationGate(ctx, inputPath);
-          if (!gate.ok) {
-            finalizeRun('failed', gate.exitCode);
-            await notifyCompletion({ exitCode: gate.exitCode, reason: gate.reason });
-            return { exitCode: gate.exitCode, report: { workDir: work, runId, name } };
-          }
           log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
           await runCreatorCreate(ctx, inputPath, v0);
           markOperatorInterventionsMigrated(work, 'creator', 'plan.v0.md');
@@ -979,6 +1222,7 @@ export async function runPlanLoopCli(
         if (!existsSync(v0)) {
           copyFileSync(inputPath, v0);
         }
+        normalizeRepositoryFileLineReferences(v0, ctx.provider.projectRoot);
       }
 
       if (startIter > 0) {
@@ -997,17 +1241,14 @@ export async function runPlanLoopCli(
       }
 
       const translateFile = path.join(work, `plan.final.${settings.locale}.md`);
-      let finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
 
       const findings = readFindingsCounts(path.join(work, 'findings.json'));
       let splitPackage = emitAndValidateSplitPackage(ctx, finalPlan);
       let packageHealth = splitPackage.packageHealth;
       const currentStructuralStatus = (): FinalStatusResult => {
-        const declaredStatus = planFrontmatterStatus(finalPlan);
         return resolveStructuralStatus({
           finalTitle: planHasTitleHeading(finalPlan) ? 1 : 0,
           shape: planDocumentShapeHealth(finalPlan),
-          ...(declaredStatus !== undefined ? { declaredStatus } : {}),
           findings,
           ...(packageHealth !== undefined ? { packageHealth } : {}),
         });
@@ -1025,11 +1266,35 @@ export async function runPlanLoopCli(
         err(`STRUCTURAL: ${structural.status} — ${structural.reason}`);
       }
 
+      recordFinalArtifactProof(ctx, finalPlan, structural);
+      const projectedStatus: RunFinalStatus =
+        structural.status === 'blocked'
+          ? 'blocked'
+          : ctx.convergence.decision === 'ready'
+            ? 'clean'
+            : 'needs-review';
+      const beforeInitialStatusProjection = readFileSync(finalPlan, 'utf8');
+      setPlanFrontmatterStatus(finalPlan, projectedStatus);
+      if (readFileSync(finalPlan, 'utf8') !== beforeInitialStatusProjection) {
+        rebuildCanonicalPackage();
+      }
+      recordFinalArtifactProof(ctx, finalPlan, structural);
+      let finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
+
       let readiness: FinalReadiness | undefined;
       let readinessPath: string | undefined;
       let judgeCoverageProved = false;
       let judgeCandidateUnchanged = true;
-      if (structural.status !== 'blocked' && qualityKnobs.judge === 1) {
+      const finalJudgeRequired =
+        requiresReadinessJudge(ctx.convergence) && ctx.convergence.judgeAllowed;
+      if (structural.status !== 'blocked' && finalJudgeRequired) {
+        const priorJudgeVersion = ctx.convergence.judgeEvaluatedPlanVersion;
+        const priorJudgeReady = ctx.convergence.judgeReady;
+        const reviewedPlan = path.join(work, `plan.v${ctx.convergence.planVersion}.md`);
+        const sameSemanticPlan =
+          existsSync(reviewedPlan) &&
+          proofInvariantPlan(reviewedPlan, ctx.provider.projectRoot) ===
+            proofInvariantPlan(finalPlan, ctx.provider.projectRoot);
         log(
           `final Judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
         );
@@ -1038,6 +1303,17 @@ export async function runPlanLoopCli(
         readinessPath = judged.metadataPath;
         judgeCoverageProved = judged.coverageProved;
         judgeCandidateUnchanged = judged.candidateUnchanged;
+        if (
+          priorJudgeVersion === ctx.convergence.planVersion &&
+          priorJudgeReady !== undefined &&
+          readiness.evaluated &&
+          sameSemanticPlan &&
+          priorJudgeReady !== readiness.ready &&
+          !ctx.convergence.unresolvedCoverage.includes('final-judge:inconsistent-verdict')
+        ) {
+          ctx.convergence.unresolvedCoverage.push('final-judge:inconsistent-verdict');
+          delete ctx.convergence.judgeApprovedPlanVersion;
+        }
         if (!readiness.evaluated) {
           err(`FINAL JUDGE: unknown (plan_sha256=${readiness.planSha256})`);
         } else if (readiness.ready) {
@@ -1047,11 +1323,11 @@ export async function runPlanLoopCli(
         } else {
           err(`FINAL JUDGE: not-ready (plan_sha256=${readiness.planSha256})`);
         }
-      } else if (structural.status === 'blocked' && qualityKnobs.judge === 1) {
+      } else if (structural.status === 'blocked' && finalJudgeRequired) {
         log('final Judge skipped — structural status is blocked');
       }
 
-      if (qualityKnobs.judge === 1) {
+      if (finalJudgeRequired) {
         recordFinalJudgeProof(ctx, readiness, judgeCoverageProved);
       }
       const initialProofHashMismatch = recordCanonicalProofHashBinding(
@@ -1066,7 +1342,7 @@ export async function runPlanLoopCli(
         finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
         rebuildCanonicalPackage();
       }
-      classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+      classifyTerminal(ctx.convergence);
       writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
 
       let finalFacts = resolveFinalFacts(
@@ -1084,7 +1360,7 @@ export async function runPlanLoopCli(
         if (statusChanged) {
           finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
         }
-        if (statusChanged && structural.status !== 'blocked' && qualityKnobs.judge === 1) {
+        if (statusChanged && structural.status !== 'blocked' && finalJudgeRequired) {
           log('final Judge re-evaluation after canonical needs-review status projection');
           const previousReady = readiness?.ready;
           const previousCoverageProved = judgeCoverageProved;
@@ -1097,6 +1373,9 @@ export async function runPlanLoopCli(
             if (!ctx.convergence.unresolvedCoverage.includes('final-judge:inconsistent-verdict')) {
               ctx.convergence.unresolvedCoverage.push('final-judge:inconsistent-verdict');
             }
+          }
+          if (ctx.convergence.unresolvedCoverage.includes('final-judge:inconsistent-verdict')) {
+            delete ctx.convergence.judgeApprovedPlanVersion;
           }
           recordFinalJudgeProof(ctx, readiness, judgeCoverageProved);
           const projectedProofHashMismatch = recordCanonicalProofHashBinding(
@@ -1114,7 +1393,7 @@ export async function runPlanLoopCli(
           }
         }
         recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
-        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        classifyTerminal(ctx.convergence);
         writeConvergenceState(work, ctx.convergence, 'convergence.final.json');
         finalFacts = resolveFinalFacts(
           structural,
@@ -1156,7 +1435,7 @@ export async function runPlanLoopCli(
           rebuildCanonicalPackage();
         }
         recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
-        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        classifyTerminal(ctx.convergence);
         if (splitPackage.packageDir !== undefined) {
           copyFileSync(finalPlan, path.join(splitPackage.packageDir, 'plan.md'));
         }
@@ -1178,7 +1457,7 @@ export async function runPlanLoopCli(
         finalSystemCheck = refreshFinalSystemCheck(ctx, finalPlan);
         rebuildCanonicalPackage();
         recordCanonicalProofHashBinding(ctx, finalPlan, finalSystemCheck, readiness);
-        classifyTerminal(ctx.convergence, qualityKnobs.judge === 1);
+        classifyTerminal(ctx.convergence);
         if (splitPackage.packageDir !== undefined) {
           copyFileSync(finalPlan, path.join(splitPackage.packageDir, 'plan.md'));
         }

@@ -14,13 +14,19 @@ import type {
   ConvergenceLimit,
   ConvergenceReport,
   Quality,
+  ReadinessDecision,
+  RiskApplicability,
+  RiskDomain,
+  RiskLevel,
   Role,
   RunMode,
 } from '../types.js';
 
-export const CONVERGENCE_SCHEMA_VERSION = 1;
+export const CONVERGENCE_SCHEMA_VERSION = 2;
 export const CRITIC_ISSUE_BUDGET = 8;
 export const CANONICAL_PROOF_HASH_MISMATCH = 'canonical-plan:proof-hash-mismatch';
+export const DELIVERED_PLAN_FRESH_REVIEW_REQUIRED = 'canonical-plan:fresh-review-required';
+export const FINAL_ARTIFACT_REVIEW_REQUIRED = 'final-artifact:needs-review';
 
 export type ScopeSource = 'prompt' | 'direct-plan' | 'unavailable';
 export type OccurrenceDisposition = 'satisfied' | 'violated' | 'not-applicable' | 'unresolved';
@@ -83,7 +89,7 @@ export interface ConvergenceIssueBudget {
 }
 
 export interface ConvergenceState {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   planVersion: number;
   readonly quality: Quality;
   readonly promise: CompletenessPromise;
@@ -111,7 +117,19 @@ export interface ConvergenceState {
   currentActionableIssues: string[];
   systemCheckPassed: boolean;
   systemMismatchIds: string[];
+  requiredEvidenceUnavailable: string[];
+  unresolvedMaterialQuestionIds: string[];
+  readinessContractDigest?: string;
+  judgeAllowed: boolean;
+  exhaustiveApplicableDomains: boolean;
+  riskDomains: RiskDomainRecord[];
+  boundaryChallenges: BoundaryChallengeRecord[];
+  opportunities: OpportunityRecord[];
   judgeApprovedPlanVersion?: number;
+  judgeEvaluatedPlanVersion?: number;
+  judgeReady?: boolean;
+  decision: ReadinessDecision;
+  reasonCodes: string[];
   stopReason: string;
   satisfied: boolean;
 }
@@ -129,7 +147,72 @@ export interface CreateConvergenceStateInput {
 export interface ConvergenceCheckResult {
   readonly passed: boolean;
   readonly mismatches: readonly string[];
+  readonly requiredEvidenceUnavailable?: readonly string[];
 }
+
+export interface RiskDomainRecord {
+  readonly domain: RiskDomain;
+  applicability: RiskApplicability;
+  risk: RiskLevel;
+  rationale: string;
+  evidenceRefs: readonly JsonValue[];
+  complete: boolean;
+  unavailableEvidence: string[];
+  lastAssessedPlanVersion?: number;
+}
+
+export interface BoundaryChallengeRecord {
+  readonly id: string;
+  readonly kind: 'scope-expansion' | 'out-of-scope-removal' | 'assurance-appetite';
+  readonly claim: string;
+  readonly rationale: string;
+  readonly evidenceRefs: readonly JsonValue[];
+  readonly planVersion: number;
+}
+
+export interface OpportunityRecord {
+  readonly fingerprint: string;
+  readonly claim: string;
+  readonly evidence: string;
+  readonly suggestedImprovement: string;
+  readonly evidenceRefs: readonly JsonValue[];
+  readonly firstSeenPlanVersion: number;
+  lastSeenPlanVersion: number;
+}
+
+export interface ReadinessPolicyRiskDomain {
+  readonly domain: RiskDomain;
+  readonly applicability: RiskApplicability;
+  readonly risk: RiskLevel;
+  readonly rationale: string;
+  readonly evidenceRefs: readonly JsonValue[];
+}
+
+export interface ReadinessPolicyInput {
+  readonly contractDigest: string;
+  readonly judgeAllowed: boolean;
+  readonly exhaustiveApplicableDomains: boolean;
+  readonly unresolvedMaterialQuestionIds: readonly string[];
+  readonly riskDomains: readonly ReadinessPolicyRiskDomain[];
+}
+
+const READINESS_DECISIONS: readonly ReadinessDecision[] = [
+  'ready',
+  'revision-required',
+  'unable-to-decide',
+  'limits-exhausted',
+];
+
+const RISK_DOMAINS: readonly RiskDomain[] = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+];
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
@@ -172,9 +255,75 @@ export function createConvergenceState(input: CreateConvergenceStateInput): Conv
     currentActionableIssues: [],
     systemCheckPassed: false,
     systemMismatchIds: [],
-    stopReason: 'not-reviewed',
+    requiredEvidenceUnavailable: [],
+    unresolvedMaterialQuestionIds: [],
+    judgeAllowed: input.matrix.judge === 1,
+    exhaustiveApplicableDomains: input.matrix.requiresExhaustiveScan === 1,
+    riskDomains: [],
+    boundaryChallenges: [],
+    opportunities: [],
+    decision: 'revision-required',
+    reasonCodes: ['not-independently-reviewed'],
+    stopReason: 'revision-required:not-independently-reviewed',
     satisfied: false,
   };
+}
+
+export function applyReadinessPolicy(state: ConvergenceState, input: ReadinessPolicyInput): void {
+  const preserveRiskProfile =
+    state.readinessContractDigest === input.contractDigest && state.riskDomains.length > 0;
+  state.readinessContractDigest = input.contractDigest;
+  state.judgeAllowed = input.judgeAllowed;
+  state.exhaustiveApplicableDomains = input.exhaustiveApplicableDomains;
+  state.unresolvedMaterialQuestionIds = unique(input.unresolvedMaterialQuestionIds);
+  state.riskDomains = input.riskDomains.map((assessment) => {
+    const existing = preserveRiskProfile
+      ? state.riskDomains.find((candidate) => candidate.domain === assessment.domain)
+      : undefined;
+    return existing === undefined
+      ? {
+          domain: assessment.domain,
+          applicability: assessment.applicability,
+          risk: assessment.risk,
+          rationale: assessment.rationale,
+          evidenceRefs: [...assessment.evidenceRefs],
+          complete: false,
+          unavailableEvidence: [],
+        }
+      : {
+          ...existing,
+          applicability: mergedApplicability(assessment.applicability, existing.applicability),
+          risk: existing.risk === 'high' ? 'high' : assessment.risk,
+        };
+  });
+  state.declaredScopeVerified = true;
+  state.exhaustedLimits = state.exhaustedLimits.filter(
+    (limit) => limit !== 'authoritative-scope' && limit !== 'assurance-appetite',
+  );
+  if (requiresReadinessJudge(state) && !state.judgeAllowed) {
+    state.exhaustedLimits.push('assurance-appetite');
+  }
+  classifyTerminal(state);
+}
+
+export function applicableRiskDomains(state: ConvergenceState): RiskDomain[] {
+  return state.riskDomains
+    .filter((assessment) => assessment.applicability === 'applicable')
+    .map((assessment) => assessment.domain);
+}
+
+export function highRiskDomains(state: ConvergenceState): RiskDomain[] {
+  return state.riskDomains
+    .filter((assessment) => assessment.applicability === 'applicable' && assessment.risk === 'high')
+    .map((assessment) => assessment.domain);
+}
+
+export function requiresReadinessJudge(state: ConvergenceState): boolean {
+  return highRiskDomains(state).length > 0;
+}
+
+export function requiresSystemCoverage(state: ConvergenceState): boolean {
+  return applicableRiskDomains(state).includes('cross-repository-delivery');
 }
 
 function asString(value: JsonValue | undefined): string {
@@ -196,6 +345,142 @@ const REQUIRED_CRITIC_CONTEXT = [
   'quality-and-limits',
 ] as const;
 
+function riskApplicability(value: JsonValue | undefined): RiskApplicability | undefined {
+  return value === 'applicable' || value === 'not-applicable' || value === 'unknown'
+    ? value
+    : undefined;
+}
+
+function riskLevel(value: JsonValue | undefined): RiskLevel | undefined {
+  return value === 'standard' || value === 'high' ? value : undefined;
+}
+
+function mergedApplicability(
+  current: RiskApplicability,
+  next: RiskApplicability | undefined,
+): RiskApplicability {
+  if (next === undefined || current === 'applicable') {
+    return current;
+  }
+  if (next === 'applicable') {
+    return 'applicable';
+  }
+  return next;
+}
+
+function recordRiskAssessment(
+  state: ConvergenceState,
+  object: JsonObject,
+  planVersion: number,
+  review: JsonObject,
+  budgetMetadataValid: boolean,
+): void {
+  const assessments = Array.isArray(object.domain_assessments)
+    ? object.domain_assessments.filter(isJsonObject)
+    : [];
+  for (const domain of state.riskDomains) {
+    const assessment = assessments.find((candidate) => candidate.domain === domain.domain);
+    if (assessment === undefined) {
+      domain.complete = false;
+      domain.unavailableEvidence = [];
+      delete domain.lastAssessedPlanVersion;
+      continue;
+    }
+    domain.applicability = mergedApplicability(
+      domain.applicability,
+      riskApplicability(assessment.applicability),
+    );
+    if (domain.risk !== 'high' && riskLevel(assessment.risk) === 'high') {
+      domain.risk = 'high';
+    }
+    const rationale = asString(assessment.rationale).trim();
+    if (rationale !== '') {
+      domain.rationale = rationale;
+    }
+    domain.evidenceRefs = Array.isArray(assessment.evidence_refs) ? assessment.evidence_refs : [];
+    domain.unavailableEvidence = Array.isArray(assessment.unavailable_evidence)
+      ? assessment.unavailable_evidence.filter(
+          (entry): entry is string => typeof entry === 'string' && entry.trim() !== '',
+        )
+      : [];
+    domain.complete = assessment.complete === true && domain.unavailableEvidence.length === 0;
+    domain.lastAssessedPlanVersion = planVersion;
+  }
+
+  const applicable = state.riskDomains.filter(
+    (assessment) => assessment.applicability === 'applicable',
+  );
+  state.scanComplete =
+    review.scan_complete === true &&
+    budgetMetadataValid &&
+    !state.issueBudget.exhausted &&
+    applicable.every(
+      (assessment) => assessment.complete && assessment.lastAssessedPlanVersion === planVersion,
+    );
+  state.declaredScopeVerified = true;
+
+  const challenges = Array.isArray(object.boundary_challenges)
+    ? object.boundary_challenges.filter(isJsonObject)
+    : [];
+  for (const challenge of challenges) {
+    const id = asString(challenge.id).trim();
+    const kind = challenge.kind;
+    if (
+      id === '' ||
+      !(
+        kind === 'scope-expansion' ||
+        kind === 'out-of-scope-removal' ||
+        kind === 'assurance-appetite'
+      )
+    ) {
+      continue;
+    }
+    const record: BoundaryChallengeRecord = {
+      id,
+      kind,
+      claim: asString(challenge.claim).trim(),
+      rationale: asString(challenge.rationale).trim(),
+      evidenceRefs: Array.isArray(challenge.evidence_refs) ? challenge.evidence_refs : [],
+      planVersion,
+    };
+    state.boundaryChallenges = [
+      ...state.boundaryChallenges.filter((entry) => entry.id !== record.id),
+      record,
+    ];
+  }
+
+  const opportunities = Array.isArray(object.opportunities)
+    ? object.opportunities.filter(isJsonObject)
+    : [];
+  for (const opportunity of opportunities) {
+    const claim = asString(opportunity.claim).trim();
+    const evidence = asString(opportunity.evidence).trim();
+    const suggestedImprovement = asString(opportunity.suggested_improvement).trim();
+    if (claim === '' || suggestedImprovement === '') {
+      continue;
+    }
+    const supplied = asString(opportunity.fingerprint).trim();
+    const fingerprint =
+      supplied === ''
+        ? stableTupleId('opportunity', [claim, evidence, suggestedImprovement])
+        : supplied;
+    const existing = state.opportunities.find((entry) => entry.fingerprint === fingerprint);
+    if (existing !== undefined) {
+      existing.lastSeenPlanVersion = planVersion;
+      continue;
+    }
+    state.opportunities.push({
+      fingerprint,
+      claim,
+      evidence,
+      suggestedImprovement,
+      evidenceRefs: Array.isArray(opportunity.evidence_refs) ? opportunity.evidence_refs : [],
+      firstSeenPlanVersion: planVersion,
+      lastSeenPlanVersion: planVersion,
+    });
+  }
+}
+
 export function recordCritique(
   state: ConvergenceState,
   critique: JsonValue,
@@ -206,7 +491,7 @@ export function recordCritique(
   state.unresolvedCoverage = state.unresolvedCoverage.filter(
     (id) =>
       !id.startsWith('critic-unresolved-') &&
-      !/^plan\.v[0-9]+:(scan-incomplete|exhaustive-scan-incomplete|not-independently-reviewed|system-check|judge|authoritative-digest-changed|plan-digest-(?:changed|unavailable)|legacy-state-bootstrap|issue-budget-metadata|scope-coverage-incomplete|context-unconsidered:.+)$/.test(
+      !/^plan\.v[0-9]+:(scan-incomplete|exhaustive-scan-incomplete|not-independently-reviewed|system-check|judge|authoritative-digest-changed|plan-digest-(?:changed|unavailable)|legacy-state-bootstrap|readiness-contract-proof-unbound|issue-budget-metadata|scope-coverage-incomplete|context-unconsidered:.+)$/.test(
         id,
       ),
   );
@@ -215,6 +500,8 @@ export function recordCritique(
   state.planVersion = planVersion;
   state.lastCritiquedPlanVersion = planVersion;
   delete state.judgeApprovedPlanVersion;
+  delete state.judgeEvaluatedPlanVersion;
+  delete state.judgeReady;
   state.currentActionableIssues = issues
     .filter((issue) => issue.severity === 'blocker' || issue.severity === 'major')
     .filter(
@@ -243,25 +530,37 @@ export function recordCritique(
     state.scopeSource === 'prompt'
       ? scopeCoverage.includes('declared-scope') || scopeCoverage.includes('original-scope')
       : scopeCoverage.includes('direct-plan-scope') || scopeCoverage.includes('declared-scope');
-  state.scanComplete =
-    review.scan_complete === true &&
-    budgetMetadataValid &&
-    !state.issueBudget.exhausted &&
-    missingContext.length === 0 &&
-    scopeCoverageComplete;
-  state.declaredScopeVerified =
-    state.scopeSource === 'prompt' ||
-    scopeCoverage.some((entry) => entry === 'declared-scope' || entry === 'direct-plan-scope');
-  if (state.declaredScopeVerified) {
+  if (state.readinessContractDigest !== undefined) {
+    recordRiskAssessment(state, object, planVersion, review, budgetMetadataValid);
+    state.scanComplete = state.scanComplete && missingContext.length === 0 && scopeCoverageComplete;
+    state.declaredScopeVerified = scopeCoverageComplete;
     state.exhaustedLimits = state.exhaustedLimits.filter(
       (limit) => limit !== 'authoritative-scope',
     );
     state.unresolvedCoverage = state.unresolvedCoverage.filter(
       (id) => id !== 'direct-plan:declared-scope-unproved',
     );
-  }
-  if (!state.scanComplete) {
-    state.unresolvedCoverage.push(`plan.v${planVersion}:scan-incomplete`);
+  } else {
+    state.scanComplete =
+      review.scan_complete === true &&
+      budgetMetadataValid &&
+      !state.issueBudget.exhausted &&
+      missingContext.length === 0 &&
+      scopeCoverageComplete;
+    state.declaredScopeVerified =
+      state.scopeSource === 'prompt' ||
+      scopeCoverage.some((entry) => entry === 'declared-scope' || entry === 'direct-plan-scope');
+    if (state.declaredScopeVerified) {
+      state.exhaustedLimits = state.exhaustedLimits.filter(
+        (limit) => limit !== 'authoritative-scope',
+      );
+      state.unresolvedCoverage = state.unresolvedCoverage.filter(
+        (id) => id !== 'direct-plan:declared-scope-unproved',
+      );
+    }
+    if (!state.scanComplete) {
+      state.unresolvedCoverage.push(`plan.v${planVersion}:scan-incomplete`);
+    }
   }
   if (!budgetMetadataValid) {
     state.unresolvedCoverage.push(`plan.v${planVersion}:issue-budget-metadata`);
@@ -476,7 +775,17 @@ export function recordCreatorUpdate(
   delete state.lastCritiquedPlanVersion;
   state.scanComplete = false;
   state.systemCheckPassed = false;
+  state.systemMismatchIds = [];
+  state.requiredEvidenceUnavailable = [];
   delete state.judgeApprovedPlanVersion;
+  delete state.judgeEvaluatedPlanVersion;
+  delete state.judgeReady;
+  state.currentActionableIssues = [];
+  for (const domain of state.riskDomains) {
+    domain.complete = false;
+    domain.unavailableEvidence = [];
+    delete domain.lastAssessedPlanVersion;
+  }
   for (const invariant of state.invariants) {
     invariant.status = 'active';
     delete invariant.lastReviewedPlanVersion;
@@ -491,10 +800,7 @@ export function recordCreatorUpdate(
   ]);
 }
 
-export function classifyTerminal(
-  state: ConvergenceState,
-  requiresJudge: boolean,
-): ConvergenceState {
+function classifyLegacyTerminal(state: ConvergenceState, requiresJudge: boolean): ConvergenceState {
   const unresolved = new Set(state.unresolvedCoverage);
   for (const id of unresolved) {
     if (id.startsWith('context-omission-')) {
@@ -561,7 +867,212 @@ export function classifyTerminal(
     : state.exhaustedLimits.length > 0
       ? `limit-exhausted:${state.exhaustedLimits.join(',')}`
       : `unresolved-coverage:${state.unresolvedCoverage.join(',')}`;
+  state.decision = state.satisfied
+    ? 'ready'
+    : state.exhaustedLimits.length > 0
+      ? 'limits-exhausted'
+      : state.currentActionableIssues.length > 0
+        ? 'revision-required'
+        : 'unable-to-decide';
+  state.reasonCodes = state.satisfied
+    ? []
+    : state.exhaustedLimits.length > 0
+      ? [...state.exhaustedLimits]
+      : state.currentActionableIssues.length > 0
+        ? ['material-issues']
+        : ['legacy-proof-incomplete'];
   return state;
+}
+
+function boundedUnresolvedBase(state: ConvergenceState): Set<string> {
+  return new Set(
+    state.unresolvedCoverage.filter(
+      (id) =>
+        !/^plan\.v[0-9]+:(?:scan-incomplete|exhaustive-scan-incomplete|not-independently-reviewed|system-check|judge|applicable-domain:.+|required-evidence:.+)$/.test(
+          id,
+        ) &&
+        !id.startsWith('boundary-challenge:') &&
+        !id.startsWith('material-question:') &&
+        !id.startsWith('risk-applicability:'),
+    ),
+  );
+}
+
+function setBoundedDecision(
+  state: ConvergenceState,
+  decision: ReadinessDecision,
+  reasonCodes: readonly string[],
+  unresolved: Set<string>,
+): ConvergenceState {
+  state.decision = decision;
+  state.reasonCodes = unique(reasonCodes);
+  state.satisfied = decision === 'ready';
+  state.unresolvedCoverage = [...unresolved].sort();
+  state.exhaustedLimits = unique(state.exhaustedLimits);
+  state.stopReason =
+    decision === 'ready'
+      ? 'ready'
+      : `${decision}:${state.reasonCodes.length > 0 ? state.reasonCodes.join(',') : 'unspecified'}`;
+  return state;
+}
+
+function classifyBoundedTerminal(state: ConvergenceState): ConvergenceState {
+  const unresolved = boundedUnresolvedBase(state);
+  const primaryUnable: string[] = [];
+
+  for (const challenge of state.boundaryChallenges) {
+    unresolved.add(`boundary-challenge:${challenge.id}`);
+  }
+  if (state.boundaryChallenges.length > 0) {
+    primaryUnable.push('boundary-challenge');
+  }
+
+  for (const questionId of state.unresolvedMaterialQuestionIds) {
+    unresolved.add(`material-question:${questionId}`);
+  }
+  if (state.unresolvedMaterialQuestionIds.length > 0) {
+    primaryUnable.push('material-question-unresolved');
+  }
+
+  const unknownDomains = state.riskDomains.filter(
+    (assessment) => assessment.applicability === 'unknown',
+  );
+  for (const assessment of unknownDomains) {
+    unresolved.add(`risk-applicability:${assessment.domain}`);
+  }
+  if (unknownDomains.length > 0) {
+    primaryUnable.push('risk-applicability-unresolved');
+  }
+
+  const assessmentEvidenceUnavailable = state.riskDomains.flatMap((assessment) =>
+    assessment.applicability === 'applicable'
+      ? assessment.unavailableEvidence.map((evidence) => `${assessment.domain}:${evidence}`)
+      : [],
+  );
+  const evidenceUnavailable = unique([
+    ...state.requiredEvidenceUnavailable,
+    ...assessmentEvidenceUnavailable,
+  ]);
+  for (const evidence of evidenceUnavailable) {
+    unresolved.add(`plan.v${state.planVersion}:required-evidence:${evidence}`);
+  }
+  if (evidenceUnavailable.length > 0) {
+    primaryUnable.push('required-evidence-unavailable');
+  }
+  if (unresolved.has(CANONICAL_PROOF_HASH_MISMATCH)) {
+    primaryUnable.push('canonical-plan-binding-mismatch');
+  }
+  if (unresolved.has(DELIVERED_PLAN_FRESH_REVIEW_REQUIRED)) {
+    primaryUnable.push('fresh-review-required');
+  }
+  if (unresolved.has(FINAL_ARTIFACT_REVIEW_REQUIRED)) {
+    primaryUnable.push('final-artifact-needs-review');
+  }
+  if (state.readinessContractDigest?.startsWith('legacy-derived:') === true) {
+    primaryUnable.push('legacy-state-requires-review');
+  }
+  if (unresolved.has('final-judge:inconsistent-verdict')) {
+    primaryUnable.push('judge-inconsistent-after-status-projection');
+  }
+  if (primaryUnable.length > 0) {
+    return setBoundedDecision(state, 'unable-to-decide', primaryUnable, unresolved);
+  }
+
+  if (requiresReadinessJudge(state) && !state.judgeAllowed) {
+    state.exhaustedLimits = unique([...state.exhaustedLimits, 'assurance-appetite']);
+  }
+  if (state.exhaustedLimits.length > 0) {
+    return setBoundedDecision(state, 'limits-exhausted', state.exhaustedLimits, unresolved);
+  }
+
+  const revisionReasons: string[] = [];
+  if (state.currentActionableIssues.length > 0) {
+    revisionReasons.push('material-issues');
+  }
+  if (requiresSystemCoverage(state) && state.systemMismatchIds.length > 0) {
+    revisionReasons.push('deterministic-check-failed');
+    for (const mismatch of state.systemMismatchIds) {
+      unresolved.add(mismatch);
+    }
+  }
+  if (revisionReasons.length > 0) {
+    return setBoundedDecision(state, 'revision-required', revisionReasons, unresolved);
+  }
+
+  const gateReasons: string[] = [];
+  if (state.lastCritiquedPlanVersion !== state.planVersion) {
+    unresolved.add(`plan.v${state.planVersion}:not-independently-reviewed`);
+    gateReasons.push('independent-review-required');
+  }
+  const applicableDomainAssessmentIncomplete = state.riskDomains.some(
+    (assessment) =>
+      assessment.applicability === 'applicable' &&
+      (!assessment.complete || assessment.lastAssessedPlanVersion !== state.planVersion),
+  );
+  if (!state.scanComplete || applicableDomainAssessmentIncomplete) {
+    unresolved.add(`plan.v${state.planVersion}:scan-incomplete`);
+    gateReasons.push(
+      state.exhaustiveApplicableDomains
+        ? 'exhaustive-applicable-scan-incomplete'
+        : 'applicable-domain-scan-incomplete',
+    );
+  }
+  if (requiresSystemCoverage(state) && !state.systemCheckPassed) {
+    unresolved.add(`plan.v${state.planVersion}:system-check`);
+    gateReasons.push('deterministic-check-incomplete');
+  }
+  const activeInvariants = state.invariants.filter(
+    (invariant) =>
+      invariant.status !== 'resolved' || invariant.lastReviewedPlanVersion !== state.planVersion,
+  );
+  if (highRiskDomains(state).length > 0 && activeInvariants.length > 0) {
+    for (const invariant of activeInvariants) {
+      unresolved.add(invariant.id);
+    }
+    gateReasons.push('cross-cutting-invariant-coverage-incomplete');
+  }
+  if (requiresReadinessJudge(state)) {
+    if (state.judgeEvaluatedPlanVersion !== state.planVersion) {
+      unresolved.add(`plan.v${state.planVersion}:judge`);
+      gateReasons.push('judge-unavailable');
+    } else if (state.judgeReady !== true || state.judgeApprovedPlanVersion !== state.planVersion) {
+      unresolved.add(`plan.v${state.planVersion}:judge`);
+      gateReasons.push('judge-not-ready');
+    }
+  }
+  if ([...unresolved].some((id) => id.startsWith('critic-unresolved-'))) {
+    gateReasons.push('critic-coverage-unresolved');
+  }
+  if ([...unresolved].some((id) => id.endsWith(':scope-coverage-incomplete'))) {
+    gateReasons.push('critic-scope-coverage-incomplete');
+  }
+  if ([...unresolved].some((id) => id.includes(':context-unconsidered:'))) {
+    gateReasons.push('critic-context-incomplete');
+  }
+  if (
+    [...unresolved].some(
+      (id) =>
+        /^v[0-9]+\.[^:]+:creator-verdict$/.test(id) ||
+        /^I-v[0-9]+-[^:]+:(?:not-applied|invalid-operator-supersession|systemic-disposition|occurrence-matrix)$/.test(
+          id,
+        ),
+    )
+  ) {
+    gateReasons.push('material-revision-proof-incomplete');
+  }
+  if (gateReasons.length > 0) {
+    return setBoundedDecision(state, 'unable-to-decide', gateReasons, unresolved);
+  }
+  return setBoundedDecision(state, 'ready', [], unresolved);
+}
+
+export function classifyTerminal(
+  state: ConvergenceState,
+  requiresJudge = requiresReadinessJudge(state),
+): ConvergenceState {
+  return state.readinessContractDigest === undefined
+    ? classifyLegacyTerminal(state, requiresJudge)
+    : classifyBoundedTerminal(state);
 }
 
 export function addConvergenceLimit(
@@ -574,13 +1085,28 @@ export function addConvergenceLimit(
 }
 
 export function recordSystemCheck(state: ConvergenceState, check: ConvergenceCheckResult): void {
-  const previous = new Set(state.systemMismatchIds);
+  const previous = new Set([...state.systemMismatchIds, ...state.requiredEvidenceUnavailable]);
   state.unresolvedCoverage = state.unresolvedCoverage.filter((id) => !previous.has(id));
   state.systemMismatchIds = unique(check.mismatches);
-  state.systemCheckPassed = check.passed;
-  if (!check.passed) {
-    state.unresolvedCoverage = unique([...state.unresolvedCoverage, ...state.systemMismatchIds]);
+  state.requiredEvidenceUnavailable = unique(check.requiredEvidenceUnavailable ?? []);
+  state.systemCheckPassed = check.passed && state.requiredEvidenceUnavailable.length === 0;
+  if (!state.systemCheckPassed) {
+    state.unresolvedCoverage = unique([
+      ...state.unresolvedCoverage,
+      ...state.systemMismatchIds,
+      ...state.requiredEvidenceUnavailable,
+    ]);
   }
+}
+
+function writeOpportunities(work: string, state: ConvergenceState): void {
+  const target = path.join(work, 'opportunities.json');
+  const tmp = `${target}.tmp`;
+  writeFileSync(
+    tmp,
+    `${JSON.stringify({ schemaVersion: 1, opportunities: state.opportunities }, null, 2)}\n`,
+  );
+  renameSync(tmp, target);
 }
 
 export function writeConvergenceState(
@@ -604,11 +1130,7 @@ export function writeConvergenceState(
           ...state.unresolvedCoverage,
           CANONICAL_PROOF_HASH_MISMATCH,
         ]);
-        state.satisfied = false;
-        state.stopReason =
-          state.exhaustedLimits.length > 0
-            ? `limit-exhausted:${state.exhaustedLimits.join(',')}`
-            : `unresolved-coverage:${state.unresolvedCoverage.sort().join(',')}`;
+        classifyTerminal(state);
       }
       state.canonicalPlanSha256 = canonicalPlanSha256;
     } else {
@@ -622,6 +1144,7 @@ export function writeConvergenceState(
   const tmp = `${target}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
   renameSync(tmp, target);
+  writeOpportunities(work, state);
   return target;
 }
 
@@ -692,12 +1215,55 @@ function validContextDelivery(value: JsonValue): boolean {
   );
 }
 
+function validRiskDomainRecord(value: JsonValue): boolean {
+  return (
+    isJsonObject(value) &&
+    RISK_DOMAINS.includes(value.domain as RiskDomain) &&
+    (value.applicability === 'applicable' ||
+      value.applicability === 'not-applicable' ||
+      value.applicability === 'unknown') &&
+    (value.risk === 'standard' || value.risk === 'high') &&
+    typeof value.rationale === 'string' &&
+    Array.isArray(value.evidenceRefs) &&
+    typeof value.complete === 'boolean' &&
+    stringArray(value.unavailableEvidence) &&
+    (value.lastAssessedPlanVersion === undefined || Number.isInteger(value.lastAssessedPlanVersion))
+  );
+}
+
+function validBoundaryChallenge(value: JsonValue): boolean {
+  return (
+    isJsonObject(value) &&
+    typeof value.id === 'string' &&
+    (value.kind === 'scope-expansion' ||
+      value.kind === 'out-of-scope-removal' ||
+      value.kind === 'assurance-appetite') &&
+    typeof value.claim === 'string' &&
+    typeof value.rationale === 'string' &&
+    Array.isArray(value.evidenceRefs) &&
+    Number.isInteger(value.planVersion)
+  );
+}
+
+function validOpportunity(value: JsonValue): boolean {
+  return (
+    isJsonObject(value) &&
+    typeof value.fingerprint === 'string' &&
+    typeof value.claim === 'string' &&
+    typeof value.evidence === 'string' &&
+    typeof value.suggestedImprovement === 'string' &&
+    Array.isArray(value.evidenceRefs) &&
+    Number.isInteger(value.firstSeenPlanVersion) &&
+    Number.isInteger(value.lastSeenPlanVersion)
+  );
+}
+
 export function readConvergenceState(file: string): ConvergenceState | undefined {
   try {
     const value = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
     if (
       !isJsonObject(value) ||
-      value.schemaVersion !== CONVERGENCE_SCHEMA_VERSION ||
+      !(value.schemaVersion === 1 || value.schemaVersion === CONVERGENCE_SCHEMA_VERSION) ||
       !Number.isInteger(value.planVersion) ||
       Number(value.planVersion) < 0 ||
       !(
@@ -749,6 +1315,7 @@ export function readConvergenceState(file: string): ConvergenceState | undefined
           'provider-context',
           'unknown-provider-context',
           'authoritative-scope',
+          'assurance-appetite',
         ].includes(limit),
       ) ||
       !stringArray(value.unresolvedCoverage) ||
@@ -763,6 +1330,57 @@ export function readConvergenceState(file: string): ConvergenceState | undefined
         !Number.isInteger(value.judgeApprovedPlanVersion)) ||
       typeof value.stopReason !== 'string' ||
       typeof value.satisfied !== 'boolean'
+    ) {
+      return undefined;
+    }
+    if (value.schemaVersion === 1) {
+      const migrated = {
+        ...value,
+        schemaVersion: CONVERGENCE_SCHEMA_VERSION,
+        requiresExhaustiveScan:
+          value.quality === 'thorough' || value.requiresExhaustiveScan === true,
+        systemMismatchIds: value.systemMismatchIds ?? [],
+        requiredEvidenceUnavailable: [],
+        unresolvedMaterialQuestionIds: [],
+        readinessContractDigest: `legacy-derived:${value.sourceDigest}`,
+        judgeAllowed: value.quality !== 'quick',
+        exhaustiveApplicableDomains: value.quality === 'thorough',
+        riskDomains: RISK_DOMAINS.map((domain) => ({
+          domain,
+          applicability: 'unknown' as const,
+          risk: 'standard' as const,
+          rationale: 'Legacy convergence state requires a fresh applicability assessment.',
+          evidenceRefs: [],
+          complete: false,
+          unavailableEvidence: [],
+        })),
+        boundaryChallenges: [],
+        opportunities: [],
+        decision: 'unable-to-decide' as const,
+        reasonCodes: ['legacy-state-requires-review'],
+        stopReason: 'unable-to-decide:legacy-state-requires-review',
+        satisfied: false,
+      } as unknown as ConvergenceState;
+      return migrated;
+    }
+    if (
+      !stringArray(value.requiredEvidenceUnavailable) ||
+      !stringArray(value.unresolvedMaterialQuestionIds) ||
+      (value.readinessContractDigest !== undefined &&
+        typeof value.readinessContractDigest !== 'string') ||
+      typeof value.judgeAllowed !== 'boolean' ||
+      typeof value.exhaustiveApplicableDomains !== 'boolean' ||
+      !Array.isArray(value.riskDomains) ||
+      !value.riskDomains.every(validRiskDomainRecord) ||
+      !Array.isArray(value.boundaryChallenges) ||
+      !value.boundaryChallenges.every(validBoundaryChallenge) ||
+      !Array.isArray(value.opportunities) ||
+      !value.opportunities.every(validOpportunity) ||
+      (value.judgeEvaluatedPlanVersion !== undefined &&
+        !Number.isInteger(value.judgeEvaluatedPlanVersion)) ||
+      (value.judgeReady !== undefined && typeof value.judgeReady !== 'boolean') ||
+      !READINESS_DECISIONS.includes(value.decision as ReadinessDecision) ||
+      !stringArray(value.reasonCodes)
     ) {
       return undefined;
     }
@@ -783,5 +1401,10 @@ export function convergenceReport(work: string, state: ConvergenceState): Conver
     artifactPath: path.join(work, 'convergence.final.json'),
     exhaustedLimits: [...state.exhaustedLimits],
     unresolvedCoverage: [...state.unresolvedCoverage],
+    decision: state.decision,
+    reasonCodes: [...state.reasonCodes],
+    applicableRiskDomains: applicableRiskDomains(state),
+    highRiskDomains: highRiskDomains(state),
+    opportunityCount: state.opportunities.length,
   };
 }

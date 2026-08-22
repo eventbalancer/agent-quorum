@@ -265,4 +265,25 @@ describe('resolveConfig precedence and provenance', () => {
     expect(env.config.status.maxPlanLines).toBe(50);
     expect(env.provenance.get('status.maxPlanLines')).toBe('env');
   });
+
+  it('resolves the additive codex watchdog contract', () => {
+    const defaults = resolveConfig({ env: {}, home: tmp });
+    expect(defaults.config.knobs.codex).toMatchObject({
+      byteTimeoutSeconds: 0,
+      semanticTimeoutSeconds: 0,
+      wallTimeoutSeconds: 1800,
+    });
+
+    const fromEnv = resolveConfig({
+      env: {
+        AGENT_QUORUM_CODEX_CALL_TIMEOUT_SECONDS: '17',
+        AGENT_QUORUM_CODEX_STALL_POLL_SECONDS: '2',
+      },
+      home: tmp,
+    });
+    expect(fromEnv.config.knobs.codex.wallTimeoutSeconds).toBe(17);
+    expect(fromEnv.config.knobs.codex.pollSeconds).toBe(2);
+    expect(fromEnv.provenance.get('knobs.codex.callTimeoutSeconds')).toBe('env');
+    expect(fromEnv.provenance.get('knobs.codex.stallPollSeconds')).toBe('env');
+  });
 });

@@ -8,13 +8,20 @@ import { Scratch } from '../../src/runtime/scratch.js';
 import {
   runCreatorClarify,
   runCreatorCreate,
+  runCreatorReadinessAssessment,
   runCreatorUpdate,
 } from '../../src/stages/plan/creator.js';
 import { runCritic } from '../../src/stages/plan/critic.js';
 import { runFixPass } from '../../src/stages/plan/fix-pass.js';
 import { runFinalJudge, runJudge } from '../../src/stages/plan/judge.js';
 import { runTranslatePass } from '../../src/stages/plan/translate-pass.js';
-import { withEnvAsync, writeFakeBin, writeStructuredPlanFile } from '../helpers/harness.js';
+import {
+  argvRecords,
+  withEnvAsync,
+  writeFakeBin,
+  writeReadinessAssessment,
+  writeStructuredPlanFile,
+} from '../helpers/harness.js';
 import { fixtureMatrix, makeTestRunContext } from '../helpers/test-context.js';
 
 const ORIGINAL_SCOPE = 'ORIGINAL_SCOPE_BOUNDARY_SENTINEL';
@@ -671,5 +678,44 @@ describe('retained context at provider boundaries', () => {
       CRITIC_SCOPE_COVERAGE_VOCABULARY,
     );
     expect(capturedPrompt).not.toContain(ORIGINAL_SCOPE);
+  });
+
+  it('gives Assessment Mode the direct plan body with fixed read-only tools', async () => {
+    const fixture = createBoundaryFixture('quick', 'plan');
+    fixture.ctx.provider.matrix.creator = {
+      runner: 'claude',
+      model: 'claude-boundary-fixture',
+      reasoning: 'high',
+    };
+    fixture.ctx.permissions.creator.createTools = 'Read,Grep,Glob,Write,Edit,Bash';
+    fixture.ctx.permissions.creator.createDisallowedTools = '';
+
+    const assessment = path.join(fixture.tmp, 'direct-assessment.json');
+    const output = path.join(fixture.work, 'direct-assessment-output.json');
+    const promptFile = path.join(fixture.tmp, 'direct-assessment.prompt');
+    const argvFile = path.join(fixture.tmp, 'direct-assessment.argv');
+    writeReadinessAssessment(assessment);
+
+    await withEnvAsync(
+      {
+        PATH: fixture.fakePath,
+        FAKE_READINESS_ASSESSMENT: assessment,
+        FAKE_CLAUDE_PROMPT: promptFile,
+        FAKE_CLAUDE_ARGV_LOG: argvFile,
+      },
+      () => runCreatorReadinessAssessment(fixture.ctx, output),
+    );
+
+    const prompt = readFileSync(promptFile, 'utf8');
+    expect(prompt).toContain('## Direct plan (declared implementation scope)');
+    expect(prompt).toContain('# Boundary Input');
+    expect(prompt).toContain('fixture gate observable');
+
+    const args = argvRecords(argvFile)[0] ?? [];
+    expect(args[args.indexOf('--tools') + 1]).toBe('Read,Grep,Glob');
+    expect(args[args.indexOf('--allowed-tools') + 1]).toBe('Read,Grep,Glob');
+    expect(args[args.indexOf('--disallowed-tools') + 1]).toBe(
+      'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion',
+    );
   });
 });

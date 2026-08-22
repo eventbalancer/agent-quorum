@@ -11,6 +11,7 @@ import {
   withEnvAsync,
   writeCritique,
   writeFakeBin,
+  writeReadinessAssessment,
   writeStoreConfig,
   writeStructuredPlanFile,
   type StderrCapture,
@@ -51,6 +52,8 @@ let fake: string;
 let work: string;
 let input: string;
 let capture: StderrCapture;
+let highRiskAssessment: string;
+let standardRiskAssessment: string;
 
 function baseEnv(
   extra: Record<string, string | undefined> = {},
@@ -66,6 +69,7 @@ function baseEnv(
     AGENT_QUORUM_RETRY_DELAY_SECONDS: '0',
     FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
     FAKE_CLAUDE_PROMPT: path.join(tmp, 'claude.prompt'),
+    FAKE_READINESS_ASSESSMENT: highRiskAssessment,
     ...extra,
   };
 }
@@ -147,7 +151,7 @@ function setupCase(kind: TerminationKind, finalVerdict: string): CaseSetup {
         }),
         quality: 'balanced',
         fix: false,
-        expectedLog: 'proof-satisfied at v0',
+        expectedLog: 'ready at v0',
       };
     }
     case 'creator-convergence': {
@@ -257,6 +261,10 @@ beforeEach(() => {
   writeStoreConfig(path.join(tmp, 'home'));
   input = path.join(tmp, 'input.md');
   writeStructuredPlanFile(input, 'Readiness Input');
+  highRiskAssessment = path.join(tmp, 'readiness-high.json');
+  standardRiskAssessment = path.join(tmp, 'readiness-standard.json');
+  writeReadinessAssessment(highRiskAssessment, true);
+  writeReadinessAssessment(standardRiskAssessment);
   capture = captureStderr();
 });
 
@@ -300,7 +308,12 @@ describe('final Judge termination and verdict matrix', () => {
       const finalPlan = path.join(work, 'plan.final.md');
       const planBytes = readFileSync(finalPlan);
       const digest = createHash('sha256').update(planBytes).digest('hex');
-      const proofCanSatisfy = !['creator-convergence', 'stable-diff', 'max-iters'].includes(kind);
+      const proofCanSatisfy = ![
+        'creator-convergence',
+        'stable-diff',
+        'max-iters',
+        'post-fix',
+      ].includes(kind);
       const expectedStatus = ready && proofCanSatisfy ? 'clean' : 'needs-review';
       expect(result.exitCode).toBe(0);
       expect(result.status).toBe(expectedStatus);
@@ -418,9 +431,11 @@ describe('final Judge termination and verdict matrix', () => {
     expect(
       JSON.parse(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')),
     ).toMatchObject({
-      judgeApprovedPlanVersion: 0,
       satisfied: false,
     });
+    expect(
+      JSON.parse(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')),
+    ).not.toHaveProperty('judgeApprovedPlanVersion');
   });
 
   it('cannot clean a canonical plan mutated by the final Judge provider', async () => {
@@ -516,7 +531,8 @@ describe('final Judge termination and verdict matrix', () => {
 
     expect(result.status).toBe('needs-review');
     expect(result.readiness?.ready).toBe(true);
-    expect(result.convergence?.unresolvedCoverage).toContain('plan.v0:judge');
+    expect(result.convergence?.unresolvedCoverage).toContain('final-judge:inconsistent-verdict');
+    expect(result.convergence?.reasonCodes).toContain('judge-inconsistent-after-status-projection');
     expect(result.convergence?.unresolvedCoverage).not.toContain('final-judge:coverage-unproved');
     const state = JSON.parse(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')) as {
       judgeApprovedPlanVersion?: number;
@@ -632,7 +648,7 @@ describe('final Judge termination and verdict matrix', () => {
     expect(result.exitCode).toBe(0);
     expect(result.status).toBe('needs-review');
     expect(result.readiness).toMatchObject({ evaluated: false, ready: null });
-    expect(readFileSync(calls, 'utf8')).toBe('5');
+    expect(readFileSync(calls, 'utf8')).toBe('3');
     expect(existsSync(path.join(work, 'plan.final.md'))).toBe(true);
     expect(existsSync(path.join(work, 'judge.final.json'))).toBe(false);
     expect(
@@ -707,15 +723,20 @@ describe('final Judge termination and verdict matrix', () => {
     const critique = path.join(tmp, 'critique.json');
     emptyCritique(critique);
 
-    const result = await withEnvAsync(baseEnv({ FAKE_CODEX_OUTPUT: critique }), () =>
-      runPlanLoop({
-        input,
-        iters: 1,
-        quality: 'quick',
-        fix: false,
-        translate: false,
-        workDir: work,
+    const result = await withEnvAsync(
+      baseEnv({
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_READINESS_ASSESSMENT: standardRiskAssessment,
       }),
+      () =>
+        runPlanLoop({
+          input,
+          iters: 1,
+          quality: 'quick',
+          fix: false,
+          translate: false,
+          workDir: work,
+        }),
     );
 
     expect(result.exitCode).toBe(0);

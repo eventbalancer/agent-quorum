@@ -8,7 +8,13 @@ import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
   normalizePlanDocument,
+  normalizeRepositoryFileLineReferences,
+  PLAN_DOCUMENT_REQUIRED_SECTIONS,
   planDocumentShapeOk,
+  planHasFrontmatter,
+  planHasHeading,
+  planHasImpactGraphMermaid,
+  planHasTitleHeading,
   requirePlanDocumentShape,
   validatePlanDocumentShape,
 } from './plan-shape.js';
@@ -20,6 +26,11 @@ import {
 } from '../../core/schema.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
 import { retainedRolePrompt } from './retained-context.js';
+import {
+  parseReadinessAssessment,
+  ReadinessContractValidationError,
+  type ReadinessAssessment,
+} from '../../core/readiness-contract.js';
 
 const ONE_SHOT_OUTPUT_MODE =
   'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
@@ -40,6 +51,10 @@ const SPLIT_META_OUTPUT_MODE =
   '- mark accepted or downgraded issues as applied only when the revised plan actually addresses them;\n' +
   '- put only self-rejected minor/nit accepted items in rejected_append;\n' +
   '- do not include plan_markdown or any other markdown content in this JSON.';
+
+const READ_ONLY_ASSESSMENT_TOOLS = 'Read,Grep,Glob';
+const READ_ONLY_ASSESSMENT_DISALLOWED_TOOLS =
+  'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
 
 function jqRawRender(value: JsonValue | undefined): string {
   if (typeof value === 'string') {
@@ -78,6 +93,61 @@ function requireCreatorCreateShape(ctx: RunContext, outFile: string): void {
     throw new HaltError(PLAN_MODE_STUB_DIAGNOSTIC, 4, true);
   }
   requirePlanDocumentShape(outFile);
+}
+
+function creatorShapeProblems(file: string): string[] {
+  return [
+    ...(planHasTitleHeading(file) ? [] : ['missing level-1 title']),
+    ...PLAN_DOCUMENT_REQUIRED_SECTIONS.filter((heading) => !planHasHeading(file, heading)).map(
+      (heading) => `missing ## ${heading}`,
+    ),
+    ...(planHasImpactGraphMermaid(file) ? [] : ['missing Mermaid flowchart in ## Impact Graph']),
+    ...(planHasFrontmatter(file) ? [] : ['missing valid leading YAML frontmatter']),
+  ];
+}
+
+async function repairCreatorCreateShape(ctx: RunContext, outFile: string): Promise<void> {
+  const invalidFile = path.join(
+    path.dirname(outFile),
+    `${path.basename(outFile, path.extname(outFile))}.shape-invalid.md`,
+  );
+  copyFileSync(outFile, invalidFile);
+  const problems = creatorShapeProblems(invalidFile);
+  log(`creator plan shape repair — ${problems.join('; ')}`);
+  const basePrompt =
+    '## Output mode: plan shape repair\n' +
+    'Return the full corrected implementation plan as clean Markdown only. Do not return a summary, commentary, or an external-file pointer.\n' +
+    'Preserve the prior plan facts, scope, phases, implementation details, and acceptance gates. Repair the deterministic Plan Document Contract violations listed below. Every required section must use its exact level-2 heading, and the final ## Impact Graph section must contain a Mermaid flowchart.\n' +
+    `\n## Deterministic shape violations\n${problems.map((problem) => `- ${problem}`).join('\n')}\n` +
+    `\n## Invalid plan\n${readStripped(invalidFile)}`;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'create-shape-repair',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: '',
+    basePrompt,
+  });
+  const status = await providerRun(
+    ctx.provider,
+    'creator',
+    'markdown',
+    outFile,
+    ctx.skills.creatorSkill,
+    '',
+    ctx.permissions.creator.createTools,
+    ctx.permissions.creator.createDisallowedTools,
+    prompt,
+  );
+  if (status !== 0) {
+    throw new HaltError(`creator plan shape repair failed (${status})`, status, true);
+  }
+  if (!nonEmptyFile(outFile)) {
+    throw new HaltError('creator plan shape repair produced an empty plan', 4, true);
+  }
+  normalizePlanDocument(outFile);
+  validatePlanDocumentShape(outFile);
 }
 
 export async function runCreatorCreate(
@@ -122,7 +192,60 @@ export async function runCreatorCreate(
   }
   normalizePlanDocument(outFile);
   validatePlanDocumentShape(outFile);
+  if (!planDocumentShapeOk(outFile) && !isClaudeCreatorPlanMode(ctx)) {
+    await repairCreatorCreateShape(ctx, outFile);
+  }
+  normalizeRepositoryFileLineReferences(outFile, ctx.provider.projectRoot);
   requireCreatorCreateShape(ctx, outFile);
+}
+
+export async function runCreatorReadinessAssessment(
+  ctx: RunContext,
+  outFile: string,
+): Promise<ReadinessAssessment> {
+  const directPlan =
+    ctx.mode === 'plan'
+      ? `\n\n## Direct plan (declared implementation scope)\n${readStripped(ctx.inputPath)}`
+      : '';
+  const basePrompt =
+    '## Output mode: readiness assessment\n' +
+    'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
+    'Perform the read-only Assessment Mode from the plan-creator skill. Establish the requested implementation boundary, assess all eight fixed risk domains, and surface only unresolved operator-owned material questions. Do not draft or edit a plan.' +
+    directPlan;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'assessment',
+    planVersion: 0,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.readinessContractSchema,
+    basePrompt,
+  });
+  const status = await providerRun(
+    ctx.provider,
+    'creator',
+    'json',
+    outFile,
+    ctx.skills.creatorSkill,
+    ctx.skills.readinessContractSchema,
+    READ_ONLY_ASSESSMENT_TOOLS,
+    READ_ONLY_ASSESSMENT_DISALLOWED_TOOLS,
+    prompt,
+  );
+  if (status !== 0) {
+    throw new HaltError(`creator readiness assessment failed (${status})`, status, true);
+  }
+  if (!nonEmptyFile(outFile) || !validateSchema(outFile, ctx.skills.readinessContractSchema)) {
+    throw new HaltError('creator readiness assessment failed schema validation', 3, true);
+  }
+  try {
+    return parseReadinessAssessment(readFileSync(outFile, 'utf8'));
+  } catch (error) {
+    if (error instanceof ReadinessContractValidationError) {
+      throw new HaltError(`creator readiness assessment is invalid: ${error.message}`, 3, true);
+    }
+    throw error;
+  }
 }
 
 async function runCreatorUpdateOneShot(
@@ -173,6 +296,7 @@ async function runCreatorUpdateOneShot(
     return 4;
   }
   normalizePlanDocument(revisionFile);
+  normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
   validatePlanDocumentShape(revisionFile);
   if (!planDocumentShapeOk(revisionFile)) {
     return 4;
@@ -304,6 +428,7 @@ export async function runCreatorUpdate(
     throw new HaltError('creator produced empty revised plan', 4, true);
   }
   normalizePlanDocument(revisionFile);
+  normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
 
   await runCreatorUpdateMeta(ctx, iter, planFile, revisionFile, critiqueFile, metaFile);
   sanitizeUpdateMetaJson(metaFile, planVersion);

@@ -17,6 +17,7 @@ import {
   REPO_ROOT,
   writeCritique,
   writeFakeBin,
+  writeReadinessAssessment,
   writeStoreConfig,
   writeStructuredPlanFile,
 } from '../helpers/harness.js';
@@ -26,6 +27,7 @@ import { readRunRecords } from '../../src/core/run-store.js';
 let tmp: string;
 let fake: string;
 let work: string;
+let highRiskAssessment: string;
 
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
@@ -65,6 +67,8 @@ beforeEach(() => {
   writeStoreConfig(path.join(tmp, 'home'));
   writeStructuredPlanFile(path.join(tmp, 'input.md'), 'CLI Input');
   emptyCritique(path.join(tmp, 'empty.json'));
+  highRiskAssessment = path.join(tmp, 'readiness-high.json');
+  writeReadinessAssessment(highRiskAssessment, true);
 });
 
 afterEach(() => {
@@ -154,6 +158,7 @@ describe('exit-code matrix', () => {
         telegramEnv(stub, {
           FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
           FAKE_CLAUDE_JSON_RESULT: verdict,
+          FAKE_READINESS_ASSESSMENT: highRiskAssessment,
         }),
       );
 
@@ -201,6 +206,7 @@ describe('exit-code matrix', () => {
         telegramEnv(stub, {
           FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
           FAKE_CLAUDE_JSON_RESULT: invalid,
+          FAKE_READINESS_ASSESSMENT: highRiskAssessment,
         }),
       );
 
@@ -361,14 +367,15 @@ describe('exit-code matrix', () => {
     const stub: TelegramStub = await startTelegramStub();
     try {
       stub.queueReply(500, '/cancel');
-      writeFileSync(
-        path.join(work, 'clarify-questions.json'),
-        `${JSON.stringify({
-          questions: [
-            { id: 'Q1', question: 'How many regions?', why: 'important', options: ['One', 'Two'] },
-          ],
-        })}\n`,
-      );
+      const readinessAssessment = path.join(tmp, 'readiness-with-question.json');
+      writeReadinessAssessment(readinessAssessment, false, [
+        {
+          id: 'deployment-regions',
+          question: 'How many regions?',
+          rationale: 'The answer changes the deployment boundary.',
+          options: ['One', 'Two'],
+        },
+      ]);
       writeFileSync(path.join(work, 'clarify.offset'), '0');
       const prompt = path.join(tmp, 'prompt.md');
       writeFileSync(prompt, 'Build the thing.\n');
@@ -391,6 +398,7 @@ describe('exit-code matrix', () => {
           AGENT_QUORUM_TELEGRAM_API_BASE: stub.baseUrl,
           AGENT_QUORUM_TELEGRAM_POLL_TIMEOUT: '1',
           AGENT_QUORUM_CLARIFY_DEADLINE_SECONDS: '5',
+          FAKE_READINESS_ASSESSMENT: readinessAssessment,
         }),
       );
       expect(result.status).toBe(7);

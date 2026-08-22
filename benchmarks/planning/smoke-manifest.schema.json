@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "suiteId", "workspaceRevision", "providerConfig", "sentinels"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "workspaceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "providerConfig": { "type": "string", "minLength": 1 },
+    "sentinels": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/sentinel" }
+    }
+  },
+  "$defs": {
+    "sentinel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "risk", "inputMode", "input", "quality", "maxIterations", "expected"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "risk": { "enum": ["standard", "high"] },
+        "inputMode": { "enum": ["prompt", "plan"] },
+        "input": { "type": "string", "minLength": 1 },
+        "quality": { "enum": ["quick", "balanced"] },
+        "maxIterations": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision",
+            "minimumCritiqueIterations",
+            "maximumCritiqueIterations",
+            "minimumPlanVersion",
+            "judge"
+          ],
+          "properties": {
+            "decision": { "const": "ready" },
+            "minimumCritiqueIterations": { "type": "integer", "minimum": 1 },
+            "maximumCritiqueIterations": { "type": "integer", "minimum": 1 },
+            "minimumPlanVersion": { "type": "integer", "minimum": 0 },
+            "judge": { "enum": ["forbidden", "required"] }
+          }
+        }
+      }
+    }
+  }
+}

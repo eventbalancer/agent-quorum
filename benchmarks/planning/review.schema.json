@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "suiteId", "reviewerId", "tasks"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "reviewerId": { "type": "string", "minLength": 1 },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["taskId", "preference", "findings", "knownConcernAssessments"],
+        "properties": {
+          "taskId": { "type": "string", "minLength": 1 },
+          "preference": { "enum": ["A", "B", "tie"] },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["plan", "severity", "claim"],
+              "properties": {
+                "plan": { "enum": ["A", "B"] },
+                "severity": { "enum": ["blocker", "major"] },
+                "claim": { "type": "string", "minLength": 1 },
+                "knownConcernId": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "knownConcernAssessments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["plan", "knownConcernId", "disposition", "evidence"],
+              "properties": {
+                "plan": { "enum": ["A", "B"] },
+                "knownConcernId": { "type": "string", "minLength": 1 },
+                "disposition": { "enum": ["addressed", "missed", "unreviewed"] },
+                "evidence": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

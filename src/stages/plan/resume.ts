@@ -18,11 +18,13 @@ import type { ResumeState, RunContext } from '../../core/run-context.js';
 import {
   addConvergenceLimit,
   fileSha256,
+  requiresSystemCoverage,
   type ConvergenceState,
   readConvergenceState,
   writeConvergenceState,
 } from '../../core/convergence.js';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
+import { readReadinessContract } from '../../core/readiness-contract.js';
 
 function sortedMatches(work: string, prefix: string, suffix: string): string[] {
   let names: string[];
@@ -199,6 +201,27 @@ function assertCompatibleResumeContract(
   ) {
     mismatches.push('scope source');
   }
+  const frozenContractFile = path.join(ctx.work, 'readiness-contract.json');
+  const restoredContractDigest = restored.readinessContractDigest;
+  if (existsSync(frozenContractFile)) {
+    try {
+      const frozenContract = readReadinessContract(frozenContractFile);
+      if (
+        restoredContractDigest !== undefined &&
+        !restoredContractDigest.startsWith('legacy-derived:') &&
+        restoredContractDigest !== frozenContract.contractDigest
+      ) {
+        mismatches.push('readiness contract digest');
+      }
+    } catch {
+      mismatches.push('readiness contract');
+    }
+  } else if (
+    restoredContractDigest !== undefined &&
+    !restoredContractDigest.startsWith('legacy-derived:')
+  ) {
+    mismatches.push('readiness contract');
+  }
   if (mismatches.length > 0) {
     const message = `resume failed: ${mismatches.join(', ')} differs from the selected run contract`;
     err(message);
@@ -277,7 +300,10 @@ function systemCheckMatchesPlan(
       check.planSha256 === selectedPlanSha256 &&
       check.passed === true &&
       Array.isArray(check.mismatches) &&
-      check.mismatches.length === 0
+      check.mismatches.length === 0 &&
+      (!('required' in check) || check.required === requiresSystemCoverage(state)) &&
+      (!Array.isArray(check.requiredEvidenceUnavailable) ||
+        check.requiredEvidenceUnavailable.length === 0)
     );
   } catch {
     return false;
@@ -292,11 +318,16 @@ function invalidateRestoredProof(
   delete state.canonicalPlanSha256;
   delete state.lastCritiquedPlanVersion;
   delete state.judgeApprovedPlanVersion;
+  delete state.judgeEvaluatedPlanVersion;
+  delete state.judgeReady;
   state.scanComplete = false;
   state.systemCheckPassed = false;
   state.systemMismatchIds = [];
+  state.requiredEvidenceUnavailable = [];
   state.currentActionableIssues = [];
   state.satisfied = false;
+  state.decision = 'unable-to-decide';
+  state.reasonCodes = ['fresh-review-required'];
   state.stopReason = marker;
   state.unresolvedCoverage = [
     ...new Set([
@@ -316,6 +347,11 @@ function invalidateRestoredProof(
       occurrence.evidenceRefs = [];
     }
   }
+  for (const assessment of state.riskDomains) {
+    assessment.complete = false;
+    assessment.unavailableEvidence = [];
+    delete assessment.lastAssessedPlanVersion;
+  }
   state.planVersion = planVersion;
 }
 
@@ -323,7 +359,10 @@ function invalidateRestoredSystemCheck(state: ConvergenceState, planVersion: num
   const marker = `plan.v${planVersion}:system-check`;
   state.systemCheckPassed = false;
   state.systemMismatchIds = [];
+  state.requiredEvidenceUnavailable = [];
   state.satisfied = false;
+  state.decision = 'unable-to-decide';
+  state.reasonCodes = ['deterministic-check-incomplete'];
   state.stopReason = marker;
   state.unresolvedCoverage = [...new Set([...state.unresolvedCoverage, marker])];
 }
@@ -360,6 +399,14 @@ export function prepareResume(ctx: RunContext): number {
       invalidateRestoredProof(restored, start, marker);
       restored.planSha256 = selectedPlanSha256;
     }
+    if (
+      restored.readinessContractDigest === undefined ||
+      restored.readinessContractDigest.startsWith('legacy-derived:')
+    ) {
+      archiveResumeSnapshot(ctx.work, state, convergenceFile);
+      archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
+      invalidateRestoredProof(restored, start, `plan.v${start}:readiness-contract-proof-unbound`);
+    }
     if (restored.systemCheckPassed && !systemCheckMatchesPlan(ctx.work, start, restored)) {
       archiveResumeSnapshot(ctx.work, state, convergenceFile);
       archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
@@ -373,11 +420,13 @@ export function prepareResume(ctx: RunContext): number {
         ? ctx.systemContext.relationships.map((relationship) => relationship.id)
         : [];
       invalidateRestoredProof(restored, start, `plan.v${start}:authoritative-digest-changed`);
-      addConvergenceLimit(
-        restored,
-        'authoritative-scope',
-        `plan.v${start}:authoritative-digest-changed`,
-      );
+      if (restored.readinessContractDigest === undefined) {
+        addConvergenceLimit(
+          restored,
+          'authoritative-scope',
+          `plan.v${start}:authoritative-digest-changed`,
+        );
+      }
     }
   } else {
     ctx.convergence.planVersion = start;

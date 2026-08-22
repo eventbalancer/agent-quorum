@@ -8,6 +8,7 @@ import { StreamLogFilter } from './stream-log.js';
 import { runLivenessHeartbeat } from './heartbeat.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
 import type { ProviderRuntime } from './runtime.js';
+import { StreamState, watchStream } from './watchdog.js';
 
 function writeFilterLines(filter: StreamLogFilter, line: string): void {
   for (const rendered of filter.line(line)) {
@@ -80,18 +81,26 @@ export async function codexRun(
       },
     );
     const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
+    const streamState = new StreamState();
     let pending = '';
+    const consumeLine = (line: string): void => {
+      if (line.trim() !== '') {
+        streamState.progress += 1;
+      }
+      writeFilterLines(filter, line);
+    };
     child.stdout?.on('data', (chunk: Buffer) => {
       if (diagnosticSink !== undefined) {
         diagnosticSink.write(chunk);
       }
+      streamState.bytes += chunk.length;
       pending += chunk.toString();
       for (;;) {
         const newlineIndex = pending.indexOf('\n');
         if (newlineIndex === -1) {
           break;
         }
-        writeFilterLines(filter, pending.slice(0, newlineIndex));
+        consumeLine(pending.slice(0, newlineIndex));
         pending = pending.slice(newlineIndex + 1);
       }
     });
@@ -105,14 +114,20 @@ export async function codexRun(
     const stderr = new ProviderStderr(traceContext, diagnosticSink);
     const stderrDrained = drainStderr(child.stderr, stderr);
 
+    const stallPromise = watchStream(child, streamState, providerRuntime.streamKnobs.codex);
     const status = await waitForExit(child);
+    const stallReason = await stallPromise;
     await heartbeat;
     if (pending !== '') {
-      writeFilterLines(filter, pending);
+      consumeLine(pending);
     }
     await stderrDrained;
     stderr.failureSummary(status);
 
+    if (stallReason !== undefined) {
+      err(`codex stream stalled: ${stallReason}`);
+      return providerRuntime.streamKnobs.codex.stallStatus;
+    }
     if (status !== 0) {
       return status;
     }

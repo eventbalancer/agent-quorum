@@ -70,10 +70,21 @@ function formatLine(candidate: RunCandidate, index: number, color: boolean): str
   const record = candidate.record;
   const meta = dim(`${shortRunId(record.runId)}  ${timeField(candidate)}`, color);
   const readiness = record.finalReadiness;
-  const finalFacts =
-    readiness === undefined
-      ? ''
-      : `  final=${record.finalStatus ?? 'unknown'} readiness=${readinessLabel(readiness.ready)}`;
+  const convergence = record.finalConvergence;
+  const facts: string[] = [];
+  if (record.finalStatus !== undefined || readiness !== undefined || convergence !== undefined) {
+    facts.push(`final=${record.finalStatus ?? 'unknown'}`);
+  }
+  if (convergence !== undefined) {
+    facts.push(`decision=${convergence.decision}`);
+    facts.push(
+      `reasons=${convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'none'}`,
+    );
+  }
+  if (readiness !== undefined) {
+    facts.push(`readiness=${readinessLabel(readiness.ready)}`);
+  }
+  const finalFacts = facts.length > 0 ? `  ${facts.join(' ')}` : '';
   return `  ${index}) ${record.name}  [${candidate.state}]${finalFacts}  ${meta}  ${record.workDir}`;
 }
 

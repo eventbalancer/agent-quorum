@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { convergenceHealth } from '../../src/core/metrics.js';
+import { sanitizeCritiqueJson } from '../../src/core/schema.js';
 import { REPO_ROOT } from '../helpers/harness.js';
 
 const roots: string[] = [];
@@ -17,7 +18,7 @@ function issue(id: string, evidenceRef: Record<string, unknown>) {
   return {
     id,
     addresses: null,
-    severity: 'minor',
+    severity: 'major',
     category: 'testability',
     claim: `${id} claim`,
     evidence: '',
@@ -102,6 +103,96 @@ describe('rich convergence health', () => {
     });
   });
 
+  it('grounds provider phase labels after sanitizing them to stable phase ids', () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-phase-evidence.'));
+    roots.push(project);
+    const work = path.join(project, 'work');
+    mkdirSync(work);
+    writeFileSync(
+      path.join(work, 'plan.v0.md'),
+      '# Plan\n\n## Work Plan\n\n### P3 - Report and Status Projection\n\nAcceptance gate includes `critique_iterations` in every status branch.\n',
+    );
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+    const critique = path.join(work, 'critique.v0.json');
+    writeFileSync(
+      critique,
+      JSON.stringify({
+        plan_version: 0,
+        summary: 'phase evidence',
+        issues: [
+          issue('C1', {
+            kind: 'phase-gate',
+            phase: 'P3 - Report and Status Projection',
+            gate: 'Acceptance gate includes critique_iterations in every status branch.',
+          }),
+        ],
+      }),
+    );
+
+    sanitizeCritiqueJson(critique, 0);
+
+    const sanitized = JSON.parse(readFileSync(critique, 'utf8')) as {
+      issues: { evidence_refs: { phase: string }[] }[];
+    };
+    expect(sanitized.issues[0]?.evidence_refs[0]?.phase).toBe('P3');
+    expect(
+      convergenceHealth(
+        work,
+        path.join(REPO_ROOT, 'skills', 'plan-critic', 'critique.schema.json'),
+        0,
+        critique,
+        project,
+      ).grounding,
+    ).toEqual({ grounded: 1, malformed: 0, 'format-mismatch': 0, unanchored: 0 });
+  });
+
+  it('grounds a structurally valid evidence list when any typed target exists', () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-partial-evidence.'));
+    roots.push(project);
+    const work = path.join(project, 'work');
+    mkdirSync(work);
+    writeFileSync(
+      path.join(work, 'plan.v0.md'),
+      '# Plan\n\n## Verified Facts\n\nFacts.\n\n## Work Plan\n\n### P4 Focused Coverage\n',
+    );
+    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+    const critique = path.join(work, 'critique.v0.json');
+    writeFileSync(
+      critique,
+      JSON.stringify({
+        plan_version: 0,
+        summary: 'partial evidence target coverage',
+        issues: [
+          {
+            ...issue('C1', { kind: 'plan-section', section: 'Original scope' }),
+            evidence_refs: [
+              { kind: 'plan-section', section: 'Original scope' },
+              { kind: 'plan-section', section: 'P4 Focused Coverage' },
+              { kind: 'plan-section', section: 'Verified Facts' },
+            ],
+          },
+          {
+            ...issue('C2', { kind: 'plan-section', section: 'Original scope' }),
+            evidence_refs: [
+              { kind: 'plan-section', section: 'Original scope' },
+              { kind: 'plan-section', section: 'Still missing' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      convergenceHealth(
+        work,
+        path.join(REPO_ROOT, 'skills', 'plan-critic', 'critique.schema.json'),
+        0,
+        critique,
+        project,
+      ).grounding,
+    ).toEqual({ grounded: 1, malformed: 1, 'format-mismatch': 0, unanchored: 0 });
+  });
+
   it('distinguishes revision regressions from ordinary refinements', () => {
     const work = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-lineage.'));
     roots.push(work);
@@ -174,7 +265,7 @@ describe('rich convergence health', () => {
           { ...issue('C3', evidence), addresses: 'v0.C3' },
           { ...issue('C4', evidence), addresses: 'v0.C2' },
           { ...issue('C5', evidence), introduced_by_revision: 'plan.v2.md' },
-          { ...issue('C6', evidence), severity: 'nit', duplicate_of: 'r1' },
+          { ...issue('C6', evidence), duplicate_of: 'r1' },
           { ...issue('C7', { kind: 'repository', value: 'source.ts:2' }), addresses: 'v9.C1' },
         ],
       }),
@@ -187,8 +278,8 @@ describe('rich convergence health', () => {
       reopened: 1,
       recurring: 1,
       'revision-regression': 1,
-      'rejected-duplicate': 1,
-      'invalid-lineage': 1,
+      'rejected-duplicate': 0,
+      'invalid-lineage': 2,
     });
     expect(health.grounding['format-mismatch']).toBe(1);
   });

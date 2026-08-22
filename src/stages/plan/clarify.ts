@@ -83,6 +83,10 @@ function clarifySetOffset(work: string, offset: number): void {
   writeFileSync(clarifyOffsetFile(work), String(offset));
 }
 
+function explicitlyRequestsClarification(value: string): boolean {
+  return ['1', 'true', 'on', 'yes'].includes(value);
+}
+
 function clarifyRecordIntervention(work: string, question: string, answer: string): void {
   const entry = {
     id: `op-clarify-${randomUUID()}`,
@@ -374,10 +378,14 @@ export async function runClarificationGate(
   const runtime = ctx.config.telegram;
   const mode = clarifyGateEnabled(runtime.clarify, runtime);
   if (mode === 'error') {
+    const transportUnavailable =
+      explicitlyRequestsClarification(runtime.clarify) && !telegramConfigured(runtime);
     return {
       ok: false,
-      exitCode: ExitCode.ClarifyCancelled,
-      reason: 'clarification gate misconfigured',
+      exitCode: transportUnavailable ? ExitCode.ClarifyTransportFailure : ExitCode.ClarifyCancelled,
+      reason: transportUnavailable
+        ? 'clarification transport is not configured'
+        : 'clarification gate misconfigured',
     };
   }
   if (mode === 'skip') {
@@ -467,7 +475,7 @@ export async function runClarificationGate(
         err('clarification gate: failed to reach Telegram (check token/chat_id/network)');
         return {
           ok: false,
-          exitCode: ExitCode.ClarifyCancelled,
+          exitCode: ExitCode.ClarifyTransportFailure,
           reason: 'failed to reach Telegram',
         };
       }
@@ -487,7 +495,7 @@ export async function runClarificationGate(
         err(`clarification gate: failed to send Q${qnum} to Telegram`);
         return {
           ok: false,
-          exitCode: ExitCode.ClarifyCancelled,
+          exitCode: ExitCode.ClarifyTransportFailure,
           reason: `failed to send Q${qnum} to Telegram`,
         };
       }

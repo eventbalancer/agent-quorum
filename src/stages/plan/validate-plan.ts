@@ -117,6 +117,17 @@ function lineCountOf(file: string): number | undefined {
   }
 }
 
+function repositoryRelativeReference(projectRoot: string, file: string): string | undefined {
+  if (!path.isAbsolute(file)) {
+    return file;
+  }
+  const relative = path.relative(path.resolve(projectRoot), path.resolve(file));
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`)) {
+    return undefined;
+  }
+  return relative.split(path.sep).join('/');
+}
+
 interface ResolvePlanReferencesResult {
   readonly counters: ReferenceCounters;
   readonly findings: readonly Finding[];
@@ -154,17 +165,18 @@ function resolvePlanReferences(
     }
 
     let resolved: string;
-    const directPath = path.join(projectRoot, file);
+    const boundedFile = repositoryRelativeReference(projectRoot, file);
+    const directPath = boundedFile === undefined ? '' : path.join(projectRoot, boundedFile);
     if (existsSync(directPath) && statSync(directPath).isFile()) {
-      resolved = file;
+      resolved = boundedFile ?? file;
       counters.direct += 1;
     } else {
-      const pattern = suffixPattern(file);
+      const pattern = boundedFile === undefined ? undefined : suffixPattern(boundedFile);
       const matches =
         pattern === undefined ? [] : wsFiles.filter((candidate) => pattern.test(candidate));
       if (matches.length === 1) {
-        resolved = matches[0] ?? file;
-        if (file.includes('/')) {
+        resolved = matches[0] ?? boundedFile ?? file;
+        if ((boundedFile ?? file).includes('/')) {
           counters.suffix += 1;
         } else {
           counters.basename += 1;

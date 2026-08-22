@@ -128,10 +128,23 @@ export function runShowCli(args: readonly string[], out: Writer = stdout): numbe
     lines.push(
       `run ${resolved.runId} (${resolved.name}) — ${resolveRunState(resolved, systemProbes)}`,
     );
-    if (resolved.finalReadiness !== undefined) {
-      const readiness = resolved.finalReadiness;
+    if (
+      resolved.finalStatus !== undefined ||
+      resolved.structuralStatus !== undefined ||
+      resolved.finalReadiness !== undefined ||
+      resolved.finalConvergence !== undefined
+    ) {
       lines.push(`  final:   ${resolved.finalStatus ?? 'unknown'}`);
       lines.push(`  structural: ${resolved.structuralStatus ?? 'unknown'}`);
+    }
+    if (resolved.finalConvergence !== undefined) {
+      lines.push(`  decision: ${resolved.finalConvergence.decision}`);
+      lines.push(
+        `  reasons: ${resolved.finalConvergence.reasonCodes.length > 0 ? resolved.finalConvergence.reasonCodes.join(',') : 'none'}`,
+      );
+    }
+    if (resolved.finalReadiness !== undefined) {
+      const readiness = resolved.finalReadiness;
       lines.push(`  readiness: ${readinessLabel(readiness.ready)}`);
       lines.push(`  rationale: ${readiness.rationale}`);
     }

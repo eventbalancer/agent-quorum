@@ -50,6 +50,7 @@ export interface SystemRelationship {
   readonly authorityPath: string;
   readonly tokens: readonly string[];
   readonly ordering: SystemRelationshipOrdering;
+  readonly repositories: readonly string[];
 }
 
 export interface SystemFacts {
@@ -93,11 +94,20 @@ export interface SystemCheck {
   readonly planVersion: number;
   readonly planSha256: string;
   readonly systemDigest: string;
+  readonly required: boolean;
+  readonly boundaryRepositories: readonly string[];
   readonly passed: boolean;
   readonly crossRepository: boolean;
   readonly relationships: readonly SystemCheckRelationship[];
   readonly mismatches: readonly string[];
+  readonly requiredEvidenceUnavailable: readonly string[];
   readonly limitations: readonly string[];
+}
+
+export interface SystemCoverageOptions {
+  readonly required: boolean;
+  readonly inScope?: readonly string[];
+  readonly outOfScope?: readonly string[];
 }
 
 interface RepositoryEntry {
@@ -283,6 +293,7 @@ function relationship(
   authorityPath: string,
   tokens: readonly string[],
   ordering: SystemRelationship['ordering'],
+  repositories: readonly string[] = [],
 ): SystemRelationship {
   return {
     id: stableTupleId('R', [type, producer, consumer, [...tokens].sort()]),
@@ -292,6 +303,7 @@ function relationship(
     authorityPath,
     tokens: [...tokens],
     ordering,
+    repositories: [...new Set(repositories)].sort(),
   };
 }
 
@@ -304,7 +316,9 @@ function extractEcosystemRelationships(
   for (const repo of repositoryEntries) {
     for (const region of [...strings(value.regions), ...strings(repo.value.regions)]) {
       result.push(
-        relationship('deployment-region', repo.name, region, file, [repo.name, region], 'none'),
+        relationship('deployment-region', repo.name, region, file, [repo.name, region], 'none', [
+          repo.name,
+        ]),
       );
     }
     for (const dependency of strings(repo.value.depends_on)) {
@@ -316,6 +330,7 @@ function extractEcosystemRelationships(
           file,
           [dependency, repo.name],
           'producer-before-consumer',
+          [dependency, repo.name],
         ),
       );
     }
@@ -330,6 +345,7 @@ function extractEcosystemRelationships(
           file,
           [packageName ?? repo.name, consumer],
           'producer-before-consumer',
+          [repo.name, consumer],
         ),
       );
     }
@@ -343,12 +359,15 @@ function extractEcosystemRelationships(
           file,
           [image ?? repo.name, consumer],
           'producer-before-consumer',
+          [repo.name, consumer],
         ),
       );
     }
     for (const workflow of strings(repo.value.ci_triggers)) {
       result.push(
-        relationship('ci-trigger', repo.name, workflow, file, [repo.name, workflow], 'none'),
+        relationship('ci-trigger', repo.name, workflow, file, [repo.name, workflow], 'none', [
+          repo.name,
+        ]),
       );
     }
     const migrationCommands = strings(repo.value.migration_commands);
@@ -362,6 +381,7 @@ function extractEcosystemRelationships(
           file,
           [repo.name, executor, ...migrationCommands],
           'migration-before-deployment',
+          [repo.name],
         ),
       );
     }
@@ -374,6 +394,7 @@ function extractEcosystemRelationships(
           file,
           [repo.name, boundary],
           'none',
+          [repo.name],
         ),
       );
     }
@@ -381,7 +402,11 @@ function extractEcosystemRelationships(
       ...strings(repo.value.delivery_gates),
       ...strings(repo.value.production_gates),
     ]) {
-      result.push(relationship('delivery-gate', repo.name, gate, file, [repo.name, gate], 'none'));
+      result.push(
+        relationship('delivery-gate', repo.name, gate, file, [repo.name, gate], 'none', [
+          repo.name,
+        ]),
+      );
     }
     const stages = strings(repo.value.delivery_stages);
     for (const [index, stage] of stages.entries()) {
@@ -394,6 +419,7 @@ function extractEcosystemRelationships(
           file,
           [producer, stage],
           index === 0 ? 'none' : 'producer-before-consumer',
+          [repo.name],
         ),
       );
     }
@@ -476,6 +502,7 @@ function collectPackageManifest(
         packageFile,
         [repositoryName, manifest.name],
         'none',
+        [repositoryName],
       ),
     );
     const exportsValue = manifest.exports;
@@ -489,6 +516,7 @@ function collectPackageManifest(
           packageFile,
           [manifest.name, '.', exportsValue],
           'none',
+          [repositoryName],
         ),
       );
     } else if (isJsonObject(exportsValue)) {
@@ -503,6 +531,7 @@ function collectPackageManifest(
             packageFile,
             [manifest.name, exportName, serializedTarget],
             'none',
+            [repositoryName],
           ),
         );
       }
@@ -519,6 +548,7 @@ function collectPackageManifest(
             packageFile,
             [manifest.name, scriptName, command],
             'none',
+            [repositoryName],
           ),
         );
       }
@@ -564,6 +594,7 @@ function collectComposeFiles(
             composeFile,
             [serviceName, image],
             'none',
+            [repositoryName],
           ),
         );
         for (const dependency of strings(service.depends_on)) {
@@ -575,6 +606,7 @@ function collectComposeFiles(
               composeFile,
               [dependency, image],
               'producer-before-consumer',
+              [repositoryName],
             ),
           );
         }
@@ -588,6 +620,7 @@ function collectComposeFiles(
                 composeFile,
                 [dependency, image],
                 'producer-before-consumer',
+                [repositoryName],
               ),
             );
           }
@@ -630,6 +663,7 @@ function collectWorkflowFiles(
               workflowFile,
               [trigger, path.basename(workflowFile)],
               'none',
+              [repositoryName],
             ),
           );
         }
@@ -644,6 +678,7 @@ function collectWorkflowFiles(
               workflowFile,
               [trigger, path.basename(workflowFile)],
               'none',
+              [repositoryName],
             ),
           );
         }
@@ -660,6 +695,7 @@ function collectWorkflowFiles(
               workflowFile,
               [dependency, jobName],
               'producer-before-consumer',
+              [repositoryName],
             ),
           );
         }
@@ -672,6 +708,7 @@ function collectWorkflowFiles(
               workflowFile,
               [job.needs, jobName],
               'producer-before-consumer',
+              [repositoryName],
             ),
           );
         }
@@ -684,6 +721,7 @@ function collectWorkflowFiles(
               workflowFile,
               [job.uses, jobName],
               'producer-before-consumer',
+              [repositoryName],
             ),
           );
         }
@@ -767,6 +805,55 @@ function declaredRepositories(
   return entries.filter((entry) => repositoryPath(projectRoot, entry) === projectRoot);
 }
 
+function implementationScopeSource(source: string): string {
+  let excludedHeadingDepth: number | undefined;
+  let excludedLabel = false;
+  return source
+    .split(/\r?\n/)
+    .map((line) => {
+      const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+      if (heading !== null) {
+        const depth = heading[1]?.length ?? 0;
+        if (excludedHeadingDepth !== undefined && depth <= excludedHeadingDepth) {
+          excludedHeadingDepth = undefined;
+        }
+        excludedLabel = false;
+        if (
+          /^(?:out[- ]of[- ]scope|non[- ]goals?|exclusions?)\s*:?[\s#]*$/i.test(heading[2] ?? '')
+        ) {
+          excludedHeadingDepth = depth;
+          return '';
+        }
+      }
+      if (excludedHeadingDepth !== undefined) {
+        return '';
+      }
+      if (
+        /^\s*(?:\*\*)?(?:out[- ]of[- ]scope|non[- ]goals?|exclusions?)(?:\*\*)?\s*:\s*$/i.test(line)
+      ) {
+        excludedLabel = true;
+        return '';
+      }
+      if (/^\s*(?:\*\*)?in[- ]scope(?:\*\*)?\s*:\s*$/i.test(line)) {
+        excludedLabel = false;
+      }
+      if (excludedLabel) {
+        return '';
+      }
+      if (
+        /\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(line) &&
+        (/\b(?:not|no|without)\b.{0,48}\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(line) ||
+          /\b(?:cross|multi)[- ]repositor(?:y|ies)\b.{0,48}\b(?:excluded|not applicable|not required|out[- ]of[- ]scope)\b/i.test(
+            line,
+          ))
+      ) {
+        return '';
+      }
+      return line;
+    })
+    .join('\n');
+}
+
 function explicitlyRequestsCrossRepositoryScope(source: string): boolean {
   return (
     /\b(?:cross|multi)[- ]repositor(?:y|ies)\b/i.test(source) ||
@@ -803,14 +890,15 @@ export function buildSystemContext(input: BuildSystemContextInput): SystemContex
     sourceRaw = readFileSync(sourceFile, 'utf8');
     sources.push({ path: sourceFile, sha256: sha256(sourceRaw) });
   }
-  const explicitlyCrossRepository = explicitlyRequestsCrossRepositoryScope(sourceRaw);
+  const scopedSource = implementationScopeSource(sourceRaw);
+  const explicitlyCrossRepository = explicitlyRequestsCrossRepositoryScope(scopedSource);
   const ecosystem = path.join(input.projectRoot, 'ecosystem.yaml');
   if (existsSync(ecosystem)) {
     const raw = addSource(sources, ecosystem) ?? '';
     try {
       const root = yamlObject(raw);
       const repoEntries = repositories(root);
-      const scopedRepositories = declaredRepositories(input.projectRoot, sourceRaw, repoEntries);
+      const scopedRepositories = declaredRepositories(input.projectRoot, scopedSource, repoEntries);
       declaredScope.push(...scopedRepositories.map((repo) => repo.name));
       regions.push(...strings(root.regions));
       migrationCommands.push(...strings(root.migration_commands));
@@ -839,6 +927,7 @@ export function buildSystemContext(input: BuildSystemContextInput): SystemContex
               dependency.file,
               [dependency.name, dependency.owner],
               'producer-before-consumer',
+              [producer, dependency.owner],
             ),
           );
         }
@@ -1233,17 +1322,87 @@ function notApplicableEvidenceStatus(
   return 'unanchored';
 }
 
+function frozenScopeMentions(entries: readonly string[], value: string): boolean {
+  if (value.trim() === '') {
+    return false;
+  }
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const token = new RegExp(`(?:^|[^A-Za-z0-9_@-])${escaped}(?=$|[^A-Za-z0-9_@-])`, 'i');
+  return entries.some((entry) => token.test(entry));
+}
+
+function frozenBoundaryRepositories(
+  context: SystemContext,
+  options: SystemCoverageOptions,
+): string[] {
+  if (options.inScope === undefined) {
+    return [...context.declaredScope];
+  }
+  const candidates = new Set([
+    ...context.declaredScope,
+    ...context.relationships.flatMap((edge) => edge.repositories),
+  ]);
+  return [...candidates]
+    .filter(
+      (repository) =>
+        frozenScopeMentions(options.inScope ?? [], repository) &&
+        !frozenScopeMentions(options.outOfScope ?? [], repository),
+    )
+    .sort();
+}
+
+function relationshipWithinFrozenBoundary(
+  relationship: SystemRelationship,
+  boundaryRepositories: ReadonlySet<string>,
+  hasFrozenBoundary: boolean,
+): boolean {
+  if (!hasFrozenBoundary) {
+    return true;
+  }
+  if (relationship.repositories.length === 0) {
+    return boundaryRepositories.size >= 2;
+  }
+  return relationship.repositories.every((repository) => boundaryRepositories.has(repository));
+}
+
+function limitationWithinFrozenBoundary(
+  limitation: string,
+  repositoryCandidates: readonly string[],
+  boundaryRepositories: ReadonlySet<string>,
+): boolean {
+  const relatedRepositories = repositoryCandidates.filter((repository) =>
+    frozenScopeMentions([limitation], repository),
+  );
+  return (
+    relatedRepositories.length === 0 ||
+    relatedRepositories.some((repository) => boundaryRepositories.has(repository))
+  );
+}
+
 export function validateSystemCoverage(
   context: SystemContext,
   planFile: string,
   planVersion: number,
+  options?: SystemCoverageOptions,
 ): SystemCheck {
   const plan = readFileSync(planFile, 'utf8');
   const rows = systemCoverageRows(plan);
   const planOutsideCoverage = withoutMarkdownSection(plan, 'System Coverage');
   const checks: SystemCheckRelationship[] = [];
   const mismatches: string[] = [];
-  const applicableRelationships = context.crossRepository ? context.relationships : [];
+  const requiredEvidenceUnavailable: string[] = [];
+  const required = options?.required ?? context.crossRepository;
+  const boundaryRepositories =
+    options === undefined
+      ? [...context.declaredScope]
+      : frozenBoundaryRepositories(context, options);
+  const boundaryRepositorySet = new Set(boundaryRepositories);
+  const hasFrozenBoundary = options?.inScope !== undefined;
+  const applicableRelationships = required
+    ? context.relationships.filter((edge) =>
+        relationshipWithinFrozenBoundary(edge, boundaryRepositorySet, hasFrozenBoundary),
+      )
+    : [];
   for (const edge of applicableRelationships) {
     const matches = rows.get(edge.id) ?? [];
     if (matches.length === 0) {
@@ -1303,27 +1462,58 @@ export function validateSystemCoverage(
       evidence,
     });
   }
-  if (context.crossRepository && context.relationships.length === 0) {
-    mismatches.push('cross-repository-scope:relationships-unavailable');
-  }
-  for (const limitation of context.limitations) {
-    if (
-      limitation.startsWith('malformed-authoritative-') ||
-      limitation.startsWith('repository-path-outside-project:') ||
-      context.crossRepository
-    ) {
-      mismatches.push(`authoritative-limitation:${limitation}`);
+  if (options === undefined) {
+    if (context.crossRepository && context.relationships.length === 0) {
+      mismatches.push('cross-repository-scope:relationships-unavailable');
+    }
+    for (const limitation of context.limitations) {
+      if (
+        limitation.startsWith('malformed-authoritative-') ||
+        limitation.startsWith('repository-path-outside-project:') ||
+        context.crossRepository
+      ) {
+        mismatches.push(`authoritative-limitation:${limitation}`);
+      }
+    }
+  } else if (required) {
+    if (hasFrozenBoundary && boundaryRepositories.length < 2) {
+      requiredEvidenceUnavailable.push('frozen-boundary:cross-repository-scope-unresolved');
+    } else if (applicableRelationships.length === 0) {
+      requiredEvidenceUnavailable.push(
+        hasFrozenBoundary
+          ? 'frozen-boundary:relationships-unavailable'
+          : 'cross-repository-scope:relationships-unavailable',
+      );
+    }
+    const repositoryCandidates = [
+      ...new Set([
+        ...context.declaredScope,
+        ...context.relationships.flatMap((edge) => edge.repositories),
+      ]),
+    ];
+    for (const limitation of context.limitations) {
+      if (
+        !hasFrozenBoundary ||
+        limitationWithinFrozenBoundary(limitation, repositoryCandidates, boundaryRepositorySet)
+      ) {
+        requiredEvidenceUnavailable.push(`authoritative-limitation:${limitation}`);
+      }
     }
   }
+  const uniqueMismatches = [...new Set(mismatches)].sort();
+  const uniqueUnavailableEvidence = [...new Set(requiredEvidenceUnavailable)].sort();
   return {
     schemaVersion: 1,
     planVersion,
     planSha256: sha256(plan),
     systemDigest: context.digest,
-    passed: mismatches.length === 0,
+    required,
+    boundaryRepositories,
+    passed: uniqueMismatches.length === 0 && uniqueUnavailableEvidence.length === 0,
     crossRepository: context.crossRepository,
     relationships: checks,
-    mismatches: [...new Set(mismatches)].sort(),
+    mismatches: uniqueMismatches,
+    requiredEvidenceUnavailable: uniqueUnavailableEvidence,
     limitations: context.limitations,
   };
 }

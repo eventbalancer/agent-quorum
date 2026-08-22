@@ -94,6 +94,23 @@ describe('validate_final_plan', () => {
     expect(findings.unresolved[0]?.file).toBe('missing.md');
   });
 
+  it('resolves absolute references only when they remain inside the repository boundary', () => {
+    const outside = path.join(tmp, 'outside.md');
+    writeFileSync(outside, 'one\n');
+    const plan = path.join(tmp, 'absolute.final.md');
+    writeFileSync(
+      plan,
+      `# Plan\n\nRefs: \`file-line:${path.join(projectRoot, 'direct.md')}:1\`, \`file-line:${outside}:1\`.\n`,
+    );
+
+    expect(runValidate(plan)).toBe(0);
+
+    const findings = readFindings();
+    expect(findings.stale_lines).toHaveLength(0);
+    expect(findings.ambiguous).toHaveLength(0);
+    expect(findings.unresolved).toEqual([{ file: outside, line: 1 }]);
+  });
+
   it('exits 5 on workspace-rule violations', () => {
     const plan = path.join(tmp, 'violating.final.md');
     writeFileSync(plan, '# Plan\n\n```sh\npnpm -r test\n```\n');

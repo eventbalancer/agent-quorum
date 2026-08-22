@@ -13,6 +13,52 @@ interface PlanFrontmatterPhase {
   readonly effort: string;
 }
 
+const FIXTURE_RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+] as const;
+
+export interface FixtureMaterialQuestion {
+  readonly id: string;
+  readonly question: string;
+  readonly rationale: string;
+  readonly options: readonly string[];
+}
+
+export function writeReadinessAssessment(
+  file: string,
+  highRisk = false,
+  materialQuestions: readonly FixtureMaterialQuestion[] = [],
+): void {
+  writeJsonFixture(file, {
+    boundary: {
+      goal: 'Produce the fixture implementation plan.',
+      in_scope: ['fixture implementation'],
+      out_of_scope: ['unrelated fixture behavior'],
+      constraints: ['preserve fixture contracts'],
+    },
+    domain_assessments: FIXTURE_RISK_DOMAINS.map((domain) => ({
+      domain,
+      applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+      risk: highRisk && domain === 'correctness' ? 'high' : 'standard',
+      rationale: `Fixture assessment for ${domain}.`,
+      evidence_refs: [],
+    })),
+    material_questions: materialQuestions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      rationale: question.rationale,
+      options: [...question.options],
+    })),
+  });
+}
+
 export interface WriteStructuredPlanOptions {
   readonly frontmatter?: boolean;
   readonly status?: 'clean' | 'needs-review' | 'blocked';
@@ -205,6 +251,17 @@ export function writeCritique(file: string, issues: JsonValue[]): void {
     plan_version: 0,
     summary: 'fixture critique',
     issues,
+    domain_assessments: FIXTURE_RISK_DOMAINS.map((domain) => ({
+      domain,
+      applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+      risk: 'standard',
+      complete: true,
+      rationale: `Fixture review for ${domain}.`,
+      unavailable_evidence: [],
+      evidence_refs: [],
+    })),
+    boundary_challenges: [],
+    opportunities: [],
     review: {
       considered_context: [
         'original-scope',

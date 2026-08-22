@@ -157,7 +157,10 @@ export function critiqueHealth(
     }
     const obj = isJsonObject(issue) ? issue : {};
     total += 1;
-    if (!evidenceIsAnchored(obj.evidence)) {
+    if (
+      !evidenceIsAnchored(obj.evidence) &&
+      !evidenceReferencesStructurallyValid(obj.evidence_refs)
+    ) {
       unanchored += 1;
     }
     if (!toText(obj.id)) {
@@ -256,7 +259,7 @@ export function evidenceReferencesGrounded(
   return (
     evidenceReferencesStructurallyValid(value) &&
     Array.isArray(value) &&
-    value.every(
+    value.some(
       (entry) =>
         isJsonObject(entry) &&
         typedEvidenceTargetExists(entry, context.work, planVersion, context.projectRoot),
@@ -279,12 +282,15 @@ function evidenceFormatMismatch(ref: Record<string, JsonValue>): boolean {
 }
 
 function containsEvidenceToken(text: string, token: string): boolean {
-  const normalized = token.trim();
+  const comparableText = text.replace(/`+/g, '');
+  const normalized = token.replace(/`+/g, '').trim();
   if (normalized === '') {
     return false;
   }
   const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|[^A-Za-z0-9_@/.:-])${escaped}(?=$|[^A-Za-z0-9_@/.:-])`, 'i').test(text);
+  return new RegExp(`(?:^|[^A-Za-z0-9_@/.:-])${escaped}(?=$|[^A-Za-z0-9_@/.:-])`, 'i').test(
+    comparableText,
+  );
 }
 
 export function planPhaseGateExists(plan: string, phase: string, gate: string): boolean {
@@ -471,10 +477,7 @@ function issueGrounding(
       return { kind: 'format-mismatch', evidenceKinds: kinds };
     }
     return {
-      kind: refs.every(
-        (ref) =>
-          typedEvidenceSyntax(ref) && typedEvidenceTargetExists(ref, work, iter, projectRoot),
-      )
+      kind: evidenceReferencesGrounded(issue.evidence_refs, { work, projectRoot }, iter)
         ? 'grounded'
         : 'malformed',
       evidenceKinds: kinds,

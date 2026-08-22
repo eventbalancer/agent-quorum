@@ -6,6 +6,7 @@ import {
   type ContextReduction,
   writeConvergenceState,
 } from '../../core/convergence.js';
+import { readReadinessContract } from '../../core/readiness-contract.js';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { operatorInterventionsContext } from './interventions.js';
 import type { RunContext } from '../../core/run-context.js';
@@ -320,6 +321,30 @@ function retainedHistory(ctx: RunContext, planVersion: number, mode: 'compact' |
   ].join('\n\n');
 }
 
+function readinessContractContext(ctx: RunContext): string {
+  const file = path.join(ctx.work, 'readiness-contract.json');
+  if (!existsSync(file)) {
+    return 'Readiness contract is not frozen yet; this is the pre-plan assessment pass.';
+  }
+  try {
+    const contract = readReadinessContract(file);
+    return JSON.stringify(
+      {
+        contractDigest: contract.contractDigest,
+        boundary: contract.boundary,
+        appetite: contract.appetite,
+        initialDomainAssessments: contract.domainAssessments,
+        unresolvedMaterialQuestions: contract.unresolvedMaterialQuestions,
+        operatorDecisionIds: contract.operatorDecisionIds,
+      },
+      null,
+      2,
+    );
+  } catch {
+    return 'Readiness contract exists but failed validation. Treat its evidence as unavailable.';
+  }
+}
+
 function skillAndSchemaBytes(skillFile: string, schemaFile: string): number {
   return Buffer.byteLength(readIfPresent(skillFile)) + Buffer.byteLength(readIfPresent(schemaFile));
 }
@@ -351,6 +376,9 @@ export function buildRetainedRoleContext(
     `quality_promise: ${ctx.convergence.promise}`,
     `required_proof_level: ${ctx.convergence.requiredProofLevel}`,
     `requires_exhaustive_scan: ${String(ctx.convergence.requiresExhaustiveScan)}`,
+    `readiness_decision: ${ctx.convergence.decision}`,
+    `judge_allowed_by_appetite: ${String(ctx.convergence.judgeAllowed)}`,
+    `exhaustive_applicable_domains: ${String(ctx.convergence.exhaustiveApplicableDomains)}`,
     `iteration_limit: ${ctx.settings.maxIters}`,
     `issue_budget: ${ctx.convergence.issueBudget.limit}`,
     `exhausted_limits: ${ctx.convergence.exhaustedLimits.join(', ') || 'none'}`,
@@ -360,6 +388,8 @@ export function buildRetainedRoleContext(
     `scope_coverage_vocabulary: ${CRITIC_SCOPE_COVERAGE_VOCABULARY.join(', ')}`,
     '### Original scope',
     originalScope(ctx),
+    '### Frozen readiness boundary and appetite',
+    readinessContractContext(ctx),
     '### Authoritative system facts',
     systemFacts(ctx),
     '### Operator decisions and interventions',

@@ -33,10 +33,28 @@ interface SanitizedUpdate {
 interface SanitizedCritiqueIssue {
   id: string;
   addresses: string | null;
+  evidence_refs?: unknown[];
+}
+
+interface SanitizedCritiqueOpportunity {
+  fingerprint: string;
+  claim: string;
+  evidence: string;
+  suggested_improvement: string;
+  evidence_refs: unknown[];
 }
 
 interface SanitizedCritique {
   issues: SanitizedCritiqueIssue[];
+  domain_assessments: unknown[];
+  boundary_challenges: unknown[];
+  opportunities: SanitizedCritiqueOpportunity[];
+  review?: {
+    issue_budget?: {
+      used: number;
+      exhausted: boolean;
+    };
+  };
 }
 
 function writeJson(name: string, value: unknown): string {
@@ -127,6 +145,19 @@ describe('sanitizers', () => {
           category: 'correctness',
           claim: 'c',
           evidence: 'e',
+          evidence_refs: [
+            {
+              kind: 'plan-section',
+              value: 'Descriptive evidence for the section.',
+              section: 'Work Plan',
+              phase: 'P1 Work',
+            },
+            {
+              kind: 'phase-gate',
+              phase: 'P3 - Report and Status Projection',
+              gate: 'Acceptance gate',
+            },
+          ],
           suggested_fix: 'f',
           confidence: 0.9,
           duplicate_of: null,
@@ -134,7 +165,7 @@ describe('sanitizers', () => {
         {
           id: 'C2',
           addresses: 'v0.C1',
-          severity: 'minor',
+          severity: 'major',
           category: 'clarity',
           claim: 'c',
           evidence: 'e',
@@ -155,6 +186,126 @@ describe('sanitizers', () => {
     expect(result.issues[1]?.id).toBe('C2');
     expect(result.issues[1]?.addresses).toBe('v0.C1');
     expect(result.issues.every((issue) => /^C[0-9]+$/.test(issue.id))).toBe(true);
+    expect(result.issues[0]?.evidence_refs).toEqual([
+      { kind: 'plan-section', section: 'Work Plan' },
+      { kind: 'phase-gate', phase: 'P3', gate: 'Acceptance gate' },
+    ]);
+    expect(result.domain_assessments).toEqual([]);
+    expect(result.boundary_challenges).toEqual([]);
+    expect(result.opportunities).toEqual([]);
+  });
+
+  it('moves legacy minor and nit issues into non-blocking opportunities', () => {
+    const file = writeJson('legacy-opportunities.json', {
+      plan_version: 2,
+      summary: 'Only optional improvements remain.',
+      issues: [
+        {
+          id: 'C1',
+          addresses: null,
+          severity: 'minor',
+          category: 'clarity',
+          claim: 'Name the local verification gate.',
+          evidence: '## Verification',
+          evidence_refs: [{ kind: 'plan-section', section: 'Verification' }],
+          suggested_fix: 'Add the gate name.',
+          confidence: 0.9,
+          duplicate_of: null,
+        },
+        {
+          id: 'C2',
+          addresses: null,
+          severity: 'nit',
+          category: 'convention',
+          claim: 'Shorten the orientation paragraph.',
+          evidence: '## At a Glance',
+          suggested_fix: 'Remove repeated context.',
+          confidence: 0.8,
+          duplicate_of: null,
+        },
+      ],
+      review: {
+        considered_context: [
+          'original-scope',
+          'authoritative-system-facts',
+          'operator-decisions',
+          'material-findings',
+          'active-invariants',
+          'quality-and-limits',
+        ],
+        invariant_assessments: [],
+        scope_coverage: ['original-scope'],
+        issue_budget: { limit: 8, used: 2, exhausted: true },
+        scan_complete: true,
+        unresolved_coverage: [],
+      },
+    });
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(false);
+    const capture = captureStderr();
+    try {
+      sanitizeCritiqueJson(file, 2);
+      expect(capture.text()).toContain('moving 2 non-material critique issue(s)');
+    } finally {
+      capture.restore();
+    }
+
+    const result = readJson(file) as SanitizedCritique;
+    expect(result.issues).toEqual([]);
+    expect(result.review?.issue_budget?.used).toBe(0);
+    expect(result.review?.issue_budget?.exhausted).toBe(false);
+    expect(result.opportunities).toHaveLength(2);
+    expect(result.opportunities[0]).toMatchObject({
+      claim: 'Name the local verification gate.',
+      evidence: '## Verification',
+      suggested_improvement: 'Add the gate name.',
+      evidence_refs: [{ kind: 'plan-section', section: 'Verification' }],
+    });
+    expect(result.opportunities[0]?.fingerprint).toMatch(/^O-[a-f0-9]{64}$/);
+    expect(result.opportunities[1]?.evidence_refs).toEqual([]);
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(true);
+  });
+
+  it('preserves bounded-readiness critic arrays and fills missing opportunity fields', () => {
+    const domainAssessment = {
+      domain: 'security-privacy-authorization',
+      applicability: 'applicable',
+      risk: 'high',
+      complete: false,
+      rationale: 'The plan changes authorization but the policy source is unavailable.',
+      unavailable_evidence: ['authorization policy'],
+      evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+    };
+    const boundaryChallenge = {
+      id: 'B1',
+      kind: 'scope-expansion',
+      claim: 'The authorization service must enter scope.',
+      rationale: 'The scoped API cannot enforce the required policy alone.',
+      evidence: '## Out of Scope',
+      evidence_refs: [{ kind: 'plan-section', section: 'Out of Scope' }],
+    };
+    const file = writeJson('bounded-readiness.json', {
+      plan_version: 1,
+      summary: 'A boundary decision is required.',
+      issues: [],
+      domain_assessments: [domainAssessment],
+      boundary_challenges: [boundaryChallenge],
+      opportunities: [
+        {
+          claim: 'Add a navigation link.',
+          evidence: '## Verification',
+          suggested_improvement: 'Link to the verification section.',
+        },
+      ],
+    });
+
+    sanitizeCritiqueJson(file, 1);
+
+    const result = readJson(file) as SanitizedCritique;
+    expect(result.domain_assessments).toEqual([domainAssessment]);
+    expect(result.boundary_challenges).toEqual([boundaryChallenge]);
+    expect(result.opportunities[0]?.fingerprint).toMatch(/^O-[a-f0-9]{64}$/);
+    expect(result.opportunities[0]?.evidence_refs).toEqual([]);
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(true);
   });
 
   it('combine_update_json assembles markdown and metadata', () => {
@@ -182,7 +333,14 @@ describe('sanitizers', () => {
       issue_id: 'C1',
       scope: 'local',
       rationale: 'The evidence limits this finding to the Work Plan section.',
-      evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      evidence_refs: [
+        {
+          kind: 'plan-section',
+          value: 'The issue was corrected in the planned phase.',
+          section: 'Work Plan',
+          phase: 'P1 Work',
+        },
+      ],
       invariant: null,
     };
     const issue = {
@@ -217,9 +375,9 @@ describe('sanitizers', () => {
 
     for (const file of [update, meta, combined]) {
       const result = readJson(file) as SanitizedUpdate;
-      expect(result.systemic_dispositions?.[0]?.evidence_refs).toEqual(
-        systemicDisposition.evidence_refs,
-      );
+      expect(result.systemic_dispositions?.[0]?.evidence_refs).toEqual([
+        { kind: 'plan-section', section: 'Work Plan' },
+      ]);
     }
     expect(schemaValidQuiet(update, skills.creatorSchema)).toBe(true);
     expect(schemaValidQuiet(meta, skills.creatorMetaSchema)).toBe(true);

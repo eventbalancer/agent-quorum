@@ -513,6 +513,11 @@ describe('cumulative convergence acceptance', () => {
         invariant_id: null;
         introduced_by_revision: null;
       }[];
+      opportunities: {
+        fingerprint: string;
+        claim: string;
+        evidence_refs: { kind: string; section: string }[];
+      }[];
     };
     const prompt = readFileSync(promptCapture, 'utf8');
     expect(result).toEqual({ iter: 0, converged: true });
@@ -521,10 +526,11 @@ describe('cumulative convergence acceptance', () => {
       considered_context: [...REQUIRED_CONTEXT],
       scan_complete: true,
     });
-    expect(parsed.issues[0]).toMatchObject({
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.opportunities[0]?.fingerprint).toMatch(/^O-[a-f0-9]{64}$/);
+    expect(parsed.opportunities[0]).toMatchObject({
+      claim: 'The target-state wording can be more explicit.',
       evidence_refs: PLAN_SECTION_EVIDENCE,
-      invariant_id: null,
-      introduced_by_revision: null,
     });
     expect(prompt).toContain('## JSON schema');
     expect(prompt).toContain('"invariant_assessments"');

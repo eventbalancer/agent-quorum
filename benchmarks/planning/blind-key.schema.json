@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "suiteId", "seed", "assignments"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "seed": { "type": "string", "minLength": 1 },
+    "assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["taskId", "candidateLabel", "comparisonLabel"],
+        "properties": {
+          "taskId": { "type": "string", "minLength": 1 },
+          "candidateLabel": { "enum": ["A", "B"] },
+          "comparisonLabel": { "enum": ["A", "B"] }
+        }
+      }
+    }
+  }
+}
