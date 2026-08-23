@@ -100,27 +100,32 @@ existing focused suite passes.
    values with identity fields unchanged and patch fields updated.
 2. Add a malformed-target case that records the original bytes, calls
    `finalizeRunRecord`, and proves the target remains byte-identical.
-3. Add a focused filesystem-call test using a hoisted `node:fs` Vitest mock in a
+3. Add separate nonexistent-target and `readFileSync` failure cases. Assert that
+   finalization returns without error, performs no replacement write or rename,
+   and leaves the target state unchanged.
+4. Add a focused filesystem-call test using a hoisted `node:fs` Vitest mock in a
    separate unit-test module. Delegate to the real filesystem while recording
    `writeFileSync` and `renameSync`; assert only that both functions were called,
    without checking their target paths or relative order. Keep the helper
    private.
-4. Make failure propagation unconditional and observable. Create an accepted
+5. Make failure propagation unconditional and observable. Create an accepted
    test record whose enumerable nested `final` projection contains a
    self-reference through a narrowly scoped test-only cast; native
    `JSON.stringify` must throw before either filesystem mock is called. Configure
    the same hoisted mock to throw a sentinel error once from the temporary
    `writeFileSync` and once from `renameSync`. For all three cases, assert the
    original error reaches the caller, the final `.json` bytes stay unchanged,
-   and no later filesystem operation occurs. Preserve the current temporary-file
-   residue behavior after rename failure rather than adding cleanup semantics.
-5. Run `pnpm exec vitest run tests/unit/run-store.test.ts` plus the focused mock
+   and no later filesystem operation occurs. For rename failure, also assert the
+   written temporary path and its serialized merged payload remain present; do
+   not add cleanup semantics.
+6. Run `pnpm exec vitest run tests/unit/run-store.test.ts` plus the focused mock
    module, followed by `pnpm run check` and `pnpm run test`.
 
-Acceptance gate: tests prove complete old/new JSON, byte-preserving malformed
-no-op behavior, filesystem-call coverage, unconditional serializer/write/rename
-error propagation without final-path publication, the unchanged round trip, and
-a green repository verification floor.
+Acceptance gate: tests prove complete old/new JSON, byte-preserving
+malformed/missing/unreadable no-op behavior, filesystem-call coverage,
+unconditional serializer/write/rename error propagation without final-path
+publication, preserved rename-failure residue, the unchanged round trip, and a
+green repository verification floor.
 
 ## Files and Interfaces
 
@@ -133,12 +138,14 @@ a green repository verification floor.
 ## Verification
 
 - Focused run-store tests prove the existing create/finalize/read contract.
-- The malformed fixture proves an unreadable reserved record is never replaced.
+- The malformed, missing, and read-error fixtures prove every current no-op
+  boundary performs no replacement write or rename.
 - The delegating filesystem mock proves the write and rename calls occur without
   asserting their targets or relative order.
 - The cyclic nested-value case proves serialization failure occurs before any
   write, while sentinel write/rename errors prove unchanged propagation and
-  final-path bytes for both filesystem failure boundaries.
+  final-path bytes for both filesystem failure boundaries; rename failure also
+  preserves the existing temporary residue and payload.
 - `pnpm run check` proves build, formatting, lint, and types.
 - `pnpm run test` proves repository integration remains intact.
 
