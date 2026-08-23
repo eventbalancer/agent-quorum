@@ -45,6 +45,7 @@ describe('package exports (ESM + CJS consumability)', () => {
       "if (typeof aq.runPlanLoop !== 'function') throw new Error('runPlanLoop missing');" +
       "if (typeof aq.launchPlanLoop !== 'function') throw new Error('launchPlanLoop missing');" +
       "if (typeof aq.getRunStatus !== 'function') throw new Error('getRunStatus missing');" +
+      "if (aq.RUN_RECORD_SCHEMA_VERSION !== 1) throw new Error('run record schema missing');" +
       "const pkg = require.resolve('agent-quorum/package.json');" +
       "if (!pkg.endsWith('package.json')) throw new Error('package.json not resolved');";
     const result = runConsumer(['-e', script]);
@@ -60,22 +61,40 @@ describe('package exports (ESM + CJS consumability)', () => {
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   });
 
-  it('publishes additive final readiness and convergence types without narrowing legacy records', () => {
+  it('publishes the current final projection and removes legacy convergence fields', () => {
     const consumer = path.join(tempDir, 'consumer.ts');
     writeFileSync(
       consumer,
-      "import type { CompletenessPromise, ConvergenceLimit, ConvergenceReport, FinalReadiness, ReadinessDecision, RiskDomain, RunFinalStatus, RunRecord, RunResult } from 'agent-quorum';\n" +
-        "const status: RunFinalStatus = 'needs-review';\n" +
-        "const readiness: FinalReadiness = { evaluated: false, ready: null, rationale: 'unknown', planSha256: 'a'.repeat(64) };\n" +
+      "import type { CompletenessPromise, FinalProjection, JudgeProofProjection, OccurrenceCoverageProjection, OccurrenceSourceProjection, ReadinessDecision, ReadinessLimit, ReadinessProofProjection, RiskDomain, RunFinalStatus, RunRecord, RunResult } from 'agent-quorum';\n" +
+        '// @ts-expect-error legacy convergence types are no longer public\n' +
+        "import type { ConvergenceReport } from 'agent-quorum';\n" +
+        '// @ts-expect-error compatibility convergence limits are no longer public\n' +
+        "import type { ConvergenceLimit } from 'agent-quorum';\n" +
+        '// @ts-expect-error flat final readiness is no longer public\n' +
+        "import type { FinalReadiness } from 'agent-quorum';\n" +
+        'declare const final: FinalProjection;\n' +
+        'const status: RunFinalStatus = final.status;\n' +
         "const promise: CompletenessPromise = 'cumulative';\n" +
-        "const limit: ConvergenceLimit = 'iteration-cap';\n" +
-        "const decision: ReadinessDecision = 'unable-to-decide';\n" +
+        "const limit: ReadinessLimit = 'iteration-cap';\n" +
+        'const decision: ReadinessDecision = final.readiness.decision;\n' +
         "const domain: RiskDomain = 'correctness';\n" +
-        "const convergence: ConvergenceReport = { promise, satisfied: false, artifactPath: '/tmp/convergence.final.json', exhaustedLimits: [limit], unresolvedCoverage: ['plan.v1:review'], decision, reasonCodes: ['iteration-cap'], applicableRiskDomains: [domain], highRiskDomains: [], opportunityCount: 0 };\n" +
-        "const result: Pick<RunResult, 'convergence'> = { convergence };\n" +
-        "const durable: Pick<RunRecord, 'finalConvergence'> = { finalConvergence: convergence };\n" +
-        "const legacy: Pick<RunRecord, 'finalStatus'> = { finalStatus: 'legacy-status' };\n" +
-        'void [status, readiness, promise, limit, decision, domain, convergence, result, durable, legacy];\n',
+        'const readiness: ReadinessProofProjection = final.readiness;\n' +
+        'const coverage: OccurrenceCoverageProjection = readiness.occurrenceCoverage;\n' +
+        'const source: OccurrenceSourceProjection | undefined = coverage.sources[0];\n' +
+        'const judge: JudgeProofProjection = final.judge;\n' +
+        '// @ts-expect-error final projections are readonly\n' +
+        "final.status = 'clean';\n" +
+        '// @ts-expect-error occurrence projections expose readonly arrays\n' +
+        "coverage.reasonCodes.push('mutated');\n" +
+        "const result: Pick<RunResult, 'final'> = { final };\n" +
+        "const durable: Pick<RunRecord, 'schemaVersion' | 'final'> = { schemaVersion: 1, final };\n" +
+        'declare const runResult: RunResult;\n' +
+        '// @ts-expect-error flat final status was removed\n' +
+        'runResult.status;\n' +
+        'declare const record: RunRecord;\n' +
+        '// @ts-expect-error durable flat convergence was removed\n' +
+        'record.finalConvergence;\n' +
+        'void [status, promise, limit, decision, domain, readiness, coverage, source, judge, result, durable];\n',
     );
     const result = runConsumer([
       path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),

@@ -10,981 +10,1033 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { archiveResumeStale, lastStablePlan, prepareResume } from '../../src/stages/plan/resume.js';
 import { resolveResumeWorkdir } from '../../src/core/resume.js';
+import { admitCreatorUpdate } from '../../src/core/readiness-admission.js';
 import type { ResumeState, RunContext } from '../../src/core/run-context.js';
-import { HaltError } from '../../src/runtime/halt.js';
-import { captureStderr, writeStructuredPlanFile, writeUpdate } from '../helpers/harness.js';
-import { Scratch } from '../../src/runtime/scratch.js';
-import { makeTestRunContext } from '../helpers/test-context.js';
 import {
-  applyReadinessPolicy,
-  classifyTerminal,
-  createConvergenceState,
-  fileSha256,
-  readConvergenceState,
-  recordCreatorUpdate,
-  recordCritique,
-  recordSystemCheck,
-  writeConvergenceState,
-} from '../../src/core/convergence.js';
-import { qualityMatrix } from '../../src/core/quality.js';
-import { validateSystemCoverage, writeSystemCheck } from '../../src/core/system-context.js';
+  applyFrozenReadinessContract,
+  bindCanonicalPlan,
+  bindVersionedPlan,
+  createOccurrenceSourceBinding,
+  createReadinessProofCatalog,
+  createReadinessProofState,
+  recordAdmittedCreatorUpdate,
+  recordAdmittedCritique,
+  recordAdmittedFixReviewerProof,
+  recordAdmittedJudgeProof,
+  recordInterventions,
+  recordSystemProof,
+  reduceReadinessProofState,
+  setOccurrenceSourceRequirement,
+  type OccurrenceCoverageSnapshot,
+  type ReadinessProofState,
+} from '../../src/core/readiness-proof.js';
+import { writeReadinessProofState } from '../../src/core/readiness-store.js';
 import {
   buildReadinessContract,
   RISK_DOMAINS,
   writeFrozenReadinessContract,
+  type ReadinessContract,
 } from '../../src/core/readiness-contract.js';
+import { fileSha256, sha256 } from '../../src/core/digest.js';
+import type { JsonValue } from '../../src/core/json.js';
+import { validateSystemCoverage, writeSystemCheck } from '../../src/core/system-context.js';
+import { HaltError } from '../../src/runtime/halt.js';
+import { Scratch } from '../../src/runtime/scratch.js';
+import { archiveResumeStale, lastStablePlan, prepareResume } from '../../src/stages/plan/resume.js';
+import {
+  captureStderr,
+  writeAcceptUpdate,
+  writeCritique,
+  writeStructuredPlanFile,
+  writeUpdate,
+} from '../helpers/harness.js';
+import { TEST_SOURCE_DIGEST, makeTestRunContext } from '../helpers/test-context.js';
 
 let tmp: string;
 let work: string;
-let schema: string;
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-resumetest.'));
   work = path.join(tmp, 'work');
   mkdirSync(work);
-  schema = path.join(tmp, 'update.schema.json');
-  writeFileSync(
-    schema,
-    `${JSON.stringify({ required: ['plan_version', 'plan_markdown'] }, null, 2)}\n`,
-  );
 });
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-function bindFrozenReadinessContract(ctx: RunContext, state = ctx.convergence): void {
-  const contract = buildReadinessContract({
+interface ProofFixtureOptions {
+  readonly planVersion?: number;
+  readonly highRisk?: boolean;
+  readonly reviewed?: boolean;
+  readonly deterministic?: boolean;
+  readonly authoritativeDigest?: string;
+  readonly materialQuestionIds?: readonly string[];
+}
+
+interface ProofFixture {
+  readonly contract: ReadinessContract;
+  readonly state: ReadinessProofState;
+  readonly planFile: string;
+  readonly proofFile: string;
+}
+
+function fixtureContract(
+  state: ReadinessProofState,
+  highRisk: boolean,
+  materialQuestionIds: readonly string[] = [],
+): ReadinessContract {
+  return buildReadinessContract({
     assessment: {
       boundary: {
-        goal: 'Preserve the bounded resume fixture.',
-        in_scope: ['Fixture repository'],
+        goal: 'Resume the selected current-version plan safely.',
+        in_scope: ['Selected versioned plan'],
         out_of_scope: ['Unrequested changes'],
-        constraints: ['Keep the frozen contract stable'],
+        constraints: ['Keep the frozen contract immutable'],
       },
       domain_assessments: RISK_DOMAINS.map((domain) => ({
         domain,
-        applicability: 'not-applicable',
-        risk: 'standard',
+        applicability: highRisk && domain === 'correctness' ? 'applicable' : 'not-applicable',
+        risk: highRisk && domain === 'correctness' ? 'high' : 'standard',
         rationale: `Fixture assessment for ${domain}.`,
         evidence_refs: [],
       })),
-      material_questions: [],
+      material_questions: materialQuestionIds.map((id) => ({
+        id,
+        question: `Resolve ${id} before resuming?`,
+        rationale: `${id} changes the frozen readiness boundary.`,
+        options: ['yes', 'no'],
+      })),
     },
     sourceDigest: state.sourceDigest,
     systemDigest: state.authoritativeDigest,
     quality: state.quality,
     iterationLimit: state.iterationLimit,
     issueBudget: state.issueBudget.limit,
-    operatorDecisionIds: state.operatorDecisionIds,
+    operatorDecisionIds: [],
   });
-  state.readinessContractDigest = contract.contractDigest;
-  writeFrozenReadinessContract(path.join(ctx.work, 'readiness-contract.json'), contract);
+}
+
+function occurrenceSnapshot(
+  state: ReadinessProofState,
+  source: OccurrenceCoverageSnapshot['source'],
+  binding: OccurrenceCoverageSnapshot['binding'],
+): OccurrenceCoverageSnapshot {
+  return {
+    source,
+    catalogDigest: state.catalog.digest,
+    binding,
+    occurrences: state.catalog.invariants.flatMap((invariant) =>
+      invariant.occurrenceIds.map((occurrenceId) => ({
+        invariantId: invariant.invariantId,
+        occurrenceId,
+        disposition: 'satisfied' as const,
+        evidenceGrounded: true as const,
+      })),
+    ),
+  };
+}
+
+function writeCurrentProof(ctx: RunContext, options: ProofFixtureOptions = {}): ProofFixture {
+  const planVersion = options.planVersion ?? 0;
+  const planFile = path.join(work, `plan.v${planVersion}.md`);
+  if (!existsSync(planFile)) {
+    writeStructuredPlanFile(planFile, `V${planVersion}`);
+  }
+  const catalog = createReadinessProofCatalog({
+    expectedPlanVersion: planVersion,
+    invariants: [],
+    materialIssueIds: [],
+  });
+  let state = createReadinessProofState({
+    quality: ctx.settings.quality,
+    matrix: ctx.quality,
+    mode: ctx.mode,
+    sourceDigest: ctx.readinessProof.sourceDigest,
+    authoritativeDigest: options.authoritativeDigest ?? ctx.systemContext.digest,
+    relationshipIds: [],
+    maxIters: ctx.settings.maxIters,
+    trustedCatalog: catalog,
+    findings: [],
+    invariants: [],
+  });
+  const contract = fixtureContract(state, options.highRisk ?? false, options.materialQuestionIds);
+  writeFrozenReadinessContract(path.join(work, 'readiness-contract.json'), contract);
+  state = applyFrozenReadinessContract(state, contract);
+  const planSha256 = fileSha256(planFile);
+  const critic = createOccurrenceSourceBinding(state, {
+    source: 'critic',
+    candidateKind: 'versioned-plan',
+    contentDigest: planSha256,
+  });
+  const intermediateJudge = options.highRisk
+    ? createOccurrenceSourceBinding(state, {
+        source: 'intermediate-judge',
+        candidateKind: 'versioned-plan',
+        contentDigest: planSha256,
+      })
+    : undefined;
+  state = bindVersionedPlan(state, {
+    planVersion,
+    planSha256,
+    criticLineageDigest: critic.lineage.lineageDigest,
+    ...(intermediateJudge === undefined
+      ? {}
+      : { intermediateJudgeLineageDigest: intermediateJudge.lineage.lineageDigest }),
+  });
+
+  if (options.reviewed) {
+    state = recordAdmittedCritique(state, {
+      planVersion,
+      snapshot: occurrenceSnapshot(state, 'critic', critic),
+      scanComplete: true,
+      declaredScopeVerified: true,
+      materialIssueIds: [],
+      issueBudgetUsed: 0,
+      issueBudgetExhausted: false,
+      riskDomains: state.riskDomains.map((domain) => ({
+        ...domain,
+        complete: true,
+        lastAssessedPlanVersion: planVersion,
+      })),
+      criticCoverageGapIds: [],
+      criticScopeCoverageGapIds: [],
+      criticContextGapIds: [],
+      boundaryChallenges: [],
+      opportunities: [],
+    });
+    if (intermediateJudge !== undefined) {
+      state = recordAdmittedJudgeProof(state, {
+        stage: 'intermediate',
+        snapshot: occurrenceSnapshot(state, 'intermediate-judge', intermediateJudge),
+        verdict: true,
+        approvedPlanVersion: planVersion,
+        materialIssueIds: [],
+      });
+    }
+  }
+
+  if (options.deterministic) {
+    const check = validateSystemCoverage(ctx.systemContext, planFile, planVersion, {
+      required: false,
+      inScope: contract.boundary.inScope,
+      outOfScope: contract.boundary.outOfScope,
+    });
+    state = recordSystemProof(state, {
+      binding: {
+        planVersion,
+        planSha256: check.planSha256,
+        authoritativeDigest: state.authoritativeDigest,
+      },
+      passed: check.passed,
+      mismatchIds: check.mismatches,
+      unavailableEvidenceIds: check.requiredEvidenceUnavailable,
+    });
+    writeSystemCheck(work, check);
+  }
+
+  const proofFile = path.join(work, `convergence.v${planVersion}.json`);
+  writeReadinessProofState(proofFile, state);
+  return { contract, state, planFile, proofFile };
+}
+
+interface StableRevisionOptions {
+  readonly acceptedIssue?: boolean;
+}
+
+function writeStableRevision(
+  ctx: RunContext,
+  options: StableRevisionOptions = {},
+): {
+  readonly v0: ProofFixture;
+  readonly v1: ProofFixture;
+} {
+  writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
+  writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
+  const v0 = writeCurrentProof(ctx, { planVersion: 0 });
+  const critiqueFile = path.join(work, 'critique.v0.json');
+  const updateFile = path.join(work, 'update.v0.json');
+  const planFile = path.join(work, 'plan.v1.md');
+  const planContent = readFileSync(planFile, 'utf8');
+  const issue: {
+    id: string;
+    addresses: null;
+    severity: 'major';
+    category: string;
+    claim: string;
+    evidence: string;
+    evidence_refs: JsonValue[];
+    suggested_fix: string;
+    confidence: number;
+    duplicate_of: null;
+  } = {
+    id: 'C1',
+    addresses: null,
+    severity: 'major',
+    category: 'correctness',
+    claim: 'Retain the admitted creator transition.',
+    evidence: '## Work Plan',
+    evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+    suggested_fix: 'Record the transition exactly.',
+    confidence: 1,
+    duplicate_of: null,
+  };
+  writeCritique(critiqueFile, options.acceptedIssue === true ? [issue] : [], 0);
+  const reviewedState = recordAdmittedCritique(v0.state, {
+    planVersion: 0,
+    snapshot: occurrenceSnapshot(
+      v0.state,
+      'critic',
+      createOccurrenceSourceBinding(v0.state, {
+        source: 'critic',
+        candidateKind: 'versioned-plan',
+        contentDigest: fileSha256(v0.planFile),
+      }),
+    ),
+    scanComplete: true,
+    declaredScopeVerified: true,
+    materialIssueIds: options.acceptedIssue === true ? ['v0.C1'] : [],
+    issueBudgetUsed: options.acceptedIssue === true ? 1 : 0,
+    issueBudgetExhausted: false,
+    riskDomains: v0.state.riskDomains.map((domain) => ({
+      ...domain,
+      complete: true,
+      lastAssessedPlanVersion: 0,
+    })),
+    criticCoverageGapIds: [],
+    criticScopeCoverageGapIds: [],
+    criticContextGapIds: [],
+    boundaryChallenges: [],
+    opportunities: [],
+  });
+  writeReadinessProofState(v0.proofFile, reviewedState);
+  const reviewedV0 = { ...v0, state: reviewedState };
+  if (options.acceptedIssue === true) {
+    writeAcceptUpdate(updateFile, 1, planFile);
+  } else {
+    writeFileSync(
+      updateFile,
+      `${JSON.stringify(
+        {
+          plan_version: 1,
+          plan_markdown: planContent,
+          issues: [],
+          applied: [],
+          systemic_dispositions: [],
+          rejected_append: [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+  const update = JSON.parse(readFileSync(updateFile, 'utf8')) as JsonValue;
+  const admitted = admitCreatorUpdate({
+    value: update,
+    currentCatalog: reviewedState.catalog,
+    fromPlanVersion: 0,
+    expectedPlanVersion: 1,
+    expectedIssues:
+      options.acceptedIssue === true
+        ? [
+            {
+              id: issue.id,
+              severity: issue.severity,
+              claim: issue.claim,
+              evidence: issue.evidence,
+              suggestedFix: issue.suggested_fix,
+              provenance: 'critic',
+            },
+          ]
+        : [],
+    retainedFindings: reviewedState.findings,
+    retainedInvariants: reviewedState.invariants,
+    evidenceContext: {
+      work,
+      projectRoot: ctx.provider.projectRoot,
+      planVersion: 1,
+      candidateContent: planContent,
+      candidatePath: planFile,
+    },
+    operatorInterventionIds: reviewedState.interventionIds,
+    admittedCriticIssueRefs: reviewedState.admittedCriticIssueRefs,
+    admittedJudgeRevisionIssueIds: [],
+  });
+  let state = recordAdmittedCreatorUpdate(reviewedState, admitted);
+  const critic = createOccurrenceSourceBinding(state, {
+    source: 'critic',
+    candidateKind: 'versioned-plan',
+    contentDigest: fileSha256(planFile),
+  });
+  state = bindVersionedPlan(state, {
+    planVersion: 1,
+    planSha256: fileSha256(planFile),
+    criticLineageDigest: critic.lineage.lineageDigest,
+  });
+  state = recordAdmittedCritique(state, {
+    planVersion: 1,
+    snapshot: occurrenceSnapshot(state, 'critic', critic),
+    scanComplete: true,
+    declaredScopeVerified: true,
+    materialIssueIds: [],
+    issueBudgetUsed: 0,
+    issueBudgetExhausted: false,
+    riskDomains: state.riskDomains.map((domain) => ({
+      ...domain,
+      complete: true,
+      lastAssessedPlanVersion: 1,
+    })),
+    criticCoverageGapIds: [],
+    criticScopeCoverageGapIds: [],
+    criticContextGapIds: [],
+    boundaryChallenges: [],
+    opportunities: [],
+  });
+  const check = validateSystemCoverage(ctx.systemContext, planFile, 1, {
+    required: false,
+    inScope: v0.contract.boundary.inScope,
+    outOfScope: v0.contract.boundary.outOfScope,
+  });
+  state = recordSystemProof(state, {
+    binding: {
+      planVersion: 1,
+      planSha256: check.planSha256,
+      authoritativeDigest: state.authoritativeDigest,
+    },
+    passed: check.passed,
+    mismatchIds: check.mismatches,
+    unavailableEvidenceIds: check.requiredEvidenceUnavailable,
+  });
+  writeSystemCheck(work, check);
+  const proofFile = path.join(work, 'convergence.v1.json');
+  writeReadinessProofState(proofFile, state);
+  const v1 = { contract: v0.contract, state, planFile, proofFile };
+  return { v0: reviewedV0, v1 };
+}
+
+function noArchiveCreated(): boolean {
+  return !readdirSync(work).some((name) => name.startsWith('stale.'));
 }
 
 describe('last stable plan', () => {
-  it('treats v0 as always stable', () => {
+  it('requires a matching current-schema proof even for v0', () => {
+    const scratch = Scratch.create('resume-missing-v0-proof');
+    const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
     writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    expect(lastStablePlan(work, schema)).toBe(0);
-  });
-
-  it('accepts vN only when update.v(N-1) is schema-valid', () => {
-    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-    writeUpdate(path.join(work, 'update.v0.json'), 1);
-    expect(lastStablePlan(work, schema)).toBe(1);
-  });
-
-  it('falls back past a plan whose update is invalid', () => {
-    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-    writeFileSync(path.join(work, 'update.v0.json'), '{"not": "an update"}\n');
-    expect(lastStablePlan(work, schema)).toBe(0);
-  });
-
-  it('requires a matching valid convergence artifact once versioned state exists', () => {
-    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-    writeUpdate(path.join(work, 'update.v0.json'), 1);
-    const state = createConvergenceState({
-      quality: 'balanced',
-      matrix: qualityMatrix('balanced'),
-      mode: 'plan',
-      sourceDigest: 'source',
-      authoritativeDigest: 'system',
-      relationshipIds: [],
-      maxIters: 3,
-    });
-    writeConvergenceState(work, state);
-
-    expect(lastStablePlan(work, schema)).toBe(0);
-    writeFileSync(path.join(work, 'convergence.v1.json'), '{"schemaVersion":1,"planVersion":1}\n');
-    expect(lastStablePlan(work, schema)).toBe(0);
-    state.planVersion = 1;
-    writeConvergenceState(work, state);
-    expect(lastStablePlan(work, schema)).toBe(1);
-  });
-
-  it('does not select a revision whose rejected-disposition ledger boundary was not committed', () => {
-    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-    writeFileSync(
-      path.join(work, 'update.v0.json'),
-      `${JSON.stringify({
-        plan_version: 1,
-        plan_markdown: readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
-        rejected_append: [
-          { id: 'C1', claim: 'Interrupted rejected finding', reason: 'not_value_adding' },
-        ],
-      })}\n`,
-    );
-    writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
-    const state = createConvergenceState({
-      quality: 'balanced',
-      matrix: qualityMatrix('balanced'),
-      mode: 'plan',
-      sourceDigest: 'source',
-      authoritativeDigest: 'system',
-      relationshipIds: [],
-      maxIters: 3,
-    });
-    writeConvergenceState(work, state);
-
-    expect(lastStablePlan(work, schema)).toBe(0);
-  });
-
-  it('halts with exit 4 when no stable plan exists', () => {
     const capture = captureStderr();
     try {
-      expect(() => lastStablePlan(work, schema)).toThrow(HaltError);
-      expect(capture.text()).toContain('resume failed: no stable plan.vN.md found');
+      expect(() => lastStablePlan(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('no stable plan.vN.md found');
     } finally {
       capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('selects v0 when its schema-3 proof is valid and bound', () => {
+    const scratch = Scratch.create('resume-stable-v0');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeCurrentProof(ctx);
+      expect(lastStablePlan(ctx)).toBe(0);
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('skips a revision whose proof is missing', () => {
+    const scratch = Scratch.create('resume-missing-revision-proof');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeCurrentProof(ctx);
+      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
+      writeUpdate(
+        path.join(work, 'update.v0.json'),
+        1,
+        readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
+      );
+      expect(lastStablePlan(ctx)).toBe(0);
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it.each([
+    ['corrupt', '{'],
+    ['unsupported', '{"schemaVersion":2}'],
+  ])('rejects a %s proof instead of falling back', (_label, serialized) => {
+    const scratch = Scratch.create('resume-invalid-revision-proof');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeCurrentProof(ctx);
+      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
+      writeUpdate(
+        path.join(work, 'update.v0.json'),
+        1,
+        readFileSync(path.join(work, 'plan.v1.md'), 'utf8'),
+      );
+      writeFileSync(path.join(work, 'convergence.v1.json'), serialized);
+      expect(() => lastStablePlan(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('invalid readiness proof for plan.v1.md');
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('falls back when the update does not commit the selected plan bytes', () => {
+    const scratch = Scratch.create('resume-update-plan-binding');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeStableRevision(ctx);
+      writeUpdate(path.join(work, 'update.v0.json'), 1, '# Different bytes\n');
+      expect(lastStablePlan(ctx)).toBe(0);
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('rejects creator-invented rejected ledger entries before selecting a revision', () => {
+    const scratch = Scratch.create('resume-rejected-boundary');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const rejection = { id: 'C1', claim: 'Rejected optional change', reason: 'not_value_adding' };
+      writeStableRevision(ctx);
+      const updateFile = path.join(work, 'update.v0.json');
+      const update = JSON.parse(readFileSync(updateFile, 'utf8')) as Record<string, unknown>;
+      update.rejected_append = [rejection];
+      writeFileSync(updateFile, `${JSON.stringify(update, null, 2)}\n`);
+
+      expect(() => lastStablePlan(ctx)).toThrow(HaltError);
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects schema-valid creator metadata that no longer matches its admitted receipt', () => {
+    const scratch = Scratch.create('resume-creator-admission-receipt');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const { v1 } = writeStableRevision(ctx, { acceptedIssue: true });
+      const updateFile = path.join(work, 'update.v0.json');
+      const update = JSON.parse(readFileSync(updateFile, 'utf8')) as {
+        issues: { verdict: string }[];
+        applied: string[];
+        systemic_dispositions: JsonValue[];
+      };
+      const first = update.issues[0];
+      if (first === undefined) {
+        throw new Error('accepted update fixture is missing C1');
+      }
+      first.verdict = 'reject_hallucinated';
+      update.applied = [];
+      update.systemic_dispositions = [];
+      writeFileSync(updateFile, `${JSON.stringify(update, null, 2)}\n`);
+      const proofBefore = readFileSync(v1.proofFile, 'utf8');
+      const updateBefore = readFileSync(updateFile, 'utf8');
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+
+      expect(capture.text()).toMatch(/semantic admission|readiness proof receipt/);
+      expect(readFileSync(v1.proofFile, 'utf8')).toBe(proofBefore);
+      expect(readFileSync(updateFile, 'utf8')).toBe(updateBefore);
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects a current proof whose catalog digest is corrupt', () => {
+    const scratch = Scratch.create('resume-incomplete-catalog');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx);
+      const raw = JSON.parse(readFileSync(fixture.proofFile, 'utf8')) as Record<string, unknown>;
+      (raw.catalog as Record<string, unknown>).digest = 'tampered-catalog';
+      writeFileSync(fixture.proofFile, `${JSON.stringify(raw, null, 2)}\n`);
+      expect(() => lastStablePlan(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('invalid readiness proof');
+    } finally {
+      capture.restore();
+      scratch.sweep();
     }
   });
 });
 
 describe('stale artifact archive', () => {
-  it('archives artifacts at/after the resume point plus final extras', () => {
+  it('archives artifacts at or after the resume point plus final extras', () => {
     writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
     writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
     writeStructuredPlanFile(path.join(work, 'plan.v2.md'), 'V2');
-    writeUpdate(path.join(work, 'update.v0.json'), 1);
-    writeUpdate(path.join(work, 'update.v1.json'), 2);
     writeFileSync(path.join(work, 'critique.v0.json'), '{}\n');
     writeFileSync(path.join(work, 'critique.v1.json'), '{}\n');
-    writeFileSync(path.join(work, 'update-meta.v1.json'), '{}\n');
-    writeFileSync(path.join(work, 'plan.revision.v1.md'), '# R1\n');
-    writeFileSync(path.join(work, 'plan.final.md'), '# Final\n');
-    writeFileSync(path.join(work, 'summary.md'), '# Summary\n');
-    writeFileSync(path.join(work, 'judge.final.raw'), '{}\n');
-    writeFileSync(path.join(work, 'judge.final.json'), '{}\n');
-    writeFileSync(path.join(work, 'judge.final.meta.json'), '{}\n');
     writeFileSync(path.join(work, 'judge.v0.json'), '{}\n');
     writeFileSync(path.join(work, 'judge.v1.json'), '{}\n');
-    writeFileSync(path.join(work, 'judge.v2.json'), '{}\n');
-    writeFileSync(path.join(work, 'plan.final.ru.md'), '# Localized final\n');
-    writeFileSync(path.join(work, 'fix-applied-review.json'), '{}\n');
+    writeFileSync(path.join(work, 'plan.final.md'), '# Final\n');
+    writeFileSync(path.join(work, 'fix-review.json'), '{}\n');
+    writeFileSync(path.join(work, 'convergence.final.json'), '{}\n');
 
     const state: ResumeState = { startIter: 1, archivedCount: 0, archiveDir: '' };
     archiveResumeStale(work, state, 1);
 
-    expect(state.archivedCount).toBe(14);
-    expect(state.archiveDir.startsWith(path.join(work, 'stale.'))).toBe(true);
-    expect(existsSync(path.join(work, 'plan.v0.md'))).toBe(true);
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
-    expect(existsSync(path.join(work, 'update.v0.json'))).toBe(true);
-    expect(existsSync(path.join(work, 'critique.v0.json'))).toBe(true);
     expect(existsSync(path.join(work, 'plan.v2.md'))).toBe(false);
+    expect(existsSync(path.join(work, 'critique.v0.json'))).toBe(true);
     expect(existsSync(path.join(work, 'critique.v1.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'update.v1.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'update-meta.v1.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'plan.revision.v1.md'))).toBe(false);
-    expect(existsSync(path.join(work, 'plan.final.md'))).toBe(false);
-    expect(existsSync(path.join(work, 'summary.md'))).toBe(false);
     expect(existsSync(path.join(work, 'judge.v0.json'))).toBe(true);
     expect(existsSync(path.join(work, 'judge.v1.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'judge.v2.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'plan.final.ru.md'))).toBe(false);
-    const archived = readdirSync(state.archiveDir).sort();
-    expect(archived).toContain('plan.v2.md');
-    expect(archived).toContain('plan.final.md');
-    expect(archived).toContain('judge.final.raw');
-    expect(archived).toContain('judge.final.json');
-    expect(archived).toContain('judge.final.meta.json');
-    expect(archived).toContain('judge.v1.json');
-    expect(archived).toContain('judge.v2.json');
-    expect(archived).toContain('plan.final.ru.md');
-    expect(archived).toContain('fix-applied-review.json');
+    expect(readdirSync(state.archiveDir)).toEqual(
+      expect.arrayContaining([
+        'plan.v2.md',
+        'critique.v1.json',
+        'judge.v1.json',
+        'plan.final.md',
+        'fix-review.json',
+        'convergence.final.json',
+      ]),
+    );
   });
 
-  it('archives package artifacts alongside plan.final.md', () => {
+  it('archives package directories without deleting their contents', () => {
     writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-    writeFileSync(path.join(work, 'plan.final.md'), '# Final\n');
-    writeFileSync(path.join(work, 'plan.split.json'), '{"decision":"split"}\n');
-    writeFileSync(path.join(work, 'package-findings.json'), '{"stale_lines":[]}\n');
-    const pkg = path.join(work, 'plan.package');
-    mkdirSync(pkg, { recursive: true });
-    writeFileSync(path.join(pkg, 'README.md'), '# pack\n');
-
+    const packageDir = path.join(work, 'plan.package');
+    mkdirSync(packageDir);
+    writeFileSync(path.join(packageDir, 'README.md'), '# Package\n');
     const state: ResumeState = { startIter: 0, archivedCount: 0, archiveDir: '' };
+
     archiveResumeStale(work, state, 0);
 
-    expect(existsSync(path.join(work, 'plan.split.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'package-findings.json'))).toBe(false);
-    expect(existsSync(pkg)).toBe(false);
-    const archived = readdirSync(state.archiveDir).sort();
-    expect(archived).toContain('plan.split.json');
-    expect(archived).toContain('package-findings.json');
-    expect(archived).toContain('plan.package');
-    expect(existsSync(path.join(state.archiveDir, 'plan.package', 'README.md'))).toBe(true);
+    expect(existsSync(packageDir)).toBe(false);
+    expect(readFileSync(path.join(state.archiveDir, 'plan.package', 'README.md'), 'utf8')).toBe(
+      '# Package\n',
+    );
   });
 
-  it('archives nothing on a clean resume', () => {
+  it('does not create an archive for a clean versioned plan', () => {
     writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
     const state: ResumeState = { startIter: 0, archivedCount: 0, archiveDir: '' };
     archiveResumeStale(work, state, 0);
-    expect(state.archivedCount).toBe(0);
-    expect(state.archiveDir).toBe('');
-    expect(existsSync(path.join(work, 'plan.v0.md'))).toBe(true);
+    expect(state).toEqual({ startIter: 0, archivedCount: 0, archiveDir: '' });
   });
 });
 
-describe('convergence-aware resume', () => {
+describe('current-version resume proof boundary', () => {
   it.each([
     ['missing', undefined],
-    ['legacy-derived', 'legacy-derived:source'],
-  ] as const)(
-    'invalidates %s readiness proof before freezing a resume contract',
-    (_label, contractDigest) => {
-      const scratch = Scratch.create('resume-unbound-readiness-proof');
-      try {
-        writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-        writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-        writeUpdate(path.join(work, 'update.v0.json'), 1);
-        const ctx = makeTestRunContext(tmp, work, scratch, {
-          quality: 'balanced',
-          maxIters: 3,
-        });
-        ctx.convergence.planVersion = 1;
-        applyReadinessPolicy(ctx.convergence, {
-          contractDigest: 'previous-contract',
-          judgeAllowed: true,
-          exhaustiveApplicableDomains: false,
-          unresolvedMaterialQuestionIds: [],
-          riskDomains: RISK_DOMAINS.map((domain) => ({
-            domain,
-            applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
-            risk: domain === 'correctness' ? 'high' : 'standard',
-            rationale: `Prior assessment for ${domain}.`,
-            evidenceRefs: [],
-          })),
-        });
-        if (contractDigest === undefined) {
-          delete ctx.convergence.readinessContractDigest;
-        } else {
-          ctx.convergence.readinessContractDigest = contractDigest;
-        }
-        ctx.convergence.lastCritiquedPlanVersion = 1;
-        ctx.convergence.scanComplete = true;
-        ctx.convergence.systemCheckPassed = true;
-        ctx.convergence.judgeEvaluatedPlanVersion = 1;
-        ctx.convergence.judgeApprovedPlanVersion = 1;
-        ctx.convergence.judgeReady = true;
-        for (const domain of ctx.convergence.riskDomains) {
-          domain.complete = true;
-          domain.lastAssessedPlanVersion = 1;
-        }
-        writeConvergenceState(work, ctx.convergence);
-        writeSystemCheck(
-          work,
-          validateSystemCoverage(ctx.systemContext, path.join(work, 'plan.v1.md'), 1),
-        );
+    ['unsupported', '{"schemaVersion":1}\n'],
+  ])('rejects a %s frozen contract before mutating artifacts', (_label, contractBytes) => {
+    const scratch = Scratch.create('resume-invalid-contract');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+      if (contractBytes === undefined) {
+        rmSync(path.join(work, 'readiness-contract.json'));
+      } else {
+        writeFileSync(path.join(work, 'readiness-contract.json'), contractBytes);
+      }
 
-        expect(prepareResume(ctx)).toBe(1);
-        expect(ctx.lastCritiqueIter).toBe(0);
-        expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
-        expect(ctx.convergence.scanComplete).toBe(false);
-        expect(ctx.convergence.systemCheckPassed).toBe(false);
-        expect(ctx.convergence.judgeEvaluatedPlanVersion).toBeUndefined();
-        expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
-        expect(ctx.convergence.judgeReady).toBeUndefined();
-        expect(ctx.convergence.riskDomains.every((domain) => !domain.complete)).toBe(true);
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('readiness contract is missing or invalid');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(readFileSync(fixture.proofFile, 'utf8')).toContain('"schemaVersion": 3');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it.each([
+    { name: 'input source', quality: 'balanced' as const, maxIters: 3, source: '9'.repeat(64) },
+    { name: 'quality', quality: 'quick' as const, maxIters: 3, source: TEST_SOURCE_DIGEST },
+    {
+      name: 'iteration limit',
+      quality: 'balanced' as const,
+      maxIters: 4,
+      source: TEST_SOURCE_DIGEST,
+    },
+  ])('rejects changed $name before archival', (current) => {
+    const scratch = Scratch.create(`resume-contract-${current.name.replaceAll(' ', '-')}`);
+    const capture = captureStderr();
+    try {
+      const prior = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeCurrentProof(prior);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+      const ctx = makeTestRunContext(tmp, work, scratch, {
+        quality: current.quality,
+        maxIters: current.maxIters,
+        sourceDigest: current.source,
+      });
+
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain(current.name);
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects a state bound to a different frozen contract digest before archival', () => {
+    const scratch = Scratch.create('resume-contract-digest');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx);
+      const raw = JSON.parse(readFileSync(fixture.proofFile, 'utf8')) as Record<string, unknown>;
+      raw.readinessContractDigest = '9'.repeat(64);
+      writeFileSync(fixture.proofFile, `${JSON.stringify(raw, null, 2)}\n`);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('readiness contract digest');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects a proof that drops a frozen material question before archival', () => {
+    const scratch = Scratch.create('resume-contract-material-question');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, { materialQuestionIds: ['Q1'] });
+      const tampered = reduceReadinessProofState({
+        ...fixture.state,
+        unresolvedMaterialQuestionIds: [],
+      });
+      writeReadinessProofState(fixture.proofFile, tampered);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('frozen readiness semantics');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('rejects a proof that weakens a frozen high-risk domain before archival', () => {
+    const scratch = Scratch.create('resume-contract-risk-floor');
+    const capture = captureStderr();
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, { highRisk: true });
+      const loweredRisk = reduceReadinessProofState({
+        ...fixture.state,
+        riskDomains: fixture.state.riskDomains.map((domain) =>
+          domain.domain === 'correctness'
+            ? { ...domain, applicability: 'not-applicable' as const, risk: 'standard' as const }
+            : domain,
+        ),
+      });
+      const tampered = setOccurrenceSourceRequirement(loweredRisk, 'intermediate-judge', {
+        required: false,
+        reason: 'standard-risk-judge-exempt',
+      });
+      writeReadinessProofState(fixture.proofFile, tampered);
+      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
+
+      expect(() => prepareResume(ctx)).toThrow(HaltError);
+      expect(capture.text()).toContain('frozen readiness semantics');
+      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
+      expect(noArchiveCreated()).toBe(true);
+    } finally {
+      capture.restore();
+      scratch.sweep();
+    }
+  });
+
+  it('preserves an unchanged current proof and reconciles future ledger entries', () => {
+    const scratch = Scratch.create('resume-unchanged-proof');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const { v1 } = writeStableRevision(ctx);
+      const committed = { iter: 0, id: 'C1', claim: 'Committed rejection' };
+      const stale = { iter: 1, id: 'C2', claim: 'Interrupted rejection' };
+      writeFileSync(
+        path.join(work, 'rejected-log.jsonl'),
+        `${JSON.stringify(committed)}\n${JSON.stringify(stale)}\n`,
+      );
+      writeFileSync(path.join(work, 'plan.final.md'), '# Stale final\n');
+
+      expect(prepareResume(ctx)).toBe(1);
+
+      expect(ctx.readinessProof).toEqual(v1.state);
+      expect(ctx.lastCritiqueIter).toBe(1);
+      expect(readFileSync(path.join(work, 'rejected-log.jsonl'), 'utf8')).toBe(
+        `${JSON.stringify(committed)}\n`,
+      );
+      expect(existsSync(path.join(work, 'plan.final.md'))).toBe(false);
+      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+        expect.arrayContaining(['plan.final.md', 'rejected-log.jsonl']),
+      );
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('invalidates full review proof when selected plan bytes change', () => {
+    const scratch = Scratch.create('resume-plan-mutation');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, { reviewed: true, deterministic: true });
+      writeFileSync(fixture.planFile, `${readFileSync(fixture.planFile, 'utf8')}\nchanged\n`);
+      const changedSha = fileSha256(fixture.planFile);
+
+      expect(prepareResume(ctx)).toBe(0);
+
+      expect(ctx.readinessProof.planSha256).toBe(changedSha);
+      expect(ctx.readinessProof.lastCritiquedPlanVersion).toBeUndefined();
+      expect(ctx.readinessProof.scanComplete).toBe(false);
+      expect(ctx.readinessProof.systemProofBinding).toBeUndefined();
+      expect(
+        ctx.readinessProof.sources.find((slot) => slot.source === 'critic')?.snapshot,
+      ).toBeUndefined();
+      expect(ctx.readinessProof.riskDomains.every((domain) => !domain.complete)).toBe(true);
+      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+        expect.arrayContaining(['convergence.v0.json', 'system-check.v0.json']),
+      );
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('rebinds and invalidates stale review lineage', () => {
+    const scratch = Scratch.create('resume-stale-review-lineage');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, { reviewed: true, deterministic: true });
+      const stale = recordInterventions(fixture.state, { interventionIds: ['I-new-context'] });
+      writeReadinessProofState(fixture.proofFile, stale);
+      const staleCritic = stale.sources.find((slot) => slot.source === 'critic');
+
+      expect(prepareResume(ctx)).toBe(0);
+
+      const critic = ctx.readinessProof.sources.find((slot) => slot.source === 'critic');
+      expect(critic?.snapshot).toBeUndefined();
+      expect(critic?.requirement.required).toBe(true);
+      expect(
+        critic?.requirement.required
+          ? critic.requirement.expectedBinding.lineage.lineageDigest
+          : undefined,
+      ).not.toBe(
+        staleCritic?.requirement.required
+          ? staleCritic.requirement.expectedBinding.lineage.lineageDigest
+          : undefined,
+      );
+      expect(ctx.readinessProof.lastCritiquedPlanVersion).toBeUndefined();
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('refreshes authoritative identity and invalidates dependent review proof', () => {
+    const scratch = Scratch.create('resume-authoritative-change');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeCurrentProof(ctx, { reviewed: true, deterministic: true });
+      const changedSystemDigest = '3'.repeat(64);
+      ctx.systemContext = { ...ctx.systemContext, digest: changedSystemDigest };
+
+      expect(prepareResume(ctx)).toBe(0);
+
+      expect(ctx.readinessProof.authoritativeDigest).toBe(changedSystemDigest);
+      expect(ctx.readinessProof.lastCritiquedPlanVersion).toBeUndefined();
+      expect(ctx.readinessProof.systemProofBinding).toBeUndefined();
+      expect(ctx.readinessProof.sources.every((slot) => slot.snapshot === undefined)).toBe(true);
+      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+        expect.arrayContaining(['convergence.v0.json', 'system-check.v0.json']),
+      );
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it.each(['missing', 'corrupt', 'mismatched', 'semantic'] as const)(
+    'invalidates only deterministic proof when its artifact is %s',
+    (kind) => {
+      const scratch = Scratch.create(`resume-system-check-${kind}`);
+      try {
+        const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+        const fixture = writeCurrentProof(ctx, { reviewed: true, deterministic: true });
+        const checkFile = path.join(work, 'system-check.v0.json');
+        if (kind === 'missing') {
+          rmSync(checkFile);
+        } else if (kind === 'corrupt') {
+          writeFileSync(checkFile, '{');
+        } else if (kind === 'mismatched') {
+          const check = JSON.parse(readFileSync(checkFile, 'utf8')) as Record<string, unknown>;
+          check.planSha256 = '0'.repeat(64);
+          writeFileSync(checkFile, `${JSON.stringify(check, null, 2)}\n`);
+        } else {
+          const check = JSON.parse(readFileSync(checkFile, 'utf8')) as Record<string, unknown>;
+          check.crossRepository = check.crossRepository !== true;
+          writeFileSync(checkFile, `${JSON.stringify(check, null, 2)}\n`);
+        }
+
+        expect(prepareResume(ctx)).toBe(0);
+
+        expect(ctx.readinessProof.lastCritiquedPlanVersion).toBe(0);
+        expect(ctx.readinessProof.scanComplete).toBe(true);
         expect(
-          ctx.convergence.riskDomains.every(
-            (domain) => domain.lastAssessedPlanVersion === undefined,
-          ),
-        ).toBe(true);
-        expect(ctx.convergence.unresolvedCoverage).toEqual(
-          expect.arrayContaining([
-            'plan.v1:readiness-contract-proof-unbound',
-            'plan.v1:not-independently-reviewed',
-            'plan.v1:scan-incomplete',
-            'plan.v1:system-check',
-          ]),
-        );
-        expect(existsSync(path.join(work, 'system-check.v1.json'))).toBe(false);
-        expect(readdirSync(ctx.resume.archiveDir)).toEqual(
-          expect.arrayContaining(['convergence.v1.json', 'system-check.v1.json']),
-        );
+          ctx.readinessProof.sources.find((slot) => slot.source === 'critic')?.snapshot,
+        ).toEqual(fixture.state.sources.find((slot) => slot.source === 'critic')?.snapshot);
+        expect(ctx.readinessProof.systemProofBinding).toBeUndefined();
+        expect(ctx.readinessProof.systemCheckPassed).toBe(false);
+        expect(readdirSync(ctx.resume.archiveDir)).toContain('convergence.v0.json');
+        if (kind !== 'missing') {
+          expect(readdirSync(ctx.resume.archiveDir)).toContain('system-check.v0.json');
+        }
       } finally {
         scratch.sweep();
       }
     },
   );
 
-  it('keeps the active rejected ledger intact when atomic reconciliation cannot commit', () => {
-    const scratch = Scratch.create('resume-ledger-atomicity-test');
-    const temporaryLedger = path.join(work, `rejected-log.jsonl.resume-${process.pid}`);
+  it('clears finalization-only fix-review and canonical proof', () => {
+    const scratch = Scratch.create('resume-finalization-proof');
     try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const ctx = makeTestRunContext(tmp, work, scratch, {
-        quality: 'balanced',
-        maxIters: 3,
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, { reviewed: true, deterministic: true });
+      const fixBinding = createOccurrenceSourceBinding(fixture.state, {
+        source: 'fix-reviewer',
+        candidateKind: 'fix-applied',
+        contentDigest: sha256('retained fix candidate'),
       });
-      const state = createConvergenceState({
-        quality: 'balanced',
-        matrix: qualityMatrix('balanced'),
-        mode: 'plan',
-        sourceDigest: ctx.convergence.sourceDigest,
-        authoritativeDigest: ctx.systemContext.digest,
-        relationshipIds: [],
-        maxIters: 3,
+      let finalized = recordAdmittedFixReviewerProof(fixture.state, {
+        required: true,
+        reason: 'fix-pass-replacement-retained',
+        expectedBinding: fixBinding,
+        snapshot: occurrenceSnapshot(fixture.state, 'fix-reviewer', fixBinding),
+        materialIssueIds: [],
       });
-      state.planVersion = 1;
-      writeConvergenceState(work, state);
+      finalized = bindCanonicalPlan(finalized, {
+        planVersion: 0,
+        canonicalPlanSha256: fileSha256(fixture.planFile),
+        compatibleWithVersionedProof: true,
+      });
+      writeReadinessProofState(fixture.proofFile, finalized);
+      writeFileSync(path.join(work, 'fix-review.json'), '{}\n');
+      writeFileSync(path.join(work, 'convergence.final.json'), '{}\n');
+
+      expect(prepareResume(ctx)).toBe(0);
+
+      expect(ctx.readinessProof.canonicalPlanSha256).toBeUndefined();
+      expect(
+        ctx.readinessProof.sources.find((slot) => slot.source === 'fix-reviewer'),
+      ).toMatchObject({
+        requirement: { required: false, reason: 'not-evaluated-for-current-candidate' },
+      });
+      expect(
+        ctx.readinessProof.sources.find((slot) => slot.source === 'fix-reviewer')?.snapshot,
+      ).toBeUndefined();
+      expect(ctx.readinessProof.lastCritiquedPlanVersion).toBe(0);
+      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+        expect.arrayContaining([
+          'fix-review.json',
+          'convergence.final.json',
+          'convergence.v0.json',
+        ]),
+      );
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('clears final Judge proof without reconstructing it from final artifacts', () => {
+    const scratch = Scratch.create('resume-final-judge-proof');
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      const fixture = writeCurrentProof(ctx, {
+        highRisk: true,
+        reviewed: true,
+        deterministic: true,
+      });
+      const canonicalSha = fileSha256(fixture.planFile);
+      const finalBinding = createOccurrenceSourceBinding(fixture.state, {
+        source: 'final-judge',
+        candidateKind: 'canonical-plan',
+        contentDigest: canonicalSha,
+      });
+      let finalized = bindCanonicalPlan(fixture.state, {
+        planVersion: 0,
+        canonicalPlanSha256: canonicalSha,
+        finalJudgeLineageDigest: finalBinding.lineage.lineageDigest,
+        compatibleWithVersionedProof: true,
+      });
+      finalized = recordAdmittedJudgeProof(finalized, {
+        stage: 'final',
+        snapshot: occurrenceSnapshot(finalized, 'final-judge', finalBinding),
+        verdict: true,
+        approvedPlanVersion: 0,
+        materialIssueIds: [],
+      });
+      writeReadinessProofState(fixture.proofFile, finalized);
+      writeFileSync(path.join(work, 'judge.final.json'), '{"ready":true}\n');
+
+      expect(prepareResume(ctx)).toBe(0);
+
+      expect(ctx.readinessProof.canonicalPlanSha256).toBeUndefined();
+      expect(
+        ctx.readinessProof.sources.find((slot) => slot.source === 'final-judge'),
+      ).toMatchObject({ requirement: { required: false, reason: 'canonical-plan-not-bound' } });
+      expect(
+        ctx.readinessProof.sources.find((slot) => slot.source === 'final-judge')?.snapshot,
+      ).toBeUndefined();
+      expect(ctx.readinessProof.judgeReady).toBeUndefined();
+      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
+        expect.arrayContaining(['judge.final.json', 'convergence.v0.json']),
+      );
+    } finally {
+      scratch.sweep();
+    }
+  });
+
+  it('keeps the active rejected ledger intact when atomic reconciliation cannot commit', () => {
+    const scratch = Scratch.create('resume-ledger-atomicity');
+    const temporary = path.join(work, `rejected-log.jsonl.resume-${process.pid}`);
+    try {
+      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
+      writeStableRevision(ctx);
       const committed = { iter: 0, id: 'C1', claim: 'Committed rejection' };
-      const stale = { iter: 1, id: 'C2', claim: 'Interrupted future rejection' };
+      const stale = { iter: 1, id: 'C2', claim: 'Interrupted rejection' };
       const original = `${JSON.stringify(committed)}\n${JSON.stringify(stale)}\n`;
-      const rejectedLedger = path.join(work, 'rejected-log.jsonl');
-      writeFileSync(rejectedLedger, original);
-      mkdirSync(temporaryLedger);
+      const ledger = path.join(work, 'rejected-log.jsonl');
+      writeFileSync(ledger, original);
+      mkdirSync(temporary);
 
       expect(() => prepareResume(ctx)).toThrow();
-      expect(readFileSync(rejectedLedger, 'utf8')).toBe(original);
+      expect(readFileSync(ledger, 'utf8')).toBe(original);
 
-      rmSync(temporaryLedger, { recursive: true });
+      rmSync(temporary, { recursive: true });
       expect(prepareResume(ctx)).toBe(1);
-      expect(readFileSync(rejectedLedger, 'utf8')).toBe(`${JSON.stringify(committed)}\n`);
-      const archives = readdirSync(work).filter((name) => name.startsWith('stale.'));
-      expect(archives.length).toBeGreaterThan(0);
+      expect(readFileSync(ledger, 'utf8')).toBe(`${JSON.stringify(committed)}\n`);
       expect(
-        archives.some((archive) => {
-          const archivedLedger = path.join(work, archive, 'rejected-log.jsonl');
-          return existsSync(archivedLedger) && readFileSync(archivedLedger, 'utf8') === original;
-        }),
+        readdirSync(work)
+          .filter((name) => name.startsWith('stale.'))
+          .some((archive) => existsSync(path.join(work, archive, 'rejected-log.jsonl'))),
       ).toBe(true);
     } finally {
-      rmSync(temporaryLedger, { recursive: true, force: true });
-      scratch.sweep();
-    }
-  });
-
-  it('rejects changed input for a legacy resume before mutating its artifacts', () => {
-    const scratch = Scratch.create('resume-legacy-source-contract');
-    const original = path.join(tmp, 'original.md');
-    const changed = path.join(tmp, 'input.md');
-    writeStructuredPlanFile(original, 'Original');
-    writeStructuredPlanFile(changed, 'Changed');
-    writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'Original');
-    const prompt = path.join(work, 'prompt.md');
-    const system = path.join(work, 'system-context.json');
-    const session = path.join(work, 'creator.session-id');
-    writeFileSync(prompt, readFileSync(original));
-    writeFileSync(system, 'legacy-system-context\n');
-    writeFileSync(session, 'legacy-session\n');
-    const before = [prompt, system, session].map((file) => readFileSync(file));
-    const ctx = makeTestRunContext(tmp, work, scratch, {
-      mode: 'prompt',
-      quality: 'balanced',
-      maxIters: 3,
-      sourceDigest: fileSha256(changed),
-    });
-    const capture = captureStderr();
-    try {
-      expect(() => prepareResume(ctx)).toThrow(HaltError);
-      expect(capture.text()).toContain('input source differs');
-      expect([prompt, system, session].map((file) => readFileSync(file))).toEqual(before);
-      expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
-    } finally {
-      capture.restore();
-      scratch.sweep();
-    }
-  });
-
-  it.each([
-    { name: 'input source', quality: 'balanced' as const, maxIters: 3, source: 'changed' },
-    { name: 'quality', quality: 'quick' as const, maxIters: 3, source: 'test-source-digest' },
-    {
-      name: 'iteration limit',
-      quality: 'balanced' as const,
-      maxIters: 4,
-      source: 'test-source-digest',
-    },
-  ])('rejects a resume whose $name differs from the selected run contract', (fixture) => {
-    const scratch = Scratch.create(`resume-contract-${fixture.name.replaceAll(' ', '-')}`);
-    const capture = captureStderr();
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const current = makeTestRunContext(tmp, work, scratch, {
-        quality: fixture.quality,
-        maxIters: fixture.maxIters,
-      });
-      const prior = createConvergenceState({
-        quality: 'balanced',
-        matrix: qualityMatrix('balanced'),
-        mode: 'plan',
-        sourceDigest: fixture.source,
-        authoritativeDigest: current.systemContext.digest,
-        relationshipIds: [],
-        maxIters: 3,
-      });
-      prior.planVersion = 1;
-      writeConvergenceState(work, prior);
-
-      expect(() => prepareResume(current)).toThrow(HaltError);
-      expect(capture.text()).toContain(`resume failed: ${fixture.name}`);
-      expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
-      expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
-    } finally {
-      capture.restore();
-      scratch.sweep();
-    }
-  });
-
-  it('rejects a mismatched frozen readiness contract before archiving artifacts', () => {
-    const scratch = Scratch.create('resume-readiness-contract-digest');
-    const capture = captureStderr();
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      writeFileSync(path.join(work, 'plan.final.md'), 'preserve-me\n');
-      const current = makeTestRunContext(tmp, work, scratch);
-      const prior = createConvergenceState({
-        quality: 'balanced',
-        matrix: qualityMatrix('balanced'),
-        mode: 'plan',
-        sourceDigest: current.convergence.sourceDigest,
-        authoritativeDigest: current.systemContext.digest,
-        relationshipIds: [],
-        maxIters: 3,
-      });
-      prior.planVersion = 1;
-      prior.readinessContractDigest = 'different-frozen-contract';
-      writeConvergenceState(work, prior);
-      const contract = buildReadinessContract({
-        assessment: {
-          boundary: {
-            goal: 'Preserve the bounded resume contract.',
-            in_scope: ['Current repository plan'],
-            out_of_scope: ['Unrequested scope'],
-            constraints: ['Keep the contract immutable'],
-          },
-          domain_assessments: RISK_DOMAINS.map((domain) => ({
-            domain,
-            applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
-            risk: 'standard',
-            rationale: `Fixture assessment for ${domain}.`,
-            evidence_refs: [],
-          })),
-          material_questions: [],
-        },
-        sourceDigest: current.convergence.sourceDigest,
-        systemDigest: current.systemContext.digest,
-        quality: 'balanced',
-        iterationLimit: 3,
-        issueBudget: prior.issueBudget.limit,
-        operatorDecisionIds: [],
-      });
-      writeFrozenReadinessContract(path.join(work, 'readiness-contract.json'), contract);
-
-      expect(() => prepareResume(current)).toThrow(HaltError);
-      expect(capture.text()).toContain('readiness contract digest');
-      expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe('preserve-me\n');
-      expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
-    } finally {
-      capture.restore();
-      scratch.sweep();
-    }
-  });
-
-  it('bootstraps a conservative state at the highest stable legacy plan', () => {
-    const scratch = Scratch.create('resume-legacy-state-test');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeStructuredPlanFile(path.join(work, 'plan.v2.md'), 'V2');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      writeUpdate(path.join(work, 'update.v1.json'), 2);
-      const ctx = makeTestRunContext(tmp, work, scratch, {
-        quality: 'balanced',
-        maxIters: 3,
-        sourceDigest: fileSha256(path.join(work, 'plan.v0.md')),
-      });
-
-      expect(prepareResume(ctx)).toBe(2);
-      expect(ctx.resume.startIter).toBe(2);
-      expect(ctx.lastCritiqueIter).toBe(1);
-      expect(ctx.convergence.planVersion).toBe(2);
-      expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.scanComplete).toBe(false);
-      expect(ctx.convergence.systemCheckPassed).toBe(false);
-      expect(ctx.convergence.unresolvedCoverage).toContain('plan.v2:legacy-state-bootstrap');
-      expect(existsSync(path.join(work, 'convergence.v2.json'))).toBe(true);
-      expect(existsSync(path.join(work, 'convergence.v0.json'))).toBe(false);
-    } finally {
-      scratch.sweep();
-    }
-  });
-
-  it('matches uninterrupted convergence state after restoring a stable revision', () => {
-    const scratch = Scratch.create('resume-state-equivalence-test');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      const planV1 = readFileSync(path.join(work, 'plan.v1.md'), 'utf8');
-      const critique = {
-        plan_version: 0,
-        summary: 'A material cross-cutting gap and one rejected minor suggestion.',
-        issues: [
-          {
-            id: 'C1',
-            addresses: null,
-            severity: 'major',
-            category: 'correctness',
-            claim: 'Every release consumer needs the same ordering guarantee.',
-            evidence: '## Work Plan',
-            evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
-            invariant_id: null,
-            introduced_by_revision: null,
-            suggested_fix: 'Cover every consumer occurrence.',
-            confidence: 0.95,
-            duplicate_of: null,
-          },
-          {
-            id: 'C2',
-            addresses: null,
-            severity: 'minor',
-            category: 'clarity',
-            claim: 'Rename the fixture phase.',
-            evidence: 'P1 Fixture Phase',
-            evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
-            invariant_id: null,
-            introduced_by_revision: null,
-            suggested_fix: 'Use a shorter phase title.',
-            confidence: 0.6,
-            duplicate_of: null,
-          },
-        ],
-        review: {
-          considered_context: [
-            'original-scope',
-            'authoritative-system-facts',
-            'operator-decisions',
-            'material-findings',
-            'active-invariants',
-            'quality-and-limits',
-          ],
-          invariant_assessments: [],
-          scope_coverage: ['direct-plan-scope'],
-          issue_budget: { limit: 8, used: 2, exhausted: false },
-          scan_complete: true,
-          unresolved_coverage: [],
-        },
-      };
-      const update = {
-        plan_version: 1,
-        plan_markdown: planV1,
-        issues: [
-          {
-            id: 'C1',
-            verdict: 'accept',
-            verdict_reason: 'The ordering gap is material and evidenced.',
-            final_severity: 'major',
-            duplicate_of: null,
-          },
-          {
-            id: 'C2',
-            verdict: 'reject_taste',
-            verdict_reason: 'The existing title is clear and the change is taste-only.',
-            final_severity: 'minor',
-            duplicate_of: null,
-          },
-        ],
-        applied: ['C1'],
-        systemic_dispositions: [
-          {
-            issue_id: 'C1',
-            scope: 'cross-cutting',
-            rationale: 'The same ordering contract applies to both consumers.',
-            invariant: {
-              statement: 'Every consumer runs only after its producer is ready.',
-              occurrences: [
-                { dimension: 'consumer', subject: 'api' },
-                { dimension: 'consumer', subject: 'worker' },
-              ],
-            },
-          },
-        ],
-        rejected_append: [
-          {
-            id: 'C2',
-            claim: 'Rename the fixture phase.',
-            reason: 'not_value_adding',
-          },
-        ],
-      };
-      writeFileSync(path.join(work, 'critique.v0.json'), `${JSON.stringify(critique)}\n`);
-      writeFileSync(path.join(work, 'update.v0.json'), `${JSON.stringify(update)}\n`);
-
-      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
-      ctx.convergence.operatorDecisionIds = ['op-clarify-scope'];
-      ctx.convergence.interventionIds = ['op-clarify-scope', 'i-release-order'];
-      ctx.convergence.contextDeliveries.push({
-        role: 'critic',
-        stage: 'review',
-        planVersion: 0,
-        mandatoryBytes: 1_200,
-        optionalBytes: 300,
-        totalInputBytes: 9_000,
-        inputTokenLimit: 200_000,
-        inputLimitSource: 'model-registry',
-        reductions: [],
-        omittedCategories: [],
-      });
-      recordCritique(ctx.convergence, critique, 0);
-      recordSystemCheck(ctx.convergence, { passed: true, mismatches: [] });
-      classifyTerminal(ctx.convergence, false);
-      ctx.lastCritiqueIter = 0;
-      ctx.convergence.contextDeliveries.push({
-        role: 'creator',
-        stage: 'revision',
-        planVersion: 0,
-        mandatoryBytes: 1_500,
-        optionalBytes: 600,
-        totalInputBytes: 11_000,
-        inputTokenLimit: 200_000,
-        inputLimitSource: 'operator',
-        reductions: [{ category: 'resolved-minor-history', bytes: 80 }],
-        omittedCategories: ['resolved-nits'],
-      });
-      recordCreatorUpdate(ctx.convergence, critique, update, 0);
-      const uninterruptedLastCritiqueIter = ctx.lastCritiqueIter;
-      bindFrozenReadinessContract(ctx);
-      writeConvergenceState(work, ctx.convergence);
-      const uninterruptedState = structuredClone(ctx.convergence);
-      writeFileSync(path.join(work, 'system-check.v0.json'), '{"passed":true}\n');
-
-      writeStructuredPlanFile(path.join(work, 'plan.v2.md'), 'Interrupted V2');
-      writeUpdate(path.join(work, 'update.v1.json'), 2);
-      writeFileSync(path.join(work, 'critique.v1.json'), '{"stale":true}\n');
-      writeFileSync(path.join(work, 'system-check.v2.json'), '{"stale":true}\n');
-      const keptRejected = { iter: 0, id: 'C2', disposition: 'reject_taste' };
-      const staleRejected = { iter: 1, id: 'C9', disposition: 'reject_taste' };
-      writeFileSync(
-        path.join(work, 'rejected-log.jsonl'),
-        `${JSON.stringify(keptRejected)}\n${JSON.stringify(staleRejected)}\n`,
-      );
-      const keptDecision = {
-        intervention_id: 'op-clarify-scope',
-        target: 'creator',
-        plan_ref: 'plan.v0.md',
-      };
-      const keptMigration = {
-        intervention_id: 'i-release-order',
-        target: 'creator',
-        plan_ref: 'plan.v1.md',
-      };
-      const staleMigration = {
-        intervention_id: 'i-stale',
-        target: 'creator',
-        plan_ref: 'plan.v2.md',
-      };
-      writeFileSync(
-        path.join(work, 'operator-intervention-migrations.jsonl'),
-        `${JSON.stringify(keptDecision)}\n${JSON.stringify(keptMigration)}\n${JSON.stringify(staleMigration)}\n`,
-      );
-
-      expect(prepareResume(ctx)).toBe(1);
-      expect(ctx.resume.startIter).toBe(1);
-      expect(ctx.lastCritiqueIter).toBe(uninterruptedLastCritiqueIter);
-      expect(ctx.convergence).toEqual(uninterruptedState);
-      expect(ctx.convergence.findings).toHaveLength(1);
-      expect(ctx.convergence.findings[0]?.issueRef).toBe('v0.C1');
-      expect(ctx.convergence.invariants[0]?.occurrences).toHaveLength(2);
-      expect(ctx.convergence.operatorDecisionIds).toEqual(['op-clarify-scope']);
-      expect(ctx.convergence.interventionIds).toEqual(['op-clarify-scope', 'i-release-order']);
-      expect(ctx.convergence.contextDeliveries).toHaveLength(2);
-      expect(ctx.convergence.issueBudget).toEqual({ limit: 8, used: 2, exhausted: false });
-      expect(ctx.convergence.iterationLimit).toBe(3);
-      expect(readFileSync(path.join(work, 'rejected-log.jsonl'), 'utf8')).toBe(
-        `${JSON.stringify(keptRejected)}\n`,
-      );
-      expect(readFileSync(path.join(work, 'operator-intervention-migrations.jsonl'), 'utf8')).toBe(
-        `${JSON.stringify(keptDecision)}\n${JSON.stringify(keptMigration)}\n`,
-      );
-      expect(readFileSync(path.join(work, 'critique.v0.json'), 'utf8')).toBe(
-        `${JSON.stringify(critique)}\n`,
-      );
-      expect(readFileSync(path.join(work, 'update.v0.json'), 'utf8')).toBe(
-        `${JSON.stringify(update)}\n`,
-      );
-      expect(existsSync(path.join(work, 'system-check.v0.json'))).toBe(true);
-      expect(existsSync(path.join(work, 'plan.v2.md'))).toBe(false);
-      expect(existsSync(path.join(work, 'critique.v1.json'))).toBe(false);
-      expect(existsSync(path.join(work, 'update.v1.json'))).toBe(false);
-      expect(existsSync(path.join(work, 'system-check.v2.json'))).toBe(false);
-      expect(ctx.resume.archiveDir).not.toBe('');
-      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
-        expect.arrayContaining([
-          'plan.v2.md',
-          'critique.v1.json',
-          'update.v1.json',
-          'system-check.v2.json',
-          'rejected-log.jsonl',
-          'operator-intervention-migrations.jsonl',
-        ]),
-      );
-    } finally {
-      scratch.sweep();
-    }
-  });
-
-  it('invalidates restored review and deterministic coverage when authoritative facts change', () => {
-    const scratch = Scratch.create('resume-authoritative-change-test');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const ctx = makeTestRunContext(tmp, work, scratch, {
-        quality: 'balanced',
-        maxIters: 3,
-      });
-      ctx.convergence.planVersion = 1;
-      ctx.convergence.authoritativeDigest = 'previous-system-digest';
-      ctx.convergence.relationshipIds = ['R-stale'];
-      ctx.convergence.lastCritiquedPlanVersion = 1;
-      ctx.convergence.judgeApprovedPlanVersion = 1;
-      ctx.convergence.scanComplete = true;
-      ctx.convergence.systemCheckPassed = true;
-      writeConvergenceState(work, ctx.convergence);
-      writeFileSync(path.join(work, 'system-check.v1.json'), '{"passed":true}\n');
-
-      expect(prepareResume(ctx)).toBe(1);
-      expect(ctx.lastCritiqueIter).toBe(0);
-      expect(ctx.convergence.authoritativeDigest).toBe(ctx.systemContext.digest);
-      expect(ctx.convergence.relationshipIds).toEqual([]);
-      expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.scanComplete).toBe(false);
-      expect(ctx.convergence.systemCheckPassed).toBe(false);
-      expect(ctx.convergence.exhaustedLimits).toContain('authoritative-scope');
-      expect(ctx.convergence.unresolvedCoverage).toContain('plan.v1:authoritative-digest-changed');
-      expect(existsSync(path.join(work, 'system-check.v1.json'))).toBe(false);
-      expect(ctx.resume.archiveDir).not.toBe('');
-      expect(readdirSync(ctx.resume.archiveDir)).toContain('system-check.v1.json');
-      expect(readdirSync(ctx.resume.archiveDir)).toContain('convergence.v1.json');
-    } finally {
-      scratch.sweep();
-    }
-  });
-
-  it('invalidates all proof when selected plan bytes change without a version change', () => {
-    const scratch = Scratch.create('resume-same-version-plan-mutation');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
-      ctx.convergence.planVersion = 1;
-      ctx.convergence.lastCritiquedPlanVersion = 1;
-      ctx.convergence.judgeApprovedPlanVersion = 1;
-      ctx.convergence.scanComplete = true;
-      ctx.convergence.systemCheckPassed = true;
-      ctx.convergence.satisfied = true;
-      ctx.convergence.stopReason = 'proof-satisfied';
-      ctx.convergence.canonicalPlanSha256 = 'stale-canonical-proof';
-      ctx.convergence.invariants = [
-        {
-          id: 'I-v0-C1',
-          sourceFinding: 'I-v0-C1',
-          statement: 'Every consumer uses the current plan contract.',
-          status: 'resolved',
-          lastReviewedPlanVersion: 1,
-          occurrences: [
-            {
-              id: 'O-fixture',
-              dimension: 'consumer',
-              subject: 'api',
-              disposition: 'satisfied',
-              evidenceRefs: [{ kind: 'plan-section', section: 'Work Plan' }],
-            },
-          ],
-        },
-      ];
-      bindFrozenReadinessContract(ctx);
-      writeConvergenceState(work, ctx.convergence);
-      const originalPlanSha256 = ctx.convergence.planSha256;
-      writeSystemCheck(
-        work,
-        validateSystemCoverage(ctx.systemContext, path.join(work, 'plan.v1.md'), 1),
-      );
-      const checkBeforeMutation = JSON.parse(
-        readFileSync(path.join(work, 'system-check.v1.json'), 'utf8'),
-      ) as { planSha256: string };
-      expect(checkBeforeMutation.planSha256).toBe(originalPlanSha256);
-      writeFileSync(
-        path.join(work, 'plan.v1.md'),
-        `${readFileSync(path.join(work, 'plan.v1.md'), 'utf8')}\nchanged\n`,
-      );
-      const changedPlanSha256 = fileSha256(path.join(work, 'plan.v1.md'));
-      expect(changedPlanSha256).not.toBe(originalPlanSha256);
-
-      expect(prepareResume(ctx)).toBe(1);
-      expect(ctx.lastCritiqueIter).toBe(0);
-      expect(ctx.convergence.planSha256).toBe(changedPlanSha256);
-      expect(ctx.convergence.canonicalPlanSha256).toBeUndefined();
-      expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.scanComplete).toBe(false);
-      expect(ctx.convergence.systemCheckPassed).toBe(false);
-      expect(ctx.convergence.satisfied).toBe(false);
-      expect(ctx.convergence.stopReason).toBe('plan.v1:plan-digest-changed');
-      expect(ctx.convergence.unresolvedCoverage).toEqual(
-        expect.arrayContaining([
-          'plan.v1:plan-digest-changed',
-          'plan.v1:not-independently-reviewed',
-          'plan.v1:scan-incomplete',
-          'plan.v1:system-check',
-          'I-v0-C1',
-        ]),
-      );
-      expect(ctx.convergence.invariants[0]).toMatchObject({
-        status: 'active',
-        occurrences: [{ disposition: 'unresolved', evidenceRefs: [] }],
-      });
-      expect(ctx.convergence.invariants[0]?.lastReviewedPlanVersion).toBeUndefined();
-      expect(existsSync(path.join(work, 'system-check.v1.json'))).toBe(false);
-      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
-        expect.arrayContaining(['convergence.v1.json', 'system-check.v1.json']),
-      );
-      expect(
-        JSON.parse(readFileSync(path.join(ctx.resume.archiveDir, 'system-check.v1.json'), 'utf8')),
-      ).toMatchObject({ planSha256: originalPlanSha256, passed: true });
-      expect(
-        JSON.parse(readFileSync(path.join(ctx.resume.archiveDir, 'convergence.v1.json'), 'utf8')),
-      ).toMatchObject({
-        planSha256: originalPlanSha256,
-        canonicalPlanSha256: 'stale-canonical-proof',
-        satisfied: true,
-      });
-      expect(readConvergenceState(path.join(work, 'convergence.v1.json'))).toEqual(ctx.convergence);
-    } finally {
-      scratch.sweep();
-    }
-  });
-
-  it('invalidates deterministic proof when system-check plan hash mismatches unchanged bytes', () => {
-    const scratch = Scratch.create('resume-system-check-plan-digest');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
-      ctx.convergence.planVersion = 1;
-      ctx.convergence.lastCritiquedPlanVersion = 1;
-      ctx.convergence.judgeApprovedPlanVersion = 1;
-      ctx.convergence.scanComplete = true;
-      ctx.convergence.systemCheckPassed = true;
-      ctx.convergence.satisfied = true;
-      ctx.convergence.stopReason = 'proof-satisfied';
-      bindFrozenReadinessContract(ctx);
-      writeConvergenceState(work, ctx.convergence);
-      const selectedPlanSha256 = fileSha256(path.join(work, 'plan.v1.md'));
-      const mismatchedPlanSha256 = '0'.repeat(64);
-      const check = validateSystemCoverage(ctx.systemContext, path.join(work, 'plan.v1.md'), 1);
-      writeSystemCheck(work, { ...check, planSha256: mismatchedPlanSha256 });
-
-      expect(ctx.convergence.planSha256).toBe(selectedPlanSha256);
-      expect(check.planSha256).toBe(selectedPlanSha256);
-      expect(mismatchedPlanSha256).not.toBe(selectedPlanSha256);
-      expect(prepareResume(ctx)).toBe(1);
-
-      expect(ctx.convergence.planSha256).toBe(selectedPlanSha256);
-      expect(ctx.convergence.lastCritiquedPlanVersion).toBe(1);
-      expect(ctx.convergence.judgeApprovedPlanVersion).toBe(1);
-      expect(ctx.convergence.scanComplete).toBe(true);
-      expect(ctx.convergence.systemCheckPassed).toBe(false);
-      expect(ctx.convergence.systemMismatchIds).toEqual([]);
-      expect(ctx.convergence.satisfied).toBe(false);
-      expect(ctx.convergence.stopReason).toBe('plan.v1:system-check');
-      expect(ctx.convergence.unresolvedCoverage).toContain('plan.v1:system-check');
-      expect(existsSync(path.join(work, 'system-check.v1.json'))).toBe(false);
-      expect(readdirSync(ctx.resume.archiveDir)).toEqual(
-        expect.arrayContaining(['convergence.v1.json', 'system-check.v1.json']),
-      );
-      expect(
-        JSON.parse(readFileSync(path.join(ctx.resume.archiveDir, 'system-check.v1.json'), 'utf8')),
-      ).toMatchObject({ planSha256: mismatchedPlanSha256, passed: true });
-      expect(
-        JSON.parse(readFileSync(path.join(ctx.resume.archiveDir, 'convergence.v1.json'), 'utf8')),
-      ).toMatchObject({
-        planSha256: selectedPlanSha256,
-        systemCheckPassed: true,
-        satisfied: true,
-      });
-    } finally {
-      scratch.sweep();
-    }
-  });
-
-  it('accepts a pre-hash convergence state but requires fresh proof', () => {
-    const scratch = Scratch.create('resume-pre-hash-convergence-state');
-    try {
-      writeStructuredPlanFile(path.join(work, 'plan.v0.md'), 'V0');
-      writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'V1');
-      writeUpdate(path.join(work, 'update.v0.json'), 1);
-      const ctx = makeTestRunContext(tmp, work, scratch, { quality: 'balanced', maxIters: 3 });
-      ctx.convergence.planVersion = 1;
-      ctx.convergence.lastCritiquedPlanVersion = 1;
-      ctx.convergence.judgeApprovedPlanVersion = 1;
-      ctx.convergence.scanComplete = true;
-      ctx.convergence.systemCheckPassed = true;
-      ctx.convergence.satisfied = true;
-      ctx.convergence.stopReason = 'proof-satisfied';
-      bindFrozenReadinessContract(ctx);
-      const stateFile = writeConvergenceState(work, ctx.convergence);
-      const legacy = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
-      delete legacy.planSha256;
-      delete legacy.canonicalPlanSha256;
-      writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`);
-      writeSystemCheck(
-        work,
-        validateSystemCoverage(ctx.systemContext, path.join(work, 'plan.v1.md'), 1),
-      );
-
-      expect(readConvergenceState(stateFile)).toBeDefined();
-      expect(prepareResume(ctx)).toBe(1);
-      expect(ctx.convergence.planSha256).toBe(fileSha256(path.join(work, 'plan.v1.md')));
-      expect(ctx.convergence.lastCritiquedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
-      expect(ctx.convergence.scanComplete).toBe(false);
-      expect(ctx.convergence.systemCheckPassed).toBe(false);
-      expect(ctx.convergence.satisfied).toBe(false);
-      expect(ctx.convergence.stopReason).toBe('plan.v1:plan-digest-unavailable');
-      expect(ctx.convergence.unresolvedCoverage).toContain('plan.v1:plan-digest-unavailable');
-      expect(
-        JSON.parse(readFileSync(path.join(ctx.resume.archiveDir, 'convergence.v1.json'), 'utf8')),
-      ).not.toHaveProperty('planSha256');
-      expect(readConvergenceState(stateFile)).toEqual(ctx.convergence);
-    } finally {
+      rmSync(temporary, { recursive: true, force: true });
       scratch.sweep();
     }
   });
@@ -1000,37 +1052,40 @@ describe('resume workdir resolution', () => {
 
   it('resolves a single matching workdir', () => {
     const dir = makeRun('loop-feature');
-    const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature');
-    expect(result).toEqual({ kind: 'resolved', dir });
+    expect(resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature')).toEqual({
+      kind: 'resolved',
+      dir,
+    });
   });
 
   it('returns none with guidance when nothing matches', () => {
     mkdirSync(path.join(tmp, 'plans'), { recursive: true });
     const capture = captureStderr();
     try {
-      const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'ghost');
-      expect(result).toEqual({ kind: 'none' });
+      expect(resolveResumeWorkdir(path.join(tmp, 'plans'), 'ghost')).toEqual({ kind: 'none' });
       expect(capture.text()).toContain('resume: no existing workdir with state for ghost');
-      expect(capture.text()).toContain('set AGENT_QUORUM_WORK_DIR to override');
     } finally {
       capture.restore();
     }
   });
 
-  it('prefers the quality-suffixed dir among ambiguous candidates', () => {
+  it('prefers the quality-suffixed directory among ambiguous candidates', () => {
     makeRun('loop-feature');
     const balanced = makeRun('loop-feature-balanced');
-    const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature', 'balanced');
-    expect(result).toEqual({ kind: 'resolved', dir: balanced });
+    expect(resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature', 'balanced')).toEqual({
+      kind: 'resolved',
+      dir: balanced,
+    });
   });
 
-  it('reports ambiguity when no quality disambiguates', () => {
+  it('reports ambiguity without a quality match', () => {
     makeRun('loop-feature');
     makeRun('loop-feature-thorough');
     const capture = captureStderr();
     try {
-      const result = resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature');
-      expect(result).toEqual({ kind: 'ambiguous' });
+      expect(resolveResumeWorkdir(path.join(tmp, 'plans'), 'feature')).toEqual({
+        kind: 'ambiguous',
+      });
       expect(capture.text()).toContain('resume: ambiguous workdir for feature; candidates:');
     } finally {
       capture.restore();

@@ -8,6 +8,7 @@ import {
   writeRunRecord,
   type RunRecordDraft,
 } from '../../src/core/run-store.js';
+import { finalProjection } from '../helpers/final-projection.js';
 
 let tmp: string;
 let stateDir: string;
@@ -42,6 +43,7 @@ function seedFinishedRun(name: string, withLog: boolean, startedAt = recentRunTi
     state: 'finished',
     exitCode: 0,
     endedAt: startedAt,
+    final: finalProjection(workDir),
   });
   return workDir;
 }

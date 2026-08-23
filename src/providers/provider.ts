@@ -98,8 +98,15 @@ export interface ProviderAttemptOutcome {
   readonly failureReason: ProviderFailureReason | undefined;
 }
 
+export interface ProviderOutputValidation {
+  readonly valid: boolean;
+  readonly retryPrompt?: string;
+}
+
+export type ProviderOutputValidationResult = boolean | ProviderOutputValidation;
+
 export interface ProviderRunOptions {
-  readonly validateOutput?: (outFile: string) => boolean;
+  readonly validateOutput?: (outFile: string) => ProviderOutputValidationResult;
 }
 
 export type ProviderInvoke = (input: ProviderCallInput) => Promise<ProviderAttemptOutcome>;
@@ -215,6 +222,7 @@ export async function providerRun(
   options: ProviderRunOptions = {},
 ): Promise<number> {
   const runner = providerRuntime.matrix[role].runner;
+  let retryPrompt = '';
   return runWithRetries(`${runner} call`, providerRuntime.retry, async () => {
     const outcome = await providerRunOnce(
       providerRuntime,
@@ -225,12 +233,17 @@ export async function providerRun(
       schemaFile,
       tools,
       disallowedTools,
-      promptText,
+      retryPrompt === '' ? promptText : `${promptText}\n\n${retryPrompt}`,
     );
     const isClaudeSchemaRejection =
       runner === 'claude' && mode === 'json' && outcome.failureReason === 'schema-incompatible';
     if (outcome.status === 0 && options.validateOutput !== undefined) {
-      return { status: options.validateOutput(outFile) ? 0 : 1, retryable: true };
+      const validation = options.validateOutput(outFile);
+      const valid = typeof validation === 'boolean' ? validation : validation.valid;
+      if (!valid && typeof validation !== 'boolean' && validation.retryPrompt !== undefined) {
+        retryPrompt = validation.retryPrompt;
+      }
+      return { status: valid ? 0 : 1, retryable: true };
     }
     return { status: outcome.status, retryable: !isClaudeSchemaRejection };
   });

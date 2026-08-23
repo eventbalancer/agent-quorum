@@ -94,7 +94,7 @@ default is the built-in fallback.
 | `settings.translate`         | `AGENT_QUORUM_TRANSLATE`             | `false`    | localized companion plan pass                                        |
 | `settings.locale`            | `AGENT_QUORUM_LOCALE`                | `en`       | interaction/companion locale (non-`en` enables translate unless off) |
 | `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`        | `5`        | stable-diff telemetry threshold; never a proof gate                  |
-| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | provider retry attempts                                              |
+| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | retries for provider failures or rejected structured role output     |
 | `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`   | `10`       | delay between retries                                                |
 
 ### Role matrix (`roles.<role>`)
@@ -112,23 +112,34 @@ override, exact-model safe-input registry, then `unknown`. The run records the
 source and value in `run.meta.tsv`. Input sizing records UTF-8 bytes for the
 skill, schema, and rendered prompt plus a fixed conservative wrapper allowance
 as telemetry. The byte estimate does not block provider calls, reduce retained
-context, or downgrade convergence;
-`inputTokenLimit` remains readable for configuration and artifact compatibility
-until admission can use provider/model-appropriate token evidence.
+context, or downgrade readiness. `inputTokenLimit` remains configuration and
+telemetry; it is not semantic-admission evidence or a readiness limit.
+
+For readiness-bearing structured roles, the same retry policy also covers a
+successful transport whose output fails schema validation or closed-world
+semantic admission. A repair attempt receives a trusted validation code/path
+and the exact candidate anchor catalog, never rejected provider prose. Proof
+state changes only after admission succeeds; exhaustion remains fail-closed.
 
 Quality is the frozen assurance appetite for a run. `quick` uses compact
 context, the creator one-shot path, and standard-risk assurance without Judge;
 `balanced` uses cumulative applicable-domain context and permits targeted Judge
 gates for high risk; `thorough` additionally requires an exhaustive scan inside
-applicable domains and disables provider sessions. The compatibility promises
-remain `best-effort`, `cumulative`, and `exhaustive`. Applicability and risk,
+applicable domains and disables provider sessions. Their completeness promises
+are `best-effort`, `cumulative`, and `exhaustive`. Applicability and risk,
 not the preset name alone, determine which proof gates are required. High-risk
 work under an appetite that cannot provide its required Judge/scan reports the
-`assurance-appetite` convergence limit. An additive, backward-compatible local
+`assurance-appetite` readiness limit. An additive, backward-compatible local
 public field, flag, config key, or artifact projection remains standard risk
 unless repository evidence shows migration, authorization, data-integrity,
 distributed-ordering, irreversible-delivery, or comparable high-impact
 consequences.
+
+The current readiness contract is intentionally breaking, but configuration is
+not: the setting names, environment variables, precedence, role/provider
+selection, quality meanings, and CLI flags on this page are unchanged. There is
+no compatibility flag that makes pre-change readiness artifacts, role outputs,
+resume state, or run records admissible as current proof.
 
 | Tool field (per role)                                                          | Applies to                             |
 | ------------------------------------------------------------------------------ | -------------------------------------- |
@@ -161,7 +172,7 @@ Provider watchdog knobs for `knobs.codex`, `knobs.claude`, and `knobs.cursor`
 Codex is commonly silent while it works, so its byte-idle and semantic-idle
 defaults are `0` (disabled); its `callTimeoutSeconds` wall-clock limit remains
 `1800`. Claude and Cursor use the table defaults for all five knobs. A watchdog
-timeout is a provider transport failure and does not become a convergence limit.
+timeout is a provider transport failure and does not become a readiness limit.
 
 Pass knobs for `knobs.fixPass` and `knobs.translatePass` (env prefix
 `AGENT_QUORUM_FIX_PASS_` / `AGENT_QUORUM_TRANSLATE_PASS_`): `timeoutSeconds`
@@ -192,12 +203,17 @@ standard output. Capture is best-effort and never changes a provider exit code.
 
 Codex Structured Outputs requires every property declared by an object schema to
 also appear in that object's `required` array. Before a Codex JSON-mode call,
-agent-quorum writes a temporary strict projection of the canonical additive role
-schema: canonical optional properties become required and nullable. After a
-successful call, null placeholders for those optional properties are removed,
-the temporary schema is deleted, and the payload is validated against the
-unchanged canonical draft 2019-09 contract. Legacy payloads therefore remain
-schema-readable while current Codex calls satisfy the stricter provider format.
+agent-quorum writes a temporary strict projection of the canonical role schema:
+canonical optional properties become required and nullable, and an array that
+is canonically constrained to `maxItems: 0` receives a provider-only `items`
+schema. An array without `items` and without that zero-length constraint is
+rejected. A `$ref` is projected without sibling annotations or constraints,
+which remain present in the canonical schema. After a successful call, null
+placeholders for optional properties are removed, the temporary schema is
+deleted, and the payload is validated against the canonical draft 2019-09
+contract. Readiness-bearing payloads then pass the same closed-world semantic
+admission as every other provider; pre-change payloads are unsupported rather
+than backfilled.
 
 Claude Code `2.1.205` is the verified structured-output baseline. The canonical
 role contracts stay on JSON Schema draft 2019-09 for local validation; immediately

@@ -37,11 +37,23 @@ async function main(): Promise<number> {
 
   process.stdout.write(
     [
-      `converged in ${result.iterations} iteration(s)`,
+      `completed in ${result.iterations} iteration(s)`,
       `final plan: ${result.finalPlanPath}`,
       `summary:    ${result.summaryPath}`,
     ].join('\n') + '\n',
   );
+
+  if (result.final !== undefined) {
+    const { readiness, judge } = result.final;
+    process.stdout.write(
+      [
+        `final: ${result.final.status} (${readiness.decision})`,
+        `proof: ${readiness.canonicalPlanSha256}`,
+        `occurrences: ${readiness.occurrenceCoverage.resolvedOccurrenceIds.length}/${readiness.occurrenceCoverage.expectedOccurrenceIds.length} resolved`,
+        `judge: ${judge.required ? (judge.available ? String(judge.verdict) : 'unavailable') : 'exempt'}`,
+      ].join('\n') + '\n',
+    );
+  }
 
   if (result.health !== undefined) {
     const { addressed, critic, validAddressedPct } = result.health;

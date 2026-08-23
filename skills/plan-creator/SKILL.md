@@ -233,7 +233,7 @@ When `## Output mode` asks for clean Markdown:
 2. Apply every valid `blocker` or `major` issue.
 3. Apply `minor` and `nit` only when they clearly improve execution quality.
 4. Preserve the plan as a readable implementation document, not a changelog.
-5. Normalize the revised plan to the Plan Document Contract when the current plan is loose or prose-heavy: ensure every Work Plan item carries an acceptance gate and a non-empty Effort cell, that a multi-phase plan leads with the `Phase | Touches | Depends on | Effort | Acceptance gate` table, and that the leading frontmatter block is present and consistent with the Work Plan. When the input plan lacks a leading frontmatter block — a direct or legacy input, or a resumed pre-change plan — **add a well-formed block**: derive `phase_count` and `phases[].{name, effort}` from the Work Plan table, set `effort_total` from the overall scope, and set `status` from plan readiness. This is the upgrade path for frontmatter-less inputs: a critic `blocker` for a missing block drives this update so the revised plan carries a valid header.
+5. Normalize the revised plan to the Plan Document Contract when the current plan is loose or prose-heavy: ensure every Work Plan item carries an acceptance gate and a non-empty Effort cell, that a multi-phase plan leads with the `Phase | Touches | Depends on | Effort | Acceptance gate` table, and that the leading frontmatter block is present and consistent with the Work Plan. When a fresh direct or otherwise current input lacks a leading frontmatter block, **add a well-formed block**: derive `phase_count` and `phases[].{name, effort}` from the Work Plan table, set `effort_total` from the overall scope, and set `status` from plan readiness. A critic `blocker` for a missing block drives this normalization so the revised plan carries a valid header; unsupported resumed readiness schemas are rejected before update mode.
 6. Keep or rebuild the bottom `## Impact Graph` so it satisfies the coverage checklist and anti-bloat rules in the contract, not merely matches the revised prose.
 7. Return only the full revised Markdown plan. No JSON, no wrapper fences, no revision notes. **The first line of your output must be the opening `---` of the YAML frontmatter block**, with the `# ` title immediately after the closing `---` — never open with "I've verified…", "Here is the revised plan", or any preamble before the frontmatter.
 
@@ -262,25 +262,19 @@ For each original critique issue, emit exactly one `issues[]` entry with the sam
 - `reject_hallucinated` — evidence is false, missing, or does not support the claim.
 - `reject_out_of_scope` — the issue is outside this plan's scope.
 - `reject_taste` — subjective preference without enough execution value.
-- `duplicate_of_prior` — semantically repeats a rejected-log entry.
 
 Rules:
 
 1. Preserve issue order and IDs. Do not add new issues.
 2. Never raise severity; only keep or downgrade it.
 3. Include all required fields on every issue: `id`, `verdict`, `verdict_reason`, `final_severity`, `duplicate_of`.
-4. `duplicate_of` is the rejected-log ID only for `duplicate_of_prior`; otherwise it is `null`.
+4. `duplicate_of` is reserved and must be `null` for every current verdict.
 5. `applied[]` contains only issue IDs actually addressed by the revised Markdown.
 6. Every accepted or downgraded `blocker` or `major` must be in `applied[]`.
-7. `rejected_append[]` contains only accepted or downgraded `minor`/`nit` issues that you chose not to apply in the revised plan.
+7. `rejected_append` is always empty. Current critiques contain only material issues; optional improvements are carried separately as opportunities.
 8. If 100% of issues are accepted, re-check at least one evidence item before finalizing.
-9. For every accepted or downgraded `blocker` or `major`, emit one `systemic_dispositions[]` entry. Classify it as `local` with a non-empty rationale plus grounded `evidence_refs`, or `cross-cutting` with a non-empty invariant statement and the complete analogous occurrence matrix. Local evidence uses the same typed kinds as critic evidence and must name an existing file line, plan section, phase/gate, command, repository, or topology relationship. Every cross-cutting occurrence needs a non-blank `dimension` and `subject`, and duplicate tuples are invalid. Do not infer missing occurrences. If an operator decision supersedes a finding, cite its intervention ID in `superseded_by`; a validated operator supersession may replace local evidence, but prior agent conclusions cannot supersede operator decisions.
+9. `systemic_dispositions` is always required. Emit exactly one entry for every accepted or downgraded `blocker` or `major`; use an empty array only when there are no such material issues. Classify each entry as `local` with a non-empty rationale, or `cross-cutting` with a non-empty invariant statement and the complete analogous occurrence matrix. Every non-superseded disposition requires grounded `evidence_refs` using the same typed kinds as critic evidence and must name an existing file line, plan section, phase/gate, command, repository, or topology relationship. Every cross-cutting occurrence needs a non-blank `dimension` and `subject`, and duplicate tuples are invalid. Do not infer missing occurrences. If an operator decision supersedes a finding, cite its intervention ID in `superseded_by`; a validated operator supersession may replace grounded evidence, but prior agent conclusions cannot supersede operator decisions.
+
+Metadata mode supplies a `## Deterministic candidate evidence anchors` catalog for the revised plan. Every non-superseded systemic disposition must include at least one current-candidate `file-line`, `plan-section`, or `phase-gate` reference copied exactly from that catalog. Copy section names without a Markdown `#` prefix and use only the supplied candidate basename and line range. Do not reuse an original-plan anchor merely because it appears in the critique; ground the disposition in the revised candidate that actually applies the issue.
 
 The mandatory retained context is evidence, not consensus. Judge the critic independently; conflicting creator and critic conclusions are valid when each is grounded. Preserve retained invariant and relationship IDs verbatim in the revised plan and metadata.
-
-Allowed `rejected_append[].reason` prefixes:
-
-- `not_value_adding`
-- `conflicts_with: C<id>`
-- `out_of_plan_scope`
-- `requires_external_decision`

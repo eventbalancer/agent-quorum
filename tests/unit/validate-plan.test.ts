@@ -94,6 +94,29 @@ describe('validate_final_plan', () => {
     expect(findings.unresolved[0]?.file).toBe('missing.md');
   });
 
+  it('keeps provider-supplied reference bodies out of normal diagnostics', () => {
+    const secret = 'REFERENCE_EVIDENCE_SECRET_743bc1';
+    mkdirSync(path.join(projectRoot, secret));
+    writeFileSync(path.join(projectRoot, secret, 'stale.ts'), 'one\n');
+    const plan = path.join(tmp, 'private-references.final.md');
+    writeFileSync(
+      plan,
+      `# Plan\n\nRefs: \`${secret}/stale.ts:999\`, \`${secret}/missing.ts:7\`.\n`,
+    );
+
+    const capture = captureStderr();
+    try {
+      validateFinalPlan(projectRoot, plan);
+      expect(capture.text()).toContain('stale line references: 1');
+      expect(capture.text()).toContain('unresolved:          1 (likely future files)');
+      expect(capture.text()).not.toContain(secret);
+    } finally {
+      capture.restore();
+    }
+
+    expect(readFileSync(path.join(tmp, 'findings.json'), 'utf8')).toContain(secret);
+  });
+
   it('resolves absolute references only when they remain inside the repository boundary', () => {
     const outside = path.join(tmp, 'outside.md');
     writeFileSync(outside, 'one\n');

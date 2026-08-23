@@ -15,7 +15,7 @@ import { DISABLED_STREAM_KNOBS } from '../../src/providers/registry.js';
 import type { StreamKnobs } from '../../src/providers/watchdog.js';
 import type { Scratch } from '../../src/runtime/scratch.js';
 import { REPO_ROOT } from './harness.js';
-import { createConvergenceState } from '../../src/core/convergence.js';
+import { createReadinessProofState } from '../../src/core/readiness-proof.js';
 import type { SystemContext } from '../../src/core/system-context.js';
 
 export const BASE_STREAM_KNOBS: StreamKnobs = {
@@ -26,6 +26,9 @@ export const BASE_STREAM_KNOBS: StreamKnobs = {
   semanticTimeoutSeconds: 0,
   wallTimeoutSeconds: 0,
 };
+
+export const TEST_SOURCE_DIGEST = '1'.repeat(64);
+export const TEST_SYSTEM_DIGEST = '2'.repeat(64);
 
 export function fixturePermissions(): RolePermissions {
   const disallowed = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
@@ -106,7 +109,7 @@ export function makeTestRunContext(
     originalRequestAvailable: options.mode === 'prompt',
     declaredScope: [],
     sources: [],
-    digest: 'test-system-digest',
+    digest: TEST_SYSTEM_DIGEST,
     crossRepository: false,
     relationships: [],
     limitations: [],
@@ -125,11 +128,11 @@ export function makeTestRunContext(
       gates: [],
     },
   };
-  const convergence = createConvergenceState({
+  const readinessProof = createReadinessProofState({
     quality,
     matrix: qualityMatrix(quality),
     mode: options.mode ?? 'plan',
-    sourceDigest: options.sourceDigest ?? 'test-source-digest',
+    sourceDigest: options.sourceDigest ?? TEST_SOURCE_DIGEST,
     authoritativeDigest: systemContext.digest,
     relationshipIds: [],
     maxIters: settings.maxIters,
@@ -175,7 +178,7 @@ export function makeTestRunContext(
     },
     lastCritiqueIter: -1,
     resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
-    convergence,
+    readinessProof,
     systemContext,
   };
 }

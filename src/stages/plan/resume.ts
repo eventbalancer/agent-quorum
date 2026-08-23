@@ -14,17 +14,28 @@ import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
 import { artifactVersion } from './critic.js';
 import { schemaValidQuiet } from '../../core/schema.js';
+import { admitCreatorUpdate, type ExpectedCreatorIssue } from '../../core/readiness-admission.js';
 import type { ResumeState, RunContext } from '../../core/run-context.js';
 import {
-  addConvergenceLimit,
-  fileSha256,
-  requiresSystemCoverage,
-  type ConvergenceState,
-  readConvergenceState,
-  writeConvergenceState,
-} from '../../core/convergence.js';
+  bindVersionedPlan,
+  createOccurrenceSourceBinding,
+  invalidateDeterministicProof,
+  invalidateFinalizationProof,
+  invalidateFullReviewProof,
+  recordAuthoritativeContext,
+  type OccurrenceSource,
+  type OccurrenceSourceBinding,
+  type ReadinessProofState,
+} from '../../core/readiness-proof.js';
+import { canonicalJsonSha256, fileSha256, stableTupleId } from '../../core/digest.js';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
-import { readReadinessContract } from '../../core/readiness-contract.js';
+import { readReadinessContract, type ReadinessContract } from '../../core/readiness-contract.js';
+import {
+  readReadinessProofState,
+  readReadinessProofStateIfPresent,
+  writeReadinessProofState,
+} from '../../core/readiness-store.js';
+import { validateSystemCoverage } from '../../core/system-context.js';
 
 function sortedMatches(work: string, prefix: string, suffix: string): string[] {
   let names: string[];
@@ -39,38 +50,53 @@ function sortedMatches(work: string, prefix: string, suffix: string): string[] {
     .map((name) => path.join(work, name));
 }
 
-// Legacy stability is update-based (with v0 as the base); once versioned
-// convergence artifacts exist, every selected plan also needs its matching state.
-export function lastStablePlan(work: string, creatorSchema: string): number {
-  const hasVersionedConvergence = sortedMatches(work, 'convergence.v', '.json').length > 0;
+export function lastStablePlan(ctx: RunContext): number {
+  const work = ctx.work;
   let best = -1;
-  for (const file of sortedMatches(work, 'plan.v', '.md')) {
+  let stableProof: ReadinessProofState | undefined;
+  const plans = sortedMatches(work, 'plan.v', '.md').sort((left, right) => {
+    return (
+      (artifactVersion(left, 'plan.v', '.md') ?? Number.MAX_SAFE_INTEGER) -
+      (artifactVersion(right, 'plan.v', '.md') ?? Number.MAX_SAFE_INTEGER)
+    );
+  });
+  for (const file of plans) {
     const n = artifactVersion(file, 'plan.v', '.md');
     if (n === undefined) {
       continue;
     }
+    const proofFile = path.join(work, `convergence.v${n}.json`);
+    let proof: ReadinessProofState | undefined;
+    try {
+      proof = readReadinessProofStateIfPresent(proofFile);
+    } catch {
+      resumeFailure(`invalid readiness proof for plan.v${n}.md (code=proof-invalid)`);
+    }
+    if (proof === undefined) {
+      continue;
+    }
+    assertCandidateProof(proof, n);
     if (n === 0) {
-      const state = readConvergenceState(path.join(work, 'convergence.v0.json'));
-      if (!hasVersionedConvergence || state?.planVersion === 0) {
-        best = Math.max(best, 0);
-      }
+      best = Math.max(best, 0);
+      stableProof = proof;
+      continue;
+    }
+    if (best !== n - 1 || stableProof === undefined) {
       continue;
     }
     const update = path.join(work, `update.v${n - 1}.json`);
     if (!nonEmptyFile(update)) {
       continue;
     }
-    if (!schemaValidQuiet(update, creatorSchema)) {
-      continue;
+    if (!schemaValidQuiet(update, ctx.skills.creatorSchema)) {
+      resumeFailure(`creator update for plan.v${n}.md failed schema validation`);
     }
-    if (hasVersionedConvergence) {
-      const state = readConvergenceState(path.join(work, `convergence.v${n}.json`));
-      if (state?.planVersion !== n) {
-        continue;
-      }
+    if (!updateCommitsPlanAndLedger(ctx, update, file, stableProof, proof, n)) {
+      continue;
     }
     if (n > best) {
       best = n;
+      stableProof = proof;
     }
   }
   if (best < 0) {
@@ -79,6 +105,187 @@ export function lastStablePlan(work: string, creatorSchema: string): number {
     throw new HaltError(message, 4, true);
   }
   return best;
+}
+
+function resumeFailure(detail: string): never {
+  const message = `resume failed: ${detail}`;
+  err(message);
+  throw new HaltError(message, 4, true);
+}
+
+function assertCandidateProof(state: ReadinessProofState, planVersion: number): void {
+  if (state.planVersion !== planVersion || state.catalog.expectedPlanVersion !== planVersion) {
+    resumeFailure(`readiness proof does not match plan.v${planVersion}.md`);
+  }
+  if (state.planSha256 === undefined) {
+    resumeFailure(`readiness proof for plan.v${planVersion}.md is unbound`);
+  }
+  const findingIds = [...state.findings.map((finding) => finding.id)].sort();
+  if (!sameStrings(findingIds, state.catalog.materialIssueIds)) {
+    resumeFailure(`readiness proof catalog for plan.v${planVersion}.md is incomplete`);
+  }
+  for (const slot of state.sources) {
+    if (
+      slot.requirement.required &&
+      (slot.requirement.expectedBinding.candidate.contentDigest.startsWith('unbound:') ||
+        slot.requirement.expectedBinding.lineage.lineageDigest.startsWith('unbound:'))
+    ) {
+      resumeFailure(`readiness proof source ${slot.source} for plan.v${planVersion}.md is unbound`);
+    }
+  }
+}
+
+function readJsonValue(file: string): JsonValue | undefined {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
+  } catch {
+    return undefined;
+  }
+}
+
+function rejectedLedgerEntries(work: string): JsonValue[] {
+  const file = path.join(work, 'rejected-log.jsonl');
+  if (!nonEmptyFile(file)) {
+    return [];
+  }
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as JsonValue];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function expectedCreatorIssuesForResume(
+  ctx: RunContext,
+  previousState: ReadinessProofState,
+): ExpectedCreatorIssue[] {
+  const planVersion = previousState.planVersion;
+  const file = path.join(ctx.work, `critique.v${planVersion}.json`);
+  if (!nonEmptyFile(file) || !schemaValidQuiet(file, ctx.skills.criticSchema)) {
+    return resumeFailure(`critique for plan.v${planVersion}.md failed schema validation`);
+  }
+  const value = readJsonValue(file);
+  if (!isJsonObject(value) || value.plan_version !== planVersion || !Array.isArray(value.issues)) {
+    return resumeFailure(`critique for plan.v${planVersion}.md has invalid lineage`);
+  }
+  return value.issues.map((entry, index) => {
+    if (
+      !isJsonObject(entry) ||
+      typeof entry.id !== 'string' ||
+      (entry.severity !== 'blocker' && entry.severity !== 'major') ||
+      typeof entry.claim !== 'string' ||
+      entry.claim.trim() === '' ||
+      typeof entry.evidence !== 'string' ||
+      entry.evidence.trim() === '' ||
+      typeof entry.suggested_fix !== 'string' ||
+      entry.suggested_fix.trim() === ''
+    ) {
+      return resumeFailure(`critique issue ${index} for plan.v${planVersion}.md is invalid`);
+    }
+    const issueRef = `v${planVersion}.${entry.id}`;
+    const judgeRevisionId = stableTupleId('judge-revision', [
+      planVersion,
+      entry.claim,
+      entry.evidence,
+      entry.suggested_fix,
+    ]);
+    const provenance = previousState.admittedCriticIssueRefs.includes(issueRef)
+      ? 'critic'
+      : previousState.intermediateJudgeMaterialIssueIds.includes(judgeRevisionId)
+        ? 'intermediate-judge'
+        : resumeFailure(`critique issue ${index} has no admitted role provenance`);
+    return {
+      id: entry.id,
+      severity: entry.severity,
+      claim: entry.claim,
+      evidence: entry.evidence,
+      suggestedFix: entry.suggested_fix,
+      provenance,
+    };
+  });
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function updateCommitsPlanAndLedger(
+  ctx: RunContext,
+  updateFile: string,
+  planFile: string,
+  previousState: ReadinessProofState,
+  state: ReadinessProofState,
+  planVersion: number,
+): boolean {
+  const work = ctx.work;
+  const value = readJsonValue(updateFile);
+  if (!isJsonObject(value) || value.plan_version !== planVersion) {
+    return false;
+  }
+  if (value.plan_markdown !== readFileSync(planFile, 'utf8')) {
+    return false;
+  }
+  const rejected = Array.isArray(value.rejected_append) ? value.rejected_append : [];
+  const ledger = rejectedLedgerEntries(work);
+  const availableLedgerEntries = ledger.filter(isJsonObject);
+  for (const expected of rejected) {
+    if (!isJsonObject(expected)) {
+      return false;
+    }
+    const committedIndex = availableLedgerEntries.findIndex(
+      (entry) =>
+        entry.iter === planVersion - 1 &&
+        entry.id === expected.id &&
+        entry.claim === expected.claim &&
+        entry.reason === expected.reason,
+    );
+    if (committedIndex < 0) {
+      return false;
+    }
+    availableLedgerEntries.splice(committedIndex, 1);
+  }
+  let admitted;
+  try {
+    admitted = admitCreatorUpdate({
+      value,
+      currentCatalog: previousState.catalog,
+      fromPlanVersion: planVersion - 1,
+      expectedPlanVersion: planVersion,
+      expectedIssues: expectedCreatorIssuesForResume(ctx, previousState),
+      retainedFindings: previousState.findings,
+      retainedInvariants: previousState.invariants,
+      evidenceContext: {
+        work,
+        projectRoot: ctx.provider.projectRoot,
+        planVersion,
+        candidateContent: readFileSync(planFile, 'utf8'),
+        candidatePath: planFile,
+      },
+      operatorInterventionIds: previousState.interventionIds,
+      admittedCriticIssueRefs: previousState.admittedCriticIssueRefs,
+      admittedJudgeRevisionIssueIds: previousState.intermediateJudgeMaterialIssueIds,
+    });
+  } catch {
+    return resumeFailure(`creator update for plan.v${planVersion}.md failed semantic admission`);
+  }
+  if (
+    state.creatorTransitionReceipt === undefined ||
+    !sameJson(admitted.transitionReceipt, state.creatorTransitionReceipt) ||
+    !sameJson(admitted.nextCatalog, state.catalog) ||
+    !sameJson(admitted.findings, state.findings) ||
+    !sameJson(admitted.invariants, state.invariants) ||
+    !sameJson(admitted.materialRevisionProofGapIds, state.materialRevisionProofGapIds)
+  ) {
+    return resumeFailure(
+      `creator update for plan.v${planVersion}.md does not match its readiness proof receipt`,
+    );
+  }
+  return true;
 }
 
 function stampForArchive(): string {
@@ -165,67 +372,110 @@ export function archiveResumeStale(work: string, state: ResumeState, start: numb
   }
 }
 
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+function readFrozenResumeContract(work: string): ReadinessContract {
+  const file = path.join(work, 'readiness-contract.json');
+  try {
+    return readReadinessContract(file);
+  } catch {
+    resumeFailure('readiness contract is missing or invalid (code=contract-invalid)');
+  }
+}
+
+function frozenContractProofSemanticsMatch(
+  restored: ReadinessProofState,
+  contract: ReadinessContract,
+): boolean {
+  const expectedQuestionIds = contract.unresolvedMaterialQuestions.map((question) => question.id);
+  if (!sameStrings(restored.unresolvedMaterialQuestionIds, expectedQuestionIds)) {
+    return false;
+  }
+  for (const assessment of contract.domainAssessments) {
+    const current = restored.riskDomains.find(
+      (candidate) => candidate.domain === assessment.domain,
+    );
+    if (current === undefined) {
+      return false;
+    }
+    if (assessment.applicability === 'applicable' && current.applicability !== 'applicable') {
+      return false;
+    }
+    if (assessment.risk === 'high' && current.risk !== 'high') {
+      return false;
+    }
+  }
+  return true;
+}
+
 function assertCompatibleResumeContract(
   ctx: RunContext,
-  restored: ConvergenceState | undefined,
+  restored: ReadinessProofState,
+  contract: ReadinessContract,
 ): void {
-  if (restored === undefined) {
-    const legacySource = path.join(ctx.work, ctx.mode === 'prompt' ? 'prompt.md' : 'plan.v0.md');
-    if (existsSync(legacySource) && fileSha256(legacySource) !== ctx.convergence.sourceDigest) {
-      const message = 'resume failed: input source differs from the selected legacy run contract';
-      err(message);
-      throw new HaltError(message, 4, true);
-    }
-    return;
-  }
   const mismatches: string[] = [];
-  if (restored.sourceDigest !== ctx.convergence.sourceDigest) {
+  if (
+    restored.sourceDigest !== contract.sourceDigest ||
+    contract.sourceDigest !== ctx.readinessProof.sourceDigest
+  ) {
     mismatches.push('input source');
   }
-  if (restored.quality !== ctx.convergence.quality) {
+  if (
+    restored.quality !== contract.appetite.quality ||
+    contract.appetite.quality !== ctx.settings.quality
+  ) {
     mismatches.push('quality');
   }
   if (
-    restored.promise !== ctx.convergence.promise ||
-    restored.requiredProofLevel !== ctx.convergence.requiredProofLevel ||
-    restored.requiresExhaustiveScan !== ctx.convergence.requiresExhaustiveScan
-  ) {
-    mismatches.push('completeness promise');
-  }
-  if (restored.iterationLimit !== ctx.settings.maxIters) {
-    mismatches.push('iteration limit');
-  }
-  if (
-    restored.scopeSource !== ctx.convergence.scopeSource ||
-    restored.originalRequestAvailable !== ctx.convergence.originalRequestAvailable
+    restored.scopeSource !== ctx.readinessProof.scopeSource ||
+    restored.originalRequestAvailable !== ctx.readinessProof.originalRequestAvailable
   ) {
     mismatches.push('scope source');
   }
-  const frozenContractFile = path.join(ctx.work, 'readiness-contract.json');
-  const restoredContractDigest = restored.readinessContractDigest;
-  if (existsSync(frozenContractFile)) {
-    try {
-      const frozenContract = readReadinessContract(frozenContractFile);
-      if (
-        restoredContractDigest !== undefined &&
-        !restoredContractDigest.startsWith('legacy-derived:') &&
-        restoredContractDigest !== frozenContract.contractDigest
-      ) {
-        mismatches.push('readiness contract digest');
-      }
-    } catch {
-      mismatches.push('readiness contract');
-    }
-  } else if (
-    restoredContractDigest !== undefined &&
-    !restoredContractDigest.startsWith('legacy-derived:')
+  if (
+    restored.iterationLimit !== contract.appetite.iterationLimit ||
+    contract.appetite.iterationLimit !== ctx.settings.maxIters
   ) {
-    mismatches.push('readiness contract');
+    mismatches.push('iteration limit');
+  }
+  if (
+    restored.issueBudget.limit !== contract.appetite.issueBudget ||
+    restored.judgeAllowed !== contract.appetite.judgeAllowed ||
+    restored.exhaustiveApplicableDomains !== contract.appetite.exhaustiveApplicableDomains
+  ) {
+    mismatches.push('assurance appetite');
+  }
+  if (restored.readinessContractDigest !== contract.contractDigest) {
+    mismatches.push('readiness contract digest');
+  }
+  if (
+    !sameStrings(restored.catalog.riskDomainIds, contract.proofCatalogSeed.riskDomains) ||
+    !sameStrings(
+      restored.catalog.retainedContextCategories,
+      contract.proofCatalogSeed.retainedContextCategories,
+    )
+  ) {
+    mismatches.push('readiness proof catalog seed');
+  }
+  if (
+    !contract.operatorDecisionIds.every((decisionId) =>
+      restored.operatorDecisionIds.includes(decisionId),
+    )
+  ) {
+    mismatches.push('operator decisions');
+  }
+  if (!frozenContractProofSemanticsMatch(restored, contract)) {
+    mismatches.push('frozen readiness semantics');
   }
   if (mismatches.length > 0) {
-    const message = `resume failed: ${mismatches.join(', ')} differs from the selected run contract`;
-    err(message);
-    throw new HaltError(message, 4, true);
+    resumeFailure(`${mismatches.join(', ')} differs from the selected run contract`);
   }
 }
 
@@ -278,99 +528,278 @@ function planRefVersion(value: JsonValue | undefined): number | undefined {
   return match === null ? undefined : Number(match[1]);
 }
 
-function systemCheckMatchesPlan(
-  work: string,
-  planVersion: number,
-  state: ConvergenceState,
-): boolean {
-  const checkFile = path.join(work, `system-check.v${planVersion}.json`);
-  const planFile = path.join(work, `plan.v${planVersion}.md`);
-  if (!existsSync(checkFile) || !existsSync(planFile)) {
-    return false;
-  }
-  try {
-    const check = JSON.parse(readFileSync(checkFile, 'utf8')) as JsonValue;
-    const selectedPlanSha256 = fileSha256(planFile);
-    return (
-      isJsonObject(check) &&
-      check.schemaVersion === 1 &&
-      check.planVersion === planVersion &&
-      check.systemDigest === state.authoritativeDigest &&
-      state.planSha256 === selectedPlanSha256 &&
-      check.planSha256 === selectedPlanSha256 &&
-      check.passed === true &&
-      Array.isArray(check.mismatches) &&
-      check.mismatches.length === 0 &&
-      (!('required' in check) || check.required === requiresSystemCoverage(state)) &&
-      (!Array.isArray(check.requiredEvidenceUnavailable) ||
-        check.requiredEvidenceUnavailable.length === 0)
-    );
-  } catch {
-    return false;
-  }
+function requiredStringArray(value: JsonValue | undefined): string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? value
+    : undefined;
 }
 
-function invalidateRestoredProof(
-  state: ConvergenceState,
-  planVersion: number,
-  marker: string,
-): void {
-  delete state.canonicalPlanSha256;
-  delete state.lastCritiquedPlanVersion;
-  delete state.judgeApprovedPlanVersion;
-  delete state.judgeEvaluatedPlanVersion;
-  delete state.judgeReady;
-  state.scanComplete = false;
-  state.systemCheckPassed = false;
-  state.systemMismatchIds = [];
-  state.requiredEvidenceUnavailable = [];
-  state.currentActionableIssues = [];
-  state.satisfied = false;
-  state.decision = 'unable-to-decide';
-  state.reasonCodes = ['fresh-review-required'];
-  state.stopReason = marker;
-  state.unresolvedCoverage = [
-    ...new Set([
-      ...state.unresolvedCoverage,
-      marker,
-      `plan.v${planVersion}:not-independently-reviewed`,
-      `plan.v${planVersion}:scan-incomplete`,
-      `plan.v${planVersion}:system-check`,
-      ...state.invariants.map(({ id }) => id),
-    ]),
-  ];
-  for (const invariant of state.invariants) {
-    invariant.status = 'active';
-    delete invariant.lastReviewedPlanVersion;
-    for (const occurrence of invariant.occurrences) {
-      occurrence.disposition = 'unresolved';
-      occurrence.evidenceRefs = [];
+function requiresSystemCoverage(state: ReadinessProofState): boolean {
+  return state.riskDomains.some(
+    (domain) =>
+      domain.domain === 'cross-repository-delivery' && domain.applicability === 'applicable',
+  );
+}
+
+function systemCheckMatchesState(
+  ctx: RunContext,
+  state: ReadinessProofState,
+  planFile: string,
+  contract: ReadinessContract,
+): boolean {
+  const file = path.join(ctx.work, `system-check.v${state.planVersion}.json`);
+  if (state.systemProofBinding === undefined) {
+    return !existsSync(file);
+  }
+  const check = readJsonValue(file);
+  if (!isJsonObject(check)) {
+    return false;
+  }
+  const trustedCheck = validateSystemCoverage(ctx.systemContext, planFile, state.planVersion, {
+    required: requiresSystemCoverage(state),
+    inScope: contract.boundary.inScope,
+    outOfScope: contract.boundary.outOfScope,
+  });
+  const trustedValue = JSON.parse(JSON.stringify(trustedCheck)) as JsonValue;
+  const mismatches = requiredStringArray(check.mismatches);
+  const unavailable = requiredStringArray(check.requiredEvidenceUnavailable);
+  return (
+    canonicalJsonSha256(check) === canonicalJsonSha256(trustedValue) &&
+    trustedCheck.planSha256 === state.systemProofBinding.planSha256 &&
+    trustedCheck.systemDigest === state.systemProofBinding.authoritativeDigest &&
+    trustedCheck.passed === state.systemCheckPassed &&
+    mismatches !== undefined &&
+    sameStrings(mismatches, state.systemMismatchIds) &&
+    unavailable !== undefined &&
+    sameStrings(unavailable, state.requiredEvidenceUnavailable)
+  );
+}
+
+function bindingMatches(left: OccurrenceSourceBinding, right: OccurrenceSourceBinding): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function expectedBinding(
+  state: ReadinessProofState,
+  source: OccurrenceSource,
+  binding: OccurrenceSourceBinding,
+): OccurrenceSourceBinding {
+  return createOccurrenceSourceBinding(state, {
+    source,
+    candidateKind: binding.candidate.kind,
+    contentDigest: binding.candidate.contentDigest,
+  });
+}
+
+interface SourcePreflight {
+  readonly versionedReviewMismatch: boolean;
+  readonly finalizationProofPresent: boolean;
+}
+
+function sourcePreflight(state: ReadinessProofState): SourcePreflight {
+  const critic = state.sources.find((slot) => slot.source === 'critic');
+  const fixReviewer = state.sources.find((slot) => slot.source === 'fix-reviewer');
+  const intermediateJudge = state.sources.find((slot) => slot.source === 'intermediate-judge');
+  const finalJudge = state.sources.find((slot) => slot.source === 'final-judge');
+  if (
+    critic === undefined ||
+    fixReviewer === undefined ||
+    intermediateJudge === undefined ||
+    finalJudge === undefined ||
+    !critic.requirement.required ||
+    state.planSha256 === undefined
+  ) {
+    resumeFailure('readiness proof source catalog is incomplete');
+  }
+
+  const highRisk = state.riskDomains.some(
+    (domain) => domain.applicability === 'applicable' && domain.risk === 'high',
+  );
+  let versionedReviewMismatch =
+    critic.requirement.reason !== 'independent-critic-required' ||
+    critic.requirement.expectedBinding.candidate.contentDigest !== state.planSha256 ||
+    !bindingMatches(
+      critic.requirement.expectedBinding,
+      expectedBinding(state, 'critic', critic.requirement.expectedBinding),
+    ) ||
+    (critic.snapshot === undefined) !== (state.lastCritiquedPlanVersion === undefined);
+
+  if (highRisk) {
+    versionedReviewMismatch =
+      versionedReviewMismatch ||
+      !intermediateJudge.requirement.required ||
+      intermediateJudge.requirement.reason !== 'applicable-high-risk-judge-required';
+    if (intermediateJudge.requirement.required) {
+      versionedReviewMismatch =
+        versionedReviewMismatch ||
+        intermediateJudge.requirement.expectedBinding.candidate.contentDigest !==
+          state.planSha256 ||
+        !bindingMatches(
+          intermediateJudge.requirement.expectedBinding,
+          expectedBinding(
+            state,
+            'intermediate-judge',
+            intermediateJudge.requirement.expectedBinding,
+          ),
+        );
+    }
+  } else {
+    versionedReviewMismatch =
+      versionedReviewMismatch ||
+      intermediateJudge.requirement.required ||
+      intermediateJudge.requirement.reason !== 'standard-risk-judge-exempt';
+  }
+
+  const hasIntermediateJudgeProof = intermediateJudge.snapshot !== undefined;
+  const hasFinalJudgeProof = finalJudge.snapshot !== undefined;
+  if (
+    state.judgeEvaluatedPlanVersion !== undefined &&
+    !hasIntermediateJudgeProof &&
+    !hasFinalJudgeProof
+  ) {
+    versionedReviewMismatch = true;
+  }
+  if (hasIntermediateJudgeProof && state.judgeEvaluatedPlanVersion === undefined) {
+    versionedReviewMismatch = true;
+  }
+
+  const allowedFixExemptions = new Set([
+    'not-required',
+    'not-evaluated-for-current-candidate',
+    'disabled',
+    'no-findings',
+    'proposal-failed',
+    'review-failed',
+    'replacement-rejected',
+    'pre-fix-restored',
+  ]);
+  if (
+    (fixReviewer.requirement.required &&
+      fixReviewer.requirement.reason !== 'fix-pass-replacement-retained') ||
+    (!fixReviewer.requirement.required && !allowedFixExemptions.has(fixReviewer.requirement.reason))
+  ) {
+    resumeFailure('fix-reviewer source requirement is invalid');
+  }
+
+  const fixFinalized =
+    fixReviewer.snapshot !== undefined ||
+    fixReviewer.requirement.required ||
+    !['not-required', 'not-evaluated-for-current-candidate'].includes(
+      fixReviewer.requirement.reason,
+    );
+  const finalJudgeFinalized =
+    state.canonicalPlanSha256 !== undefined ||
+    finalJudge.snapshot !== undefined ||
+    finalJudge.requirement.required ||
+    finalJudge.requirement.reason !== 'canonical-plan-not-bound';
+  const finalizationProofPresent =
+    fixFinalized ||
+    finalJudgeFinalized ||
+    state.fixReviewerMaterialIssueIds.length > 0 ||
+    state.finalJudgeMaterialIssueIds.length > 0 ||
+    state.hasCanonicalBindingMismatch ||
+    state.hasFreshReviewMismatch ||
+    state.hasFinalArtifactMismatch ||
+    state.hasJudgeInconsistency;
+
+  for (const source of [fixReviewer, finalJudge]) {
+    if (!source.requirement.required) {
+      continue;
+    }
+    if (
+      !bindingMatches(
+        source.requirement.expectedBinding,
+        expectedBinding(state, source.source, source.requirement.expectedBinding),
+      )
+    ) {
+      return { versionedReviewMismatch, finalizationProofPresent: true };
     }
   }
-  for (const assessment of state.riskDomains) {
-    assessment.complete = false;
-    assessment.unavailableEvidence = [];
-    delete assessment.lastAssessedPlanVersion;
-  }
-  state.planVersion = planVersion;
+  return { versionedReviewMismatch, finalizationProofPresent };
 }
 
-function invalidateRestoredSystemCheck(state: ConvergenceState, planVersion: number): void {
-  const marker = `plan.v${planVersion}:system-check`;
-  state.systemCheckPassed = false;
-  state.systemMismatchIds = [];
-  state.requiredEvidenceUnavailable = [];
-  state.satisfied = false;
-  state.decision = 'unable-to-decide';
-  state.reasonCodes = ['deterministic-check-incomplete'];
-  state.stopReason = marker;
-  state.unresolvedCoverage = [...new Set([...state.unresolvedCoverage, marker])];
+interface ResumePreflight {
+  readonly start: number;
+  readonly proofFile: string;
+  readonly planFile: string;
+  readonly selectedPlanSha256: string;
+  readonly restored: ReadinessProofState;
+  readonly contract: ReadinessContract;
+  readonly source: SourcePreflight;
+  readonly planChanged: boolean;
+  readonly authoritativeChanged: boolean;
+  readonly deterministicMismatch: boolean;
+}
+
+function preflightResume(ctx: RunContext): ResumePreflight {
+  const start = lastStablePlan(ctx);
+  const proofFile = path.join(ctx.work, `convergence.v${start}.json`);
+  let restored: ReadinessProofState;
+  try {
+    restored = readReadinessProofState(proofFile);
+  } catch {
+    resumeFailure('selected readiness proof is invalid (code=proof-invalid)');
+  }
+  assertCandidateProof(restored, start);
+  const contract = readFrozenResumeContract(ctx.work);
+  assertCompatibleResumeContract(ctx, restored, contract);
+  const planFile = path.join(ctx.work, `plan.v${start}.md`);
+  const selectedPlanSha256 = fileSha256(planFile);
+  const source = sourcePreflight(restored);
+  return {
+    start,
+    proofFile,
+    planFile,
+    selectedPlanSha256,
+    restored,
+    contract,
+    source,
+    planChanged: restored.planSha256 !== selectedPlanSha256,
+    authoritativeChanged:
+      restored.authoritativeDigest !== ctx.systemContext.digest ||
+      !sameStrings(
+        restored.relationshipIds,
+        ctx.systemContext.crossRepository
+          ? ctx.systemContext.relationships.map((relationship) => relationship.id)
+          : [],
+      ),
+    deterministicMismatch: !systemCheckMatchesState(ctx, restored, planFile, contract),
+  };
+}
+
+function bindSelectedPlan(
+  state: ReadinessProofState,
+  planVersion: number,
+  planSha256: string,
+): ReadinessProofState {
+  const critic = createOccurrenceSourceBinding(state, {
+    source: 'critic',
+    candidateKind: 'versioned-plan',
+    contentDigest: planSha256,
+  });
+  const highRisk = state.riskDomains.some(
+    (domain) => domain.applicability === 'applicable' && domain.risk === 'high',
+  );
+  const intermediateJudge = highRisk
+    ? createOccurrenceSourceBinding(state, {
+        source: 'intermediate-judge',
+        candidateKind: 'versioned-plan',
+        contentDigest: planSha256,
+      })
+    : undefined;
+  return bindVersionedPlan(state, {
+    planVersion,
+    planSha256,
+    criticLineageDigest: critic.lineage.lineageDigest,
+    ...(intermediateJudge === undefined
+      ? {}
+      : { intermediateJudgeLineageDigest: intermediateJudge.lineage.lineageDigest }),
+  });
 }
 
 export function prepareResume(ctx: RunContext): number {
-  const start = lastStablePlan(ctx.work, ctx.skills.creatorSchema);
-  const restored = readConvergenceState(path.join(ctx.work, `convergence.v${start}.json`));
-  assertCompatibleResumeContract(ctx, restored);
+  const preflight = preflightResume(ctx);
+  const { start } = preflight;
   const state: ResumeState = { startIter: start, archivedCount: 0, archiveDir: '' };
   archiveResumeStale(ctx.work, state, start);
   reconcileJsonlLedger(ctx.work, state, 'rejected-log.jsonl', (entry) => {
@@ -386,56 +815,43 @@ export function prepareResume(ctx: RunContext): number {
     const version = planRefVersion(entry.plan_ref);
     return version !== undefined && version <= start;
   });
-  if (restored !== undefined) {
-    ctx.convergence = restored;
-    delete restored.canonicalPlanSha256;
-    const convergenceFile = path.join(ctx.work, `convergence.v${start}.json`);
-    const selectedPlan = path.join(ctx.work, `plan.v${start}.md`);
-    const selectedPlanSha256 = fileSha256(selectedPlan);
-    if (restored.planSha256 !== selectedPlanSha256) {
-      archiveResumeSnapshot(ctx.work, state, convergenceFile);
-      archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
-      const marker = `plan.v${start}:plan-digest-${restored.planSha256 === undefined ? 'unavailable' : 'changed'}`;
-      invalidateRestoredProof(restored, start, marker);
-      restored.planSha256 = selectedPlanSha256;
-    }
-    if (
-      restored.readinessContractDigest === undefined ||
-      restored.readinessContractDigest.startsWith('legacy-derived:')
-    ) {
-      archiveResumeSnapshot(ctx.work, state, convergenceFile);
-      archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
-      invalidateRestoredProof(restored, start, `plan.v${start}:readiness-contract-proof-unbound`);
-    }
-    if (restored.systemCheckPassed && !systemCheckMatchesPlan(ctx.work, start, restored)) {
-      archiveResumeSnapshot(ctx.work, state, convergenceFile);
-      archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
-      invalidateRestoredSystemCheck(restored, start);
-    }
-    if (restored.authoritativeDigest !== ctx.systemContext.digest) {
-      archiveResumeSnapshot(ctx.work, state, convergenceFile);
-      archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
-      restored.authoritativeDigest = ctx.systemContext.digest;
-      restored.relationshipIds = ctx.systemContext.crossRepository
-        ? ctx.systemContext.relationships.map((relationship) => relationship.id)
-        : [];
-      invalidateRestoredProof(restored, start, `plan.v${start}:authoritative-digest-changed`);
-      if (restored.readinessContractDigest === undefined) {
-        addConvergenceLimit(
-          restored,
-          'authoritative-scope',
-          `plan.v${start}:authoritative-digest-changed`,
-        );
-      }
-    }
-  } else {
-    ctx.convergence.planVersion = start;
-    ctx.convergence.unresolvedCoverage.push(`plan.v${start}:legacy-state-bootstrap`);
-    ctx.convergence.stopReason = 'legacy-state-bootstrap';
+
+  let restored = preflight.restored;
+  if (preflight.source.finalizationProofPresent) {
+    restored = invalidateFinalizationProof(restored);
   }
-  ctx.lastCritiqueIter = Math.max(-1, restored?.lastCritiquedPlanVersion ?? start - 1);
+  if (preflight.authoritativeChanged) {
+    restored = recordAuthoritativeContext(restored, {
+      authoritativeDigest: ctx.systemContext.digest,
+      relationshipIds: ctx.systemContext.crossRepository
+        ? ctx.systemContext.relationships.map((relationship) => relationship.id)
+        : [],
+    });
+  }
+  const fullReviewInvalidated =
+    preflight.planChanged ||
+    preflight.authoritativeChanged ||
+    preflight.source.versionedReviewMismatch;
+  if (fullReviewInvalidated) {
+    restored = invalidateFinalizationProof(invalidateFullReviewProof(restored));
+    restored = bindSelectedPlan(restored, start, preflight.selectedPlanSha256);
+  } else if (preflight.deterministicMismatch) {
+    restored = invalidateDeterministicProof(restored);
+  }
+
+  const proofChanged = JSON.stringify(restored) !== JSON.stringify(preflight.restored);
+  if (proofChanged) {
+    archiveResumeSnapshot(ctx.work, state, preflight.proofFile);
+  }
+  if (fullReviewInvalidated || preflight.deterministicMismatch) {
+    archiveResumeFile(ctx.work, state, path.join(ctx.work, `system-check.v${start}.json`));
+  }
+
+  ctx.readinessProof = restored;
+  ctx.readinessBoundary = preflight.contract.boundary;
+  ctx.lastCritiqueIter = Math.max(-1, restored.lastCritiquedPlanVersion ?? start - 1);
   ctx.resume = state;
-  writeConvergenceState(ctx.work, ctx.convergence);
+  writeReadinessProofState(preflight.proofFile, restored);
   if (state.archivedCount > 0) {
     log(`resume archived ${state.archivedCount} stale artifact(s) to ${state.archiveDir}`);
   } else {

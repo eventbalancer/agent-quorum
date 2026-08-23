@@ -33,6 +33,12 @@ export interface EvidenceTargetContext {
   readonly projectRoot: string;
 }
 
+export interface CandidateEvidenceTargetContext extends EvidenceTargetContext {
+  readonly planVersion: number;
+  readonly candidateContent: string;
+  readonly candidatePath?: string;
+}
+
 export interface ConvergenceHealth {
   readonly lineage: Record<LineageClass, number>;
   readonly grounding: Record<GroundingClass, number>;
@@ -267,6 +273,28 @@ export function evidenceReferencesGrounded(
   );
 }
 
+export function evidenceReferencesGroundedAgainstCandidate(
+  value: JsonValue | undefined,
+  context: CandidateEvidenceTargetContext,
+): boolean {
+  return (
+    evidenceReferencesStructurallyValid(value) &&
+    Array.isArray(value) &&
+    value.some(
+      (entry) =>
+        isJsonObject(entry) &&
+        typedEvidenceTargetExists(
+          entry,
+          context.work,
+          context.planVersion,
+          context.projectRoot,
+          context.candidateContent,
+          context.candidatePath,
+        ),
+    )
+  );
+}
+
 function evidenceFormatMismatch(ref: Record<string, JsonValue>): boolean {
   const value = typeof ref.value === 'string' ? ref.value : '';
   return (
@@ -326,6 +354,8 @@ function typedEvidenceTargetExists(
   work: string,
   iter: number,
   projectRoot: string,
+  candidateContent?: string,
+  candidatePath?: string,
 ): boolean {
   const value = typeof ref.value === 'string' ? ref.value : '';
   const withinProject = (candidate: string) => {
@@ -377,6 +407,14 @@ function typedEvidenceTargetExists(
       if (file === undefined || !Number.isInteger(line) || line < 1) {
         return false;
       }
+      if (
+        candidateContent !== undefined &&
+        candidatePath !== undefined &&
+        (path.resolve(projectRoot, file) === path.resolve(candidatePath) ||
+          file === path.basename(candidatePath))
+      ) {
+        return candidateContent.split('\n').length >= line;
+      }
       const resolved = path.isAbsolute(file) ? file : path.join(projectRoot, file);
       return (
         (withinProject(resolved) || authoritativeSource(resolved)) &&
@@ -386,13 +424,10 @@ function typedEvidenceTargetExists(
     }
     case 'plan-section': {
       const section = (typeof ref.section === 'string' ? ref.section : value).replace(/^#+\s*/, '');
-      const planFile = path.join(work, `plan.v${iter}.md`);
-      return (
-        existsSync(planFile) &&
-        readFileSync(planFile, 'utf8')
-          .split('\n')
-          .some((line) => /^#{1,6}\s+/.test(line) && line.replace(/^#+\s*/, '').trim() === section)
-      );
+      const planContent = candidateContent ?? readExistingPlan(path.join(work, `plan.v${iter}.md`));
+      return planContent
+        .split('\n')
+        .some((line) => /^#{1,6}\s+/.test(line) && line.replace(/^#+\s*/, '').trim() === section);
     }
     case 'repository': {
       const repository = typeof ref.repository === 'string' ? ref.repository : value;
@@ -420,11 +455,7 @@ function typedEvidenceTargetExists(
       return existsSync(systemFile) && readFileSync(systemFile, 'utf8').includes(id);
     }
     case 'phase-gate': {
-      const planFile = path.join(work, `plan.v${iter}.md`);
-      if (!existsSync(planFile)) {
-        return false;
-      }
-      const plan = readFileSync(planFile, 'utf8');
+      const plan = candidateContent ?? readExistingPlan(path.join(work, `plan.v${iter}.md`));
       const valueParts = /^([^:]+):\s*(.+)$/.exec(value);
       const phase = typeof ref.phase === 'string' ? ref.phase.trim() : valueParts?.[1]?.trim();
       const gate = typeof ref.gate === 'string' ? ref.gate.trim() : valueParts?.[2]?.trim();
@@ -441,9 +472,12 @@ function typedEvidenceTargetExists(
       if (command.trim() === '') {
         return false;
       }
-      const planFile = path.join(work, `plan.v${iter}.md`);
-      if (existsSync(planFile) && readFileSync(planFile, 'utf8').includes(command)) {
+      const plan = candidateContent ?? readExistingPlan(path.join(work, `plan.v${iter}.md`));
+      if (plan.includes(command)) {
         return true;
+      }
+      if (candidateContent !== undefined) {
+        return false;
       }
       const systemFile = path.join(work, 'system-context.json');
       return existsSync(systemFile) && readFileSync(systemFile, 'utf8').includes(command);
@@ -451,6 +485,10 @@ function typedEvidenceTargetExists(
     default:
       return false;
   }
+}
+
+function readExistingPlan(file: string): string {
+  return existsSync(file) ? readFileSync(file, 'utf8') : '';
 }
 
 function issueGrounding(

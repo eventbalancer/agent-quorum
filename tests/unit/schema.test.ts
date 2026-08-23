@@ -14,12 +14,49 @@ import { skillPaths } from '../../src/core/run-context.js';
 import { captureStderr, REPO_ROOT, withEnv } from '../helpers/harness.js';
 
 const skills = skillPaths(REPO_ROOT);
+const CRITIC_RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+] as const;
+const COMPLETE_CRITIC_REVIEW = {
+  considered_context: [
+    'original-scope',
+    'authoritative-system-facts',
+    'operator-decisions',
+    'material-findings',
+    'active-invariants',
+    'quality-and-limits',
+  ],
+  invariant_assessments: [],
+  scope_coverage: ['original-scope'],
+  issue_budget: { limit: 8, used: 0, exhausted: false },
+  scan_complete: true,
+  unresolved_coverage: [],
+} as const;
+
+function completeDomainAssessments(): Record<string, unknown>[] {
+  return CRITIC_RISK_DOMAINS.map((domain) => ({
+    domain,
+    applicability: 'not-applicable',
+    risk: 'standard',
+    complete: true,
+    rationale: `${domain} does not apply to this candidate.`,
+    unavailable_evidence: [],
+    evidence_refs: [{ kind: 'plan-section', section: 'Scope' }],
+  }));
+}
 
 let tmp: string;
 
 interface SanitizedUpdateIssue {
-  verdict_reason: string;
-  duplicate_of: null;
+  verdict_reason?: string;
+  duplicate_of?: null;
 }
 
 interface SanitizedUpdate {
@@ -37,18 +74,18 @@ interface SanitizedCritiqueIssue {
 }
 
 interface SanitizedCritiqueOpportunity {
-  fingerprint: string;
+  fingerprint?: string;
   claim: string;
   evidence: string;
   suggested_improvement: string;
-  evidence_refs: unknown[];
+  evidence_refs?: unknown[];
 }
 
 interface SanitizedCritique {
   issues: SanitizedCritiqueIssue[];
-  domain_assessments: unknown[];
-  boundary_challenges: unknown[];
-  opportunities: SanitizedCritiqueOpportunity[];
+  domain_assessments?: unknown[];
+  boundary_challenges?: unknown[];
+  opportunities?: SanitizedCritiqueOpportunity[];
   review?: {
     issue_budget?: {
       used: number;
@@ -76,18 +113,22 @@ afterEach(() => {
 });
 
 describe('sanitizers', () => {
-  it('sanitize_update_json strips fields and backfills defaults', () => {
+  it('sanitize_update_json strips fields without backfilling missing verdict fields', () => {
+    const unknownFieldSecret = 'UPDATE_UNKNOWN_KEY_SECRET_86f42c';
     const file = writeJson('update.json', {
       plan_version: 1,
       plan_markdown: '# Plan',
-      summary: 'drop me',
+      [unknownFieldSecret]: 'drop me',
       issues: [{ id: 'C1', verdict: 'accept', final_severity: 'major', notes: 'drop me' }],
       applied: ['C1'],
+      systemic_dispositions: [],
       rejected_append: [{ id: 'C2', claim: 'claim', reason: 'reason', extra: 'drop me' }],
     });
     const capture = captureStderr();
     try {
       sanitizeUpdateJson(file);
+      expect(capture.text()).toContain('dropping unknown top-level fields from update (count=1)');
+      expect(capture.text()).not.toContain(unknownFieldSecret);
     } finally {
       capture.restore();
     }
@@ -98,33 +139,43 @@ describe('sanitizers', () => {
       'plan_markdown',
       'plan_version',
       'rejected_append',
+      'systemic_dispositions',
     ]);
-    expect(result.issues[0]?.verdict_reason).toBe('');
-    expect(result.issues[0]?.duplicate_of).toBeNull();
+    expect(result.issues[0]).not.toHaveProperty('verdict_reason');
+    expect(result.issues[0]).not.toHaveProperty('duplicate_of');
     expect(result.issues[0]).not.toHaveProperty('notes');
     expect(result.rejected_append[0]).not.toHaveProperty('extra');
   });
 
-  it('sanitize functions force plan_version to the loop iteration', () => {
+  it('sanitize functions preserve provider plan_version for semantic admission', () => {
+    const critique = writeJson('force-critique.json', {
+      plan_version: 0,
+      summary: 'Review',
+      issues: [],
+    });
     const update = writeJson('force-update.json', {
       plan_version: 0,
       plan_markdown: '# Plan',
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     });
     const meta = writeJson('force-meta.json', {
       plan_version: 0,
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     });
     const capture = captureStderr();
     try {
+      sanitizeCritiqueJson(critique, 1);
       sanitizeUpdateJson(update, 1);
       sanitizeUpdateMetaJson(meta, 1);
-      expect((readJson(update) as { plan_version: number }).plan_version).toBe(1);
-      expect((readJson(meta) as { plan_version: number }).plan_version).toBe(1);
+      expect((readJson(critique) as { plan_version: number }).plan_version).toBe(0);
+      expect((readJson(update) as { plan_version: number }).plan_version).toBe(0);
+      expect((readJson(meta) as { plan_version: number }).plan_version).toBe(0);
       expect(() => {
         sanitizeUpdateJson(update, 'two');
       }).toThrow(/expected_version must be an integer/);
@@ -133,7 +184,7 @@ describe('sanitizers', () => {
     }
   });
 
-  it('sanitize_critique_json normalizes version-prefixed issue ids', () => {
+  it('sanitize_critique_json preserves version-prefixed issue ids for strict rejection', () => {
     const file = writeJson('critique.json', {
       plan_version: 0,
       summary: 'verdict',
@@ -182,20 +233,22 @@ describe('sanitizers', () => {
       capture.restore();
     }
     const result = readJson(file) as SanitizedCritique;
-    expect(result.issues[0]?.id).toBe('C1');
+    expect(result.issues[0]?.id).toBe('v0.C1');
     expect(result.issues[1]?.id).toBe('C2');
     expect(result.issues[1]?.addresses).toBe('v0.C1');
-    expect(result.issues.every((issue) => /^C[0-9]+$/.test(issue.id))).toBe(true);
+    expect(result.issues.every((issue) => /^C[0-9]+$/.test(issue.id))).toBe(false);
     expect(result.issues[0]?.evidence_refs).toEqual([
       { kind: 'plan-section', section: 'Work Plan' },
       { kind: 'phase-gate', phase: 'P3', gate: 'Acceptance gate' },
     ]);
-    expect(result.domain_assessments).toEqual([]);
-    expect(result.boundary_challenges).toEqual([]);
-    expect(result.opportunities).toEqual([]);
+    expect(result).not.toHaveProperty('review');
+    expect(result).not.toHaveProperty('domain_assessments');
+    expect(result).not.toHaveProperty('boundary_challenges');
+    expect(result).not.toHaveProperty('opportunities');
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(false);
   });
 
-  it('moves legacy minor and nit issues into non-blocking opportunities', () => {
+  it('does not migrate legacy minor and nit issues or backfill current proof fields', () => {
     const file = writeJson('legacy-opportunities.json', {
       plan_version: 2,
       summary: 'Only optional improvements remain.',
@@ -239,33 +292,24 @@ describe('sanitizers', () => {
         scan_complete: true,
         unresolved_coverage: [],
       },
+      domain_assessments: completeDomainAssessments(),
+      boundary_challenges: [],
+      opportunities: [],
     });
     expect(schemaValidQuiet(file, skills.criticSchema)).toBe(false);
-    const capture = captureStderr();
-    try {
-      sanitizeCritiqueJson(file, 2);
-      expect(capture.text()).toContain('moving 2 non-material critique issue(s)');
-    } finally {
-      capture.restore();
-    }
+    sanitizeCritiqueJson(file, 2);
 
     const result = readJson(file) as SanitizedCritique;
-    expect(result.issues).toEqual([]);
-    expect(result.review?.issue_budget?.used).toBe(0);
-    expect(result.review?.issue_budget?.exhausted).toBe(false);
-    expect(result.opportunities).toHaveLength(2);
-    expect(result.opportunities[0]).toMatchObject({
-      claim: 'Name the local verification gate.',
-      evidence: '## Verification',
-      suggested_improvement: 'Add the gate name.',
-      evidence_refs: [{ kind: 'plan-section', section: 'Verification' }],
-    });
-    expect(result.opportunities[0]?.fingerprint).toMatch(/^O-[a-f0-9]{64}$/);
-    expect(result.opportunities[1]?.evidence_refs).toEqual([]);
-    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(true);
+    expect(result.issues).toHaveLength(2);
+    expect(result.review?.issue_budget?.used).toBe(2);
+    expect(result.review?.issue_budget?.exhausted).toBe(true);
+    expect(result.domain_assessments).toEqual(completeDomainAssessments());
+    expect(result.boundary_challenges).toEqual([]);
+    expect(result.opportunities).toEqual([]);
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(false);
   });
 
-  it('preserves bounded-readiness critic arrays and fills missing opportunity fields', () => {
+  it('preserves bounded-readiness critic arrays without filling missing opportunity fields', () => {
     const domainAssessment = {
       domain: 'security-privacy-authorization',
       applicability: 'applicable',
@@ -286,8 +330,11 @@ describe('sanitizers', () => {
     const file = writeJson('bounded-readiness.json', {
       plan_version: 1,
       summary: 'A boundary decision is required.',
+      review: COMPLETE_CRITIC_REVIEW,
       issues: [],
-      domain_assessments: [domainAssessment],
+      domain_assessments: completeDomainAssessments().map((assessment) =>
+        assessment.domain === 'security-privacy-authorization' ? domainAssessment : assessment,
+      ),
       boundary_challenges: [boundaryChallenge],
       opportunities: [
         {
@@ -301,11 +348,103 @@ describe('sanitizers', () => {
     sanitizeCritiqueJson(file, 1);
 
     const result = readJson(file) as SanitizedCritique;
-    expect(result.domain_assessments).toEqual([domainAssessment]);
+    expect(result.domain_assessments).toEqual(
+      completeDomainAssessments().map((assessment) =>
+        assessment.domain === 'security-privacy-authorization' ? domainAssessment : assessment,
+      ),
+    );
     expect(result.boundary_challenges).toEqual([boundaryChallenge]);
-    expect(result.opportunities[0]?.fingerprint).toMatch(/^O-[a-f0-9]{64}$/);
-    expect(result.opportunities[0]?.evidence_refs).toEqual([]);
-    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(true);
+    expect(result.opportunities?.[0]).not.toHaveProperty('fingerprint');
+    expect(result.opportunities?.[0]).not.toHaveProperty('evidence_refs');
+    expect(schemaValidQuiet(file, skills.criticSchema)).toBe(false);
+  });
+
+  it('preserves missing required nested fields so schema validation rejects provider omissions', () => {
+    const critique = writeJson('missing-critique-fields.json', {
+      plan_version: 1,
+      summary: 'A material issue remains.',
+      review: { ...COMPLETE_CRITIC_REVIEW, issue_budget: { limit: 8, used: 1, exhausted: false } },
+      issues: [
+        {
+          id: 'C1',
+          severity: 'major',
+          category: 'correctness',
+          claim: 'The work omits a required check.',
+          evidence: '## Work Plan',
+          evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+          suggested_fix: 'Add the check.',
+        },
+      ],
+      domain_assessments: completeDomainAssessments(),
+      boundary_challenges: [],
+      opportunities: [
+        {
+          claim: 'Clarify the verification order.',
+          evidence: '## Verification',
+          suggested_improvement: 'State the order explicitly.',
+        },
+      ],
+    });
+    const update = writeJson('missing-update-fields.json', {
+      plan_version: 1,
+      plan_markdown: '# Work Plan',
+      issues: [{ id: 'C1', verdict: 'accept', final_severity: 'major' }],
+      applied: ['C1'],
+      systemic_dispositions: [],
+      rejected_append: [],
+    });
+    const meta = writeJson('missing-meta-fields.json', {
+      plan_version: 1,
+      issues: [{ id: 'C1', verdict: 'accept', final_severity: 'major' }],
+      applied: ['C1'],
+      systemic_dispositions: [],
+      rejected_append: [],
+    });
+
+    sanitizeCritiqueJson(critique, 1);
+    sanitizeUpdateJson(update, 1);
+    sanitizeUpdateMetaJson(meta, 1);
+
+    const sanitizedCritique = readJson(critique) as SanitizedCritique;
+    expect(sanitizedCritique.issues[0]).not.toHaveProperty('addresses');
+    expect(sanitizedCritique.issues[0]).not.toHaveProperty('confidence');
+    expect(sanitizedCritique.issues[0]).not.toHaveProperty('duplicate_of');
+    expect(sanitizedCritique.opportunities?.[0]).not.toHaveProperty('fingerprint');
+    expect(sanitizedCritique.opportunities?.[0]).not.toHaveProperty('evidence_refs');
+
+    for (const file of [update, meta]) {
+      const sanitized = readJson(file) as SanitizedUpdate;
+      expect(sanitized.issues[0]).not.toHaveProperty('verdict_reason');
+      expect(sanitized.issues[0]).not.toHaveProperty('duplicate_of');
+    }
+    expect(schemaValidQuiet(critique, skills.criticSchema)).toBe(false);
+    expect(schemaValidQuiet(update, skills.creatorSchema)).toBe(false);
+    expect(schemaValidQuiet(meta, skills.creatorMetaSchema)).toBe(false);
+  });
+
+  it('does not synthesize missing required update arrays', () => {
+    const update = writeJson('missing-update-arrays.json', {
+      plan_version: 1,
+      plan_markdown: '# Work Plan',
+      issues: [],
+      systemic_dispositions: [],
+    });
+    const meta = writeJson('missing-meta-arrays.json', {
+      plan_version: 1,
+      issues: [],
+      systemic_dispositions: [],
+    });
+
+    sanitizeUpdateJson(update, 1);
+    sanitizeUpdateMetaJson(meta, 1);
+
+    for (const file of [update, meta]) {
+      const sanitized = readJson(file) as Record<string, unknown>;
+      expect(sanitized).not.toHaveProperty('applied');
+      expect(sanitized).not.toHaveProperty('rejected_append');
+    }
+    expect(schemaValidQuiet(update, skills.creatorSchema)).toBe(false);
+    expect(schemaValidQuiet(meta, skills.creatorMetaSchema)).toBe(false);
   });
 
   it('combine_update_json assembles markdown and metadata', () => {
@@ -313,6 +452,7 @@ describe('sanitizers', () => {
       plan_version: 2,
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     });
     const markdown = path.join(tmp, 'revision.md');
@@ -324,6 +464,7 @@ describe('sanitizers', () => {
       plan_markdown: '# Revised\n',
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     });
   });
@@ -394,10 +535,16 @@ describe('in-process schema validation', () => {
     expect(schemaValidQuiet(invalid, schema)).toBe(false);
   });
 
-  it('validate_schema runs in-process and reports failures with detail (adapted: no ajv binary)', () => {
-    const schema = writeJson('detail.schema.json', { required: ['ok'] });
+  it('validate_schema reports only bounded counts for provider-controlled failures', () => {
+    const unknownFieldSecret = 'AJV_UNKNOWN_KEY_SECRET_75e13b';
+    const schema = writeJson('detail.schema.json', {
+      type: 'object',
+      additionalProperties: false,
+      required: ['ok'],
+      properties: { ok: { type: 'boolean' } },
+    });
     const valid = writeJson('detail.valid.json', { ok: true });
-    const invalid = writeJson('detail.invalid.json', {});
+    const invalid = writeJson('detail.invalid.json', { ok: true, [unknownFieldSecret]: true });
     const notJson = path.join(tmp, 'broken.json');
     writeFileSync(notJson, '{nope');
     const capture = captureStderr();
@@ -405,6 +552,8 @@ describe('in-process schema validation', () => {
       expect(validateSchema(valid, schema)).toBe(true);
       expect(validateSchema(invalid, schema)).toBe(false);
       expect(capture.text()).toContain(`schema validation failed: ${invalid} vs ${schema}`);
+      expect(capture.text()).toContain('code=invalid-data violations=1');
+      expect(capture.text()).not.toContain(unknownFieldSecret);
       expect(validateSchema(notJson, schema)).toBe(false);
       expect(capture.text()).toContain(`not valid JSON: ${notJson}`);
     } finally {

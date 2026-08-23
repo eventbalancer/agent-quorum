@@ -2,11 +2,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runFixPass } from '../../src/stages/plan/fix-pass.js';
+import {
+  exemptFixPass,
+  fixReviewCandidateDigest,
+  runFixPass,
+} from '../../src/stages/plan/fix-pass.js';
 import { runTranslatePass } from '../../src/stages/plan/translate-pass.js';
-import { writeConvergenceState } from '../../src/core/convergence.js';
+import {
+  createReadinessProofCatalog,
+  createReadinessProofState,
+  recordAdmittedFixReviewerProof,
+  type ReadinessInvariantRecord,
+  type ReadinessProofState,
+} from '../../src/core/readiness-proof.js';
+import {
+  readReadinessProofState,
+  writeReadinessProofState,
+} from '../../src/core/readiness-store.js';
 import type { RunContext } from '../../src/core/run-context.js';
 import { Scratch } from '../../src/runtime/scratch.js';
+import { setPlanFrontmatterStatus } from '../../src/stages/plan/plan-shape.js';
 import {
   argvRecords,
   captureStderr,
@@ -66,25 +81,83 @@ function writeReview(file: string, approval: string, concerns: unknown[]): void 
   );
 }
 
-function addActiveInvariant(ctx: RunContext): void {
-  ctx.convergence.invariants = [
-    {
-      id: 'I-v0-C1',
-      sourceFinding: 'I-v0-C1',
-      statement: 'The repaired reference remains valid.',
-      status: 'resolved',
-      lastReviewedPlanVersion: 0,
-      occurrences: [
-        {
-          id: 'O-fixture',
-          dimension: 'reference',
-          subject: 'stale.md:9',
-          disposition: 'satisfied',
-          evidenceRefs: [],
-        },
-      ],
-    },
-  ];
+const ACTIVE_INVARIANTS: readonly ReadinessInvariantRecord[] = [
+  {
+    id: 'I-v0-C1',
+    sourceFinding: 'v0.C1',
+    statement: 'The repaired reference remains valid.',
+    occurrences: [{ id: 'O-fixture', dimension: 'reference', subject: 'stale.md:9' }],
+  },
+];
+
+function writeInvariantReview(
+  file: string,
+  approval: string,
+  concerns: unknown[],
+  disposition: 'satisfied' | 'violated' | 'not-applicable' | 'unresolved',
+): void {
+  writeFileSync(
+    file,
+    `${JSON.stringify(
+      {
+        approval,
+        coverage_complete: true,
+        unresolved_occurrence_ids: disposition === 'unresolved' ? ['O-fixture'] : [],
+        invariant_assessments: [
+          {
+            invariant_id: 'I-v0-C1',
+            occurrences: [
+              {
+                occurrence_id: 'O-fixture',
+                disposition,
+                evidence_refs:
+                  disposition === 'unresolved'
+                    ? []
+                    : [{ kind: 'plan-section', section: 'Verification' }],
+              },
+            ],
+          },
+        ],
+        concerns,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+function proofState(
+  ctx: RunContext,
+  invariants: readonly ReadinessInvariantRecord[] = [],
+): ReadinessProofState {
+  const catalog = createReadinessProofCatalog({
+    expectedPlanVersion: 0,
+    invariants: invariants.map((invariant) => ({
+      invariantId: invariant.id,
+      occurrenceIds: invariant.occurrences.map((occurrence) => occurrence.id),
+    })),
+    materialIssueIds: [],
+  });
+  return createReadinessProofState({
+    quality: ctx.settings.quality,
+    matrix: ctx.quality,
+    mode: ctx.mode,
+    sourceDigest: '4'.repeat(64),
+    authoritativeDigest: ctx.systemContext.digest,
+    relationshipIds: [],
+    maxIters: ctx.settings.maxIters,
+    trustedCatalog: catalog,
+    invariants,
+  });
+}
+
+function runTestFixPass(
+  ctx: RunContext,
+  finalPlan: string,
+  proof: ReadinessProofState = proofState(ctx),
+) {
+  ctx.readinessProof = proof;
+  return runFixPass(ctx, finalPlan, proof);
 }
 
 beforeEach(() => {
@@ -108,26 +181,30 @@ function fakePath(): string {
 }
 
 describe('fix pass', () => {
-  it('skips without findings.json and with zero findings', async () => {
+  it('returns explicit disabled and no-findings exemptions', async () => {
+    expect(exemptFixPass('disabled')).toEqual({
+      retainedReplacement: false,
+      requirement: { required: false, reason: 'disabled' },
+    });
     const finalPlan = seedConvergedPlan();
     const ctx = makeContext();
-    await runFixPass(ctx, finalPlan);
+    expect(await runTestFixPass(ctx, finalPlan)).toEqual(exemptFixPass('no-findings'));
     expect(capture.text()).toContain('fix-pass: no findings.json — skipping');
 
     writeFindings(0);
-    await runFixPass(ctx, finalPlan);
+    expect(await runTestFixPass(ctx, finalPlan)).toEqual(exemptFixPass('no-findings'));
     expect(capture.text()).toContain('fix-pass: 0 findings — skipping');
     expect(existsSync(path.join(work, 'plan.final.before-fix.md'))).toBe(false);
   });
 
-  it('consumes a clean Claude review with a draft-07 schema', async () => {
+  it('returns exact admitted proposal evidence with status-normalized identity', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
     const proposal = path.join(tmp, 'proposal.md');
     writeStructuredPlanFile(proposal, 'Fixed Proposal');
     const review = path.join(tmp, 'review.json');
-    writeReview(review, 'accept', []);
+    writeInvariantReview(review, 'accept', [], 'satisfied');
     const matrix = fixtureMatrix();
     matrix.reviewer = {
       runner: 'claude',
@@ -135,31 +212,132 @@ describe('fix pass', () => {
       reasoning: 'xhigh',
     };
     const ctx = makeContext({ matrix });
+    const proof = proofState(ctx, ACTIVE_INVARIANTS);
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
         FAKE_CLAUDE_JSON_RESULT: review,
         FAKE_CLAUDE_REQUIRE_DRAFT7: '1',
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan, proof),
     );
 
+    expect(outcome.retainedReplacement).toBe(true);
+    if (!outcome.retainedReplacement) {
+      throw new Error('expected retained proposal outcome');
+    }
+    expect(outcome.candidate).toEqual({
+      kind: 'fix-proposal',
+      planVersion: 0,
+      path: finalPlan,
+      contentDigest: fixReviewCandidateDigest(finalPlan),
+    });
+    expect(outcome.requirement).toEqual({
+      required: true,
+      reason: 'fix-pass-replacement-retained',
+      expectedBinding: outcome.review.expectedBinding,
+    });
+    expect(outcome.review.snapshot).toEqual({
+      source: 'fix-reviewer',
+      catalogDigest: outcome.review.snapshot.catalogDigest,
+      binding: outcome.requirement.expectedBinding,
+      occurrences: [
+        {
+          invariantId: 'I-v0-C1',
+          occurrenceId: 'O-fixture',
+          disposition: 'satisfied',
+          evidenceGrounded: true,
+        },
+      ],
+    });
+    const recorded = recordAdmittedFixReviewerProof(ctx.readinessProof, outcome.review);
+    expect(recorded.sources.find((source) => source.source === 'fix-reviewer')).toEqual({
+      source: 'fix-reviewer',
+      requirement: outcome.requirement,
+      snapshot: outcome.review.snapshot,
+    });
+    expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(proposal, 'utf8'));
+    const retainedDigest = outcome.candidate.contentDigest;
+    setPlanFrontmatterStatus(finalPlan, 'needs-review');
+    expect(fixReviewCandidateDigest(finalPlan)).toBe(retainedDigest);
+    const nonStatusMutation = path.join(tmp, 'non-status-mutation.md');
+    writeFileSync(
+      nonStatusMutation,
+      readFileSync(finalPlan, 'utf8').replace('# Fixed Proposal', '# Mutated Proposal'),
+    );
+    expect(fixReviewCandidateDigest(nonStatusMutation)).not.toBe(retainedDigest);
     expect(capture.text()).toContain('fix-pass: clean accept, using proposal as final plan');
-    expect(JSON.parse(readFileSync(path.join(work, 'fix-review.json'), 'utf8'))).toEqual({
+    expect(JSON.parse(readFileSync(path.join(work, 'fix-review.json'), 'utf8'))).toMatchObject({
       approval: 'accept',
       coverage_complete: true,
       unresolved_occurrence_ids: [],
-      invariant_assessments: [],
       concerns: [],
     });
-    expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(proposal, 'utf8'));
     expect(readFileSync(path.join(work, 'plan.final.before-fix.md'), 'utf8')).toBe(before);
     expect(capture.text()).toContain('fix-pass: done (backup at plan.final.before-fix.md)');
   });
 
-  it('concerns route through the apply step', async () => {
+  it('retries a schema-valid fix review with ungrounded candidate evidence', async () => {
+    const finalPlan = seedConvergedPlan();
+    writeFindings(1);
+    const proposal = path.join(tmp, 'proposal.md');
+    writeStructuredPlanFile(proposal, 'Fix Review Retry');
+    const validReview = path.join(tmp, 'valid-review.json');
+    writeInvariantReview(validReview, 'accept', [], 'satisfied');
+    const invalidReview = path.join(tmp, 'invalid-review.json');
+    const invalidValue = JSON.parse(readFileSync(validReview, 'utf8')) as {
+      invariant_assessments: { occurrences: { evidence_refs: unknown[] }[] }[];
+    };
+    const occurrence = invalidValue.invariant_assessments[0]?.occurrences[0];
+    if (occurrence === undefined) {
+      throw new TypeError('missing fix-review occurrence fixture');
+    }
+    occurrence.evidence_refs = [{ kind: 'plan-section', section: 'Invented Section' }];
+    writeFileSync(invalidReview, `${JSON.stringify(invalidValue, null, 2)}\n`);
+    const calls = path.join(tmp, 'review.calls');
+    const prompt = path.join(tmp, 'review.prompt');
+    const matrix = fixtureMatrix();
+    matrix.reviewer = {
+      runner: 'claude',
+      model: 'claude-opus-4-8',
+      reasoning: 'xhigh',
+    };
+    const ctx = makeContext({ matrix });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+    ctx.passes.fixPass = {
+      ...ctx.passes.fixPass,
+      retryCount: 1,
+    };
+    const proof = proofState(ctx, ACTIVE_INVARIANTS);
+
+    const outcome = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
+        FAKE_CLAUDE_JSON_RESULT: validReview,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: invalidReview,
+        FAKE_CLAUDE_JSON_RESULT_2: validReview,
+        FAKE_CLAUDE_PROMPT: prompt,
+      },
+      () => runTestFixPass(ctx, finalPlan, proof),
+    );
+
+    expect(outcome.retainedReplacement).toBe(true);
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic semantic-admission repair');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic candidate evidence anchors');
+    expect(capture.text()).toContain(
+      'fix-reviewer output failed semantic admission (code=ungrounded-evidence',
+    );
+  });
+
+  it('admits a separate exact applied review before retaining changed bytes', async () => {
     const finalPlan = seedConvergedPlan();
     writeFindings(1);
     const proposal = path.join(tmp, 'proposal.md');
@@ -167,14 +345,15 @@ describe('fix pass', () => {
     const applied = path.join(tmp, 'applied.md');
     writeStructuredPlanFile(applied, 'Applied Fix');
     const review = path.join(tmp, 'review.json');
-    writeReview(review, 'accept_with_concerns', [
+    writeReview(review, 'reject', [
       { id: 'R1', claim: 'apply concern', evidence: 'stale.md:9', severity: 'major' },
     ]);
     const appliedReview = path.join(tmp, 'applied-review.json');
     writeReview(appliedReview, 'accept', []);
+    const reviewPrompt = path.join(tmp, 'codex.prompt');
     const ctx = makeContext();
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_CALLS: path.join(tmp, 'claude.calls'),
@@ -184,17 +363,34 @@ describe('fix pass', () => {
         FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
         FAKE_CODEX_OUTPUT_1: review,
         FAKE_CODEX_OUTPUT_2: appliedReview,
-        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CODEX_PROMPT: reviewPrompt,
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
+    expect(outcome.retainedReplacement).toBe(true);
+    if (!outcome.retainedReplacement) {
+      throw new Error('expected retained applied outcome');
+    }
+    expect(outcome.candidate).toMatchObject({
+      kind: 'fix-applied',
+      planVersion: 0,
+      path: finalPlan,
+      contentDigest: fixReviewCandidateDigest(finalPlan),
+    });
+    expect(outcome.requirement.expectedBinding.candidate.kind).toBe('fix-applied');
+    expect(outcome.requirement.expectedBinding.lineage.evaluationStage).toBe('fix-applied-review');
+    expect(outcome.review.materialIssueIds).toEqual([]);
+    expect(outcome.review.snapshot.binding).toEqual(outcome.requirement.expectedBinding);
+    expect(readFileSync(reviewPrompt, 'utf8')).toContain(
+      `occurrence_source_lineage_digest: ${outcome.requirement.expectedBinding.lineage.lineageDigest}`,
+    );
     expect(capture.text()).toContain('fix-pass: step 3 — claude apply');
     expect(capture.text()).toContain('fix-pass: step 4 — codex review exact applied candidate');
     expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(applied, 'utf8'));
   });
 
-  it('independently reviews an accepted proposal when active invariant coverage is missing', async () => {
+  it('rejects an incomplete proposal review before candidate adoption', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
@@ -205,80 +401,46 @@ describe('fix pass', () => {
       incompleteReview,
       `${JSON.stringify({ approval: 'accept', concerns: [] }, null, 2)}\n`,
     );
-    const appliedReview = path.join(tmp, 'applied-review.json');
-    writeFileSync(
-      appliedReview,
-      `${JSON.stringify(
-        {
-          approval: 'reject',
-          coverage_complete: false,
-          unresolved_occurrence_ids: ['O-fixture'],
-          invariant_assessments: [
-            {
-              invariant_id: 'I-v0-C1',
-              satisfied: false,
-              unresolved_occurrence_ids: ['O-fixture'],
-            },
-          ],
-          concerns: [
-            {
-              id: 'R1',
-              claim: 'The proposal regresses the active invariant.',
-              evidence: 'stale.md:9',
-              severity: 'major',
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
-    );
     const ctx = makeContext();
-    addActiveInvariant(ctx);
+    const proof = proofState(ctx, ACTIVE_INVARIANTS);
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
-        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
-        FAKE_CODEX_OUTPUT_1: incompleteReview,
-        FAKE_CODEX_OUTPUT_2: appliedReview,
+        FAKE_CODEX_OUTPUT: incompleteReview,
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan, proof),
     );
 
-    expect(capture.text()).toContain(
-      'proposal accepted without complete invariant coverage — reviewing exact candidate',
-    );
-    expect(capture.text()).toContain('fix-pass: step 4 — codex review exact applied candidate');
-    expect(capture.text()).toContain(
-      'exact applied candidate was not independently approved — restoring backup',
-    );
+    expect(outcome).toEqual(exemptFixPass('review-failed'));
+    expect(capture.text()).toContain('fix-pass: review failed');
     expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
 
-  it('propose failure keeps the pre-fix canonical plan', async () => {
+  it('returns proposal-failed without retaining provider output', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(2);
     const ctx = makeContext();
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_ATTEMPTS: path.join(tmp, 'claude.attempts'),
         FAKE_CLAUDE_FAILS: '9',
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
+    expect(outcome).toEqual(exemptFixPass('proposal-failed'));
     expect(capture.text()).toContain('keeping pre-fix canonical plan, fix-pass skipped');
     expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
 
-  it('shape-broken proposal keeps the pre-fix canonical plan', async () => {
+  it('classifies shape-broken proposal output as proposal-failed', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
@@ -286,15 +448,16 @@ describe('fix pass', () => {
     writeFileSync(broken, '# Just a summary\n\nNot a full plan.\n');
     const ctx = makeContext();
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_RESULT: broken,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
+    expect(outcome).toEqual(exemptFixPass('proposal-failed'));
     expect(capture.text()).toContain('fix-pass: proposal output failed the plan-shape gate');
     expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
@@ -320,7 +483,7 @@ describe('fix pass', () => {
         FAKE_CODEX_OUTPUT: review,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
     expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(cleanProposal, 'utf8'));
@@ -328,7 +491,7 @@ describe('fix pass', () => {
     expect(capture.text()).toContain('fix-pass: clean accept');
   });
 
-  it('rejects a bad apply output after a blocker/major review', async () => {
+  it('returns replacement-rejected when changed output fails validation', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
@@ -337,12 +500,12 @@ describe('fix pass', () => {
     const brokenApply = path.join(tmp, 'broken-apply.md');
     writeFileSync(brokenApply, '# Not a plan\n');
     const review = path.join(tmp, 'review.json');
-    writeReview(review, 'accept_with_concerns', [
+    writeReview(review, 'reject', [
       { id: 'R1', claim: 'major concern', evidence: 'stale.md:9', severity: 'major' },
     ]);
     const ctx = makeContext();
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_CALLS: path.join(tmp, 'claude.calls'),
@@ -351,17 +514,17 @@ describe('fix pass', () => {
         FAKE_CODEX_OUTPUT: review,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
-    expect(capture.text()).toContain(
-      'fix-pass: apply output rejected after blocker/major review — keeping pre-fix canonical plan',
-    );
+    expect(outcome).toEqual(exemptFixPass('replacement-rejected'));
+    expect(capture.text()).toContain('fix-pass: apply output rejected');
     expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
 
-  it('rejected apply output falls back to the proposal when no blockers/majors remain', async () => {
+  it('does not bind a proposal review to failed changed bytes', async () => {
     const finalPlan = seedConvergedPlan();
+    const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
     const proposal = path.join(tmp, 'proposal.md');
     writeStructuredPlanFile(proposal, 'Fixed Proposal');
@@ -373,7 +536,7 @@ describe('fix pass', () => {
     ]);
     const ctx = makeContext();
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_CALLS: path.join(tmp, 'claude.calls'),
@@ -382,67 +545,48 @@ describe('fix pass', () => {
         FAKE_CODEX_OUTPUT: review,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan),
     );
 
-    expect(capture.text()).toContain(
-      'fix-pass: apply output rejected — using validated proposal as final',
-    );
-    expect(readFileSync(finalPlan, 'utf8')).toBe(readFileSync(proposal, 'utf8'));
+    expect(outcome).toEqual(exemptFixPass('replacement-rejected'));
+    expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
 
-  it('re-reviews an invalid-apply fallback when proposal invariant coverage is incomplete', async () => {
+  it('restores the pre-fix plan when an admitted applied review is inconclusive', async () => {
     const finalPlan = seedConvergedPlan();
     const before = readFileSync(finalPlan, 'utf8');
     writeFindings(1);
     const proposal = path.join(tmp, 'proposal.md');
     writeStructuredPlanFile(proposal, 'Invariant Regression');
-    const brokenApply = path.join(tmp, 'broken-apply.md');
-    writeFileSync(brokenApply, '# Not a plan\n');
-    const incompleteReview = path.join(tmp, 'incomplete-review.json');
-    writeFileSync(
-      incompleteReview,
-      `${JSON.stringify({
-        approval: 'accept_with_concerns',
-        coverage_complete: false,
-        unresolved_occurrence_ids: ['O-fixture'],
-        invariant_assessments: [],
-        concerns: [{ id: 'R1', claim: 'minor concern', evidence: 'stale.md:9', severity: 'minor' }],
-      })}\n`,
+    const applied = path.join(tmp, 'applied.md');
+    writeStructuredPlanFile(applied, 'Applied Invariant Regression');
+    const proposalReview = path.join(tmp, 'proposal-review.json');
+    writeInvariantReview(
+      proposalReview,
+      'reject',
+      [{ id: 'R1', claim: 'apply the repair', evidence: 'stale.md:9', severity: 'major' }],
+      'satisfied',
     );
-    const rejectedReview = path.join(tmp, 'rejected-review.json');
-    writeFileSync(
-      rejectedReview,
-      `${JSON.stringify({
-        approval: 'reject',
-        coverage_complete: false,
-        unresolved_occurrence_ids: ['O-fixture'],
-        invariant_assessments: [],
-        concerns: [
-          { id: 'R2', claim: 'invariant unresolved', evidence: 'stale.md:9', severity: 'major' },
-        ],
-      })}\n`,
-    );
+    const appliedReview = path.join(tmp, 'applied-review.json');
+    writeInvariantReview(appliedReview, 'accept', [], 'unresolved');
     const ctx = makeContext();
-    addActiveInvariant(ctx);
+    const proof = proofState(ctx, ACTIVE_INVARIANTS);
 
-    await withEnvAsync(
+    const outcome = await withEnvAsync(
       {
         PATH: fakePath(),
         FAKE_CLAUDE_MARKDOWN_CALLS: path.join(tmp, 'claude.calls'),
         FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
-        FAKE_CLAUDE_MARKDOWN_RESULT_2: brokenApply,
+        FAKE_CLAUDE_MARKDOWN_RESULT_2: applied,
         FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
-        FAKE_CODEX_OUTPUT: incompleteReview,
-        FAKE_CODEX_OUTPUT_1: incompleteReview,
-        FAKE_CODEX_OUTPUT_2: rejectedReview,
+        FAKE_CODEX_OUTPUT_1: proposalReview,
+        FAKE_CODEX_OUTPUT_2: appliedReview,
         FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
       },
-      () => runFixPass(ctx, finalPlan),
+      () => runTestFixPass(ctx, finalPlan, proof),
     );
 
-    expect(capture.text()).toContain('using validated proposal as final');
-    expect(capture.text()).toContain('review exact applied candidate');
+    expect(outcome).toEqual(exemptFixPass('pre-fix-restored'));
     expect(capture.text()).toContain('restoring backup');
     expect(readFileSync(finalPlan, 'utf8')).toBe(before);
   });
@@ -460,7 +604,11 @@ describe('translate pass', () => {
     const argvLog = path.join(tmp, 'claude.argv');
     const promptLog = path.join(tmp, 'claude.prompt');
     const ctx = makeContext({ locale: 'pt-BR' });
-    const versionedState = writeConvergenceState(work, ctx.convergence);
+    ctx.readinessProof = proofState(ctx);
+    const versionedState = writeReadinessProofState(
+      path.join(work, `convergence.v${ctx.readinessProof.planVersion}.json`),
+      ctx.readinessProof,
+    );
     const versionedBefore = readFileSync(versionedState);
 
     await withEnvAsync(
@@ -477,7 +625,8 @@ describe('translate pass', () => {
     expect(readFileSync(promptLog, 'utf8')).toContain('## Target locale\npt-BR');
     expect(capture.text()).toContain('translate-pass: done');
     expect(readFileSync(versionedState)).toEqual(versionedBefore);
-    expect(ctx.convergence.contextDeliveries).toEqual([
+    expect(readReadinessProofState(versionedState).contextDeliveries).toEqual([]);
+    expect(ctx.readinessProof.contextDeliveries).toEqual([
       expect.objectContaining({ role: 'translator', stage: 'translate' }),
     ]);
     const record = argvRecords(argvLog)[0] ?? [];

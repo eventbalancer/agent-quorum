@@ -56,6 +56,20 @@ const COMPLETE_CRITIC_REVIEW = {
   scan_complete: true,
   unresolved_coverage: [],
 } as const;
+const COMPLETE_DOMAIN_ASSESSMENTS = CRITIC_RISK_DOMAINS.map((domain) => ({
+  domain,
+  applicability: 'not-applicable',
+  risk: 'standard',
+  complete: true,
+  rationale: `${domain} does not apply to this candidate.`,
+  unavailable_evidence: [],
+  evidence_refs: [{ kind: 'plan-section', section: 'Scope' }],
+}));
+const EMPTY_OCCURRENCE_PROOF = {
+  coverage_complete: true,
+  unresolved_occurrence_ids: [],
+  invariant_assessments: [],
+} as const;
 
 interface SchemaContract {
   readonly name: string;
@@ -88,10 +102,12 @@ const schemaContracts: readonly SchemaContract[] = [
       plan_markdown: '# Plan',
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     },
     invalid: {
       plan_version: 1,
+      plan_markdown: '# Plan',
       issues: [],
       applied: [],
       rejected_append: [],
@@ -104,10 +120,11 @@ const schemaContracts: readonly SchemaContract[] = [
       plan_version: 1,
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     },
     invalid: {
-      plan_version: 0,
+      plan_version: 1,
       issues: [],
       applied: [],
       rejected_append: [],
@@ -158,8 +175,23 @@ const schemaContracts: readonly SchemaContract[] = [
   {
     name: 'critique',
     schemaFile: skills.criticSchema,
-    valid: { plan_version: 0, summary: 'ok', issues: [] },
-    invalid: { plan_version: 0, issues: [] },
+    valid: {
+      plan_version: 0,
+      summary: 'ok',
+      review: COMPLETE_CRITIC_REVIEW,
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS,
+      boundary_challenges: [],
+      opportunities: [],
+      issues: [],
+    },
+    invalid: {
+      plan_version: 0,
+      summary: 'missing review',
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS,
+      boundary_challenges: [],
+      opportunities: [],
+      issues: [],
+    },
   },
   {
     name: 'enriched critique proof vocabulary',
@@ -168,6 +200,9 @@ const schemaContracts: readonly SchemaContract[] = [
       plan_version: 0,
       summary: 'complete independent scan',
       review: COMPLETE_CRITIC_REVIEW,
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS,
+      boundary_challenges: [],
+      opportunities: [],
       issues: [],
     },
     invalid: {
@@ -177,6 +212,9 @@ const schemaContracts: readonly SchemaContract[] = [
         ...COMPLETE_CRITIC_REVIEW,
         considered_context: REQUIRED_CRITIC_CONTEXT.slice(0, -1),
       },
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS,
+      boundary_challenges: [],
+      opportunities: [],
       issues: [],
     },
   },
@@ -186,17 +224,20 @@ const schemaContracts: readonly SchemaContract[] = [
     valid: {
       plan_version: 0,
       summary: 'A high-risk applicable domain lacks required evidence.',
-      domain_assessments: [
-        {
-          domain: 'security-privacy-authorization',
-          applicability: 'applicable',
-          risk: 'high',
-          complete: false,
-          rationale: 'The plan changes authorization behavior.',
-          unavailable_evidence: ['deployed policy source'],
-          evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
-        },
-      ],
+      review: COMPLETE_CRITIC_REVIEW,
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS.map((assessment) =>
+        assessment.domain === 'security-privacy-authorization'
+          ? {
+              domain: 'security-privacy-authorization',
+              applicability: 'applicable',
+              risk: 'high',
+              complete: false,
+              rationale: 'The plan changes authorization behavior.',
+              unavailable_evidence: ['deployed policy source'],
+              evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+            }
+          : assessment,
+      ),
       boundary_challenges: [
         {
           id: 'B1',
@@ -221,17 +262,20 @@ const schemaContracts: readonly SchemaContract[] = [
     invalid: {
       plan_version: 0,
       summary: 'Uses an unsupported applicability token.',
-      domain_assessments: [
-        {
-          domain: 'security-privacy-authorization',
-          applicability: 'unresolved',
-          risk: 'high',
-          complete: false,
-          rationale: 'The plan changes authorization behavior.',
-          unavailable_evidence: [],
-          evidence_refs: [],
-        },
-      ],
+      review: COMPLETE_CRITIC_REVIEW,
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS.map((assessment) =>
+        assessment.domain === 'security-privacy-authorization'
+          ? {
+              domain: 'security-privacy-authorization',
+              applicability: 'unresolved',
+              risk: 'high',
+              complete: false,
+              rationale: 'The plan changes authorization behavior.',
+              unavailable_evidence: [],
+              evidence_refs: [],
+            }
+          : assessment,
+      ),
       boundary_challenges: [],
       opportunities: [],
       issues: [],
@@ -240,14 +284,28 @@ const schemaContracts: readonly SchemaContract[] = [
   {
     name: 'fix review',
     schemaFile: skills.reviewerSchema,
-    valid: { approval: 'accept', concerns: [] },
-    invalid: { approval: 'approve', concerns: [] },
+    valid: { approval: 'accept', ...EMPTY_OCCURRENCE_PROOF, concerns: [] },
+    invalid: {
+      approval: 'accept',
+      unresolved_occurrence_ids: [],
+      invariant_assessments: [],
+      concerns: [],
+    },
   },
   {
     name: 'readiness judgment',
     schemaFile: skills.judgeSchema,
-    valid: { ready: true, rationale: 'ready' },
-    invalid: { ready: true },
+    valid: {
+      ready: true,
+      rationale: 'ready',
+      revision_issue: null,
+      ...EMPTY_OCCURRENCE_PROOF,
+    },
+    invalid: {
+      ready: true,
+      rationale: 'ready',
+      ...EMPTY_OCCURRENCE_PROOF,
+    },
   },
 ];
 
@@ -344,6 +402,25 @@ describe('critic proof vocabulary contract', () => {
     expect(schema.$defs.riskLevel.enum).toEqual(CRITIC_RISK_LEVELS);
   });
 
+  it('requires the complete closed critic output surface and all eight domains', () => {
+    const schema = JSON.parse(readFileSync(skills.criticSchema, 'utf8')) as {
+      required: string[];
+      properties: {
+        domain_assessments: { minItems: number; maxItems: number };
+      };
+    };
+    expect(schema.required).toEqual([
+      'plan_version',
+      'summary',
+      'review',
+      'domain_assessments',
+      'boundary_challenges',
+      'opportunities',
+      'issues',
+    ]);
+    expect(schema.properties.domain_assessments).toMatchObject({ minItems: 8, maxItems: 8 });
+  });
+
   it('keeps critic risk calibration aligned with the frozen assessment policy', () => {
     const skill = skillText(skills.criticSkill);
     expect(skill).toContain('Do not raise a frozen `standard` domain to `high` merely because');
@@ -361,6 +438,157 @@ describe('Judge final-readiness contract', () => {
     expect(text).toContain('do not quote or reproduce plan text');
     expect(text).toContain('revision_issue');
     expect(text).toContain('inside the frozen boundary');
+  });
+});
+
+describe('occurrence proof role contracts', () => {
+  interface OccurrenceProofSchema {
+    required: string[];
+    properties: {
+      invariant_assessments: {
+        items: {
+          required: string[];
+          properties: {
+            satisfied?: unknown;
+            unresolved_occurrence_ids?: unknown;
+            occurrences: {
+              items: {
+                required: string[];
+                properties: {
+                  disposition: { enum: string[] };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  }
+
+  it.each([
+    ['fix reviewer', skills.reviewerSchema],
+    ['Judge', skills.judgeSchema],
+  ])('%s requires exact per-occurrence dispositions instead of summary booleans', (_, file) => {
+    const schema = JSON.parse(readFileSync(file, 'utf8')) as OccurrenceProofSchema;
+    expect(schema.required).toEqual(
+      expect.arrayContaining([
+        'coverage_complete',
+        'unresolved_occurrence_ids',
+        'invariant_assessments',
+      ]),
+    );
+    const invariant = schema.properties.invariant_assessments.items;
+    expect(invariant.required).toEqual(['invariant_id', 'occurrences']);
+    expect(invariant.properties.satisfied).toBeUndefined();
+    expect(invariant.properties.unresolved_occurrence_ids).toBeUndefined();
+    const occurrence = invariant.properties.occurrences.items;
+    expect(occurrence.required).toEqual(['occurrence_id', 'disposition', 'evidence_refs']);
+    expect(occurrence.properties.disposition.enum).toEqual([
+      'satisfied',
+      'violated',
+      'not-applicable',
+      'unresolved',
+    ]);
+  });
+
+  it('requires explicit creator dispositions and an explicit Judge revision issue', () => {
+    for (const file of [skills.creatorSchema, skills.creatorMetaSchema]) {
+      const schema = JSON.parse(readFileSync(file, 'utf8')) as { required: string[] };
+      expect(schema.required).toContain('systemic_dispositions');
+    }
+    const judge = JSON.parse(readFileSync(skills.judgeSchema, 'utf8')) as {
+      required: string[];
+      properties: { revision_issue: { type: string[] } };
+    };
+    expect(judge.required).toContain('revision_issue');
+    expect(judge.properties.revision_issue.type).toEqual(['object', 'null']);
+  });
+
+  it('represents all four occurrence dispositions and rejects summary-only assessments', () => {
+    const occurrences = ['satisfied', 'violated', 'not-applicable', 'unresolved'].map(
+      (disposition, index) => ({
+        occurrence_id: `O${index + 1}`,
+        disposition,
+        evidence_refs:
+          disposition === 'unresolved'
+            ? []
+            : [{ kind: 'plan-section', section: `Occurrence ${index + 1}` }],
+      }),
+    );
+    const proof = {
+      coverage_complete: true,
+      unresolved_occurrence_ids: ['O4'],
+      invariant_assessments: [{ invariant_id: 'I1', occurrences }],
+    };
+    const fixtures = [
+      {
+        name: 'reviewer',
+        schema: skills.reviewerSchema,
+        valid: {
+          approval: 'reject',
+          ...proof,
+          concerns: [
+            {
+              id: 'R1',
+              claim: 'The candidate has a material concern.',
+              evidence: '## Verification',
+              severity: 'major',
+            },
+          ],
+        },
+        legacy: {
+          approval: 'accept',
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [
+            { invariant_id: 'I1', satisfied: true, unresolved_occurrence_ids: [] },
+          ],
+          concerns: [],
+        },
+      },
+      {
+        name: 'judge',
+        schema: skills.judgeSchema,
+        valid: {
+          ready: false,
+          rationale: 'An occurrence is unresolved.',
+          revision_issue: null,
+          ...proof,
+        },
+        legacy: {
+          ready: true,
+          rationale: 'ready',
+          revision_issue: null,
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [
+            { invariant_id: 'I1', satisfied: true, unresolved_occurrence_ids: [] },
+          ],
+        },
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const validFile = path.join(tmp, `${fixture.name}-four-dispositions.json`);
+      const legacyFile = path.join(tmp, `${fixture.name}-legacy-assessment.json`);
+      writeFileSync(validFile, `${JSON.stringify(fixture.valid)}\n`);
+      writeFileSync(legacyFile, `${JSON.stringify(fixture.legacy)}\n`);
+      expect(schemaValidQuiet(validFile, fixture.schema)).toBe(true);
+      expect(schemaValidQuiet(legacyFile, fixture.schema)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['critic', skills.criticSkill],
+    ['fix reviewer', skills.reviewerSkill],
+    ['Judge', skills.judgeSkill],
+  ])('%s documents all four grounded occurrence outcomes and rejects role consensus', (_, file) => {
+    const text = skillText(file);
+    for (const disposition of ['satisfied', 'violated', 'not-applicable', 'unresolved']) {
+      expect(text).toContain(`\`${disposition}\``);
+    }
+    expect(text).toContain('exactly once');
+    expect(text.toLowerCase()).toContain('not consensus');
   });
 });
 

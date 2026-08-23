@@ -35,6 +35,74 @@ const JUDGE_SKILL = path.join(SKILLS_DIR, 'plan-judge', 'SKILL.md');
 const JUDGE_SCHEMA = path.join(SKILLS_DIR, 'plan-judge', 'readiness.schema.json');
 const TOOLS = 'Read,Grep,Glob';
 const DISALLOWED = 'Write,Edit,NotebookEdit,Bash,Agent,Task,ToolSearch,AskUserQuestion';
+const FOUR_DISPOSITION_ASSESSMENTS = [
+  {
+    invariant_id: 'I-fixture',
+    occurrences: [
+      {
+        occurrence_id: 'O-satisfied',
+        disposition: 'satisfied',
+        evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      },
+      {
+        occurrence_id: 'O-violated',
+        disposition: 'violated',
+        evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      },
+      {
+        occurrence_id: 'O-not-applicable',
+        disposition: 'not-applicable',
+        evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+      },
+      {
+        occurrence_id: 'O-unresolved',
+        disposition: 'unresolved',
+        evidence_refs: [],
+      },
+    ],
+  },
+] as const;
+const FOUR_DISPOSITION_PROOF = {
+  coverage_complete: true,
+  unresolved_occurrence_ids: ['O-unresolved'],
+  invariant_assessments: FOUR_DISPOSITION_ASSESSMENTS,
+} as const;
+const COMPLETE_CRITIC_REVIEW = {
+  considered_context: [
+    'original-scope',
+    'authoritative-system-facts',
+    'operator-decisions',
+    'material-findings',
+    'active-invariants',
+    'quality-and-limits',
+  ],
+  invariant_assessments: FOUR_DISPOSITION_ASSESSMENTS.map((assessment) => ({
+    ...assessment,
+    complete: true,
+  })),
+  scope_coverage: ['declared-scope', 'direct-plan-scope'],
+  issue_budget: { limit: 8, used: 0, exhausted: false },
+  scan_complete: true,
+  unresolved_coverage: [],
+} as const;
+const COMPLETE_DOMAIN_ASSESSMENTS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+].map((domain) => ({
+  domain,
+  applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+  risk: 'standard',
+  complete: true,
+  rationale: `Fixture review for ${domain}.`,
+  unavailable_evidence: [],
+  evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+}));
 
 let tmp: string;
 let fake: string;
@@ -316,6 +384,7 @@ const CLAUDE_SCHEMA_CONTRACTS: readonly ClaudeSchemaContract[] = [
       plan_markdown: '# Updated plan',
       issues: [],
       applied: [],
+      systemic_dispositions: [],
       rejected_append: [],
     },
   },
@@ -324,28 +393,58 @@ const CLAUDE_SCHEMA_CONTRACTS: readonly ClaudeSchemaContract[] = [
     role: 'creator',
     skillFile: CREATOR_SKILL,
     schemaFile: CREATOR_UPDATE_META_SCHEMA,
-    payload: { plan_version: 1, issues: [], applied: [], rejected_append: [] },
+    payload: {
+      plan_version: 1,
+      issues: [],
+      applied: [],
+      systemic_dispositions: [],
+      rejected_append: [],
+    },
   },
   {
     name: 'critique',
     role: 'critic',
     skillFile: CRITIC_SKILL,
     schemaFile: CRITIC_SCHEMA,
-    payload: { plan_version: 0, summary: 'Ready', issues: [] },
+    payload: {
+      plan_version: 0,
+      summary: 'Ready',
+      review: COMPLETE_CRITIC_REVIEW,
+      domain_assessments: COMPLETE_DOMAIN_ASSESSMENTS,
+      boundary_challenges: [],
+      opportunities: [],
+      issues: [],
+    },
   },
   {
     name: 'fix review',
     role: 'reviewer',
     skillFile: REVIEWER_SKILL,
     schemaFile: REVIEWER_SCHEMA,
-    payload: { approval: 'accept', concerns: [] },
+    payload: {
+      approval: 'reject',
+      ...FOUR_DISPOSITION_PROOF,
+      concerns: [
+        {
+          id: 'R1',
+          claim: 'The fixture occurrence is violated.',
+          evidence: 'Work Plan',
+          severity: 'major',
+        },
+      ],
+    },
   },
   {
     name: 'readiness judgment',
     role: 'judge',
     skillFile: JUDGE_SKILL,
     schemaFile: JUDGE_SCHEMA,
-    payload: { ready: true, rationale: 'Ready' },
+    payload: {
+      ready: false,
+      rationale: 'The fixture includes all four occurrence dispositions.',
+      revision_issue: null,
+      ...FOUR_DISPOSITION_PROOF,
+    },
   },
 ];
 
@@ -1006,6 +1105,52 @@ describe('codex argv and retries', () => {
     expect(status).toBe(0);
     expect(readFileSync(calls, 'utf8')).toBe('2');
     expect(schemaValidQuiet(out, CRITIC_SCHEMA)).toBe(true);
+  });
+
+  it('adds trusted validation feedback only to the retry prompt', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const promptFile = path.join(tmp, 'codex.prompt');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
+    let validationCalls = 0;
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: promptFile,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'BASE-PROMPT\n',
+          {
+            validateOutput: () => {
+              validationCalls += 1;
+              return validationCalls === 1
+                ? { valid: false, retryPrompt: 'TRUSTED-REPAIR-INSTRUCTION' }
+                : true;
+            },
+          },
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(validationCalls).toBe(2);
+    const retryPrompt = readFileSync(promptFile, 'utf8');
+    expect(retryPrompt).toContain('BASE-PROMPT');
+    expect(retryPrompt).toContain('TRUSTED-REPAIR-INSTRUCTION');
+    expect(retryPrompt.indexOf('BASE-PROMPT')).toBeLessThan(
+      retryPrompt.indexOf('TRUSTED-REPAIR-INSTRUCTION'),
+    );
+    expect(capture.text()).not.toContain('TRUSTED-REPAIR-INSTRUCTION');
   });
 
   it('returns failure when output validation exhausts the retry policy', async () => {

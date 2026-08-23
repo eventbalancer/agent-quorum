@@ -92,7 +92,7 @@ export async function runTranslatePass(
     ctx,
     role: 'translator',
     stage: 'translate',
-    planVersion: ctx.convergence.planVersion,
+    planVersion: ctx.readinessProof.planVersion,
     skillFile: ctx.skills.translatorSkill,
     schemaFile: '',
     basePrompt,

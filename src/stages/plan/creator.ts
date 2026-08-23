@@ -3,7 +3,7 @@ import { nonEmptyFile } from '../../runtime/files.js';
 import path from 'node:path';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
-import { providerRun } from '../../providers/provider.js';
+import { providerRun, type ProviderOutputValidationResult } from '../../providers/provider.js';
 import { resolveClaudePermissionMode } from '../../providers/runtime.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
@@ -31,6 +31,18 @@ import {
   ReadinessContractValidationError,
   type ReadinessAssessment,
 } from '../../core/readiness-contract.js';
+import {
+  admitCreatorUpdate,
+  ReadinessAdmissionError,
+  type AdmitCreatorUpdateInput,
+  type AdmittedCreatorUpdate,
+} from '../../core/readiness-admission.js';
+import {
+  admissionFailureLogLabel,
+  candidateEvidenceAnchorPrompt,
+  readinessAdmissionRepairPrompt,
+  structuredOutputRepairPrompt,
+} from './evidence-anchors.js';
 
 const ONE_SHOT_OUTPUT_MODE =
   'Return ONLY JSON conforming to the schema. No prose, no markdown fences.\n' +
@@ -49,7 +61,7 @@ const SPLIT_META_OUTPUT_MODE =
   'The revised plan has already been written as markdown. Your job here is only bookkeeping:\n' +
   '- give each original critique issue a verdict;\n' +
   '- mark accepted or downgraded issues as applied only when the revised plan actually addresses them;\n' +
-  '- put only self-rejected minor/nit accepted items in rejected_append;\n' +
+  '- return rejected_append as an empty array; current critiques contain only material issues;\n' +
   '- do not include plan_markdown or any other markdown content in this JSON.';
 
 const READ_ONLY_ASSESSMENT_TOOLS = 'Read,Grep,Glob';
@@ -70,6 +82,81 @@ function creatorUpdatePrompt(planBlock: string, critiqueFile: string, outputMode
     '\n' +
     `## Output mode\n${outputMode}`
   );
+}
+
+function creatorMetadataCritique(critiqueFile: string): string {
+  try {
+    const value = JSON.parse(readFileSync(critiqueFile, 'utf8')) as JsonValue;
+    if (!isJsonObject(value)) {
+      return readStripped(critiqueFile);
+    }
+    return JSON.stringify(
+      {
+        plan_version: value.plan_version ?? null,
+        issues: Array.isArray(value.issues) ? value.issues : [],
+      },
+      null,
+      2,
+    );
+  } catch {
+    return readStripped(critiqueFile);
+  }
+}
+
+export type CreatorUpdateAdmissionInput = Omit<
+  AdmitCreatorUpdateInput,
+  'value' | 'evidenceContext'
+>;
+
+function admitCreatorUpdateFile(
+  ctx: RunContext,
+  updateFile: string,
+  candidateFile: string,
+  admissionInput: CreatorUpdateAdmissionInput,
+): AdmittedCreatorUpdate {
+  const value = JSON.parse(readFileSync(updateFile, 'utf8')) as JsonValue;
+  return admitCreatorUpdate({
+    value,
+    ...admissionInput,
+    evidenceContext: {
+      work: ctx.work,
+      projectRoot: ctx.provider.projectRoot,
+      planVersion: admissionInput.expectedPlanVersion,
+      candidateContent: readFileSync(candidateFile, 'utf8'),
+      candidatePath: candidateFile,
+    },
+  });
+}
+
+function semanticCreatorValidation(
+  ctx: RunContext,
+  updateFile: string,
+  candidateFile: string,
+  admissionInput: CreatorUpdateAdmissionInput | undefined,
+  onAdmitted: (admitted: AdmittedCreatorUpdate | undefined) => void,
+  onAdmissionError: (error: ReadinessAdmissionError | undefined) => void,
+): ProviderOutputValidationResult {
+  if (admissionInput === undefined) {
+    onAdmissionError(undefined);
+    return true;
+  }
+  try {
+    onAdmitted(admitCreatorUpdateFile(ctx, updateFile, candidateFile, admissionInput));
+    onAdmissionError(undefined);
+    return true;
+  } catch (error) {
+    onAdmitted(undefined);
+    if (error instanceof ReadinessAdmissionError) {
+      onAdmissionError(error);
+      log(`WARNING: ${admissionFailureLogLabel('creator-update', error)}`);
+      return { valid: false, retryPrompt: readinessAdmissionRepairPrompt(error) };
+    }
+    onAdmissionError(undefined);
+    return {
+      valid: false,
+      retryPrompt: structuredOutputRepairPrompt('creator update'),
+    };
+  }
 }
 
 const PLAN_MODE_STUB_DIAGNOSTIC =
@@ -248,60 +335,39 @@ export async function runCreatorReadinessAssessment(
   }
 }
 
-async function runCreatorUpdateOneShot(
+interface CreatorUpdateRequestResult {
+  readonly status: number;
+  readonly admitted?: AdmittedCreatorUpdate;
+}
+
+function materializeOneShotUpdate(
   ctx: RunContext,
   iter: number,
-  planFile: string,
-  critiqueFile: string,
   updateFile: string,
-  nextFile: string,
   revisionFile: string,
   metaFile: string,
-): Promise<number> {
+): boolean {
   const planVersion = iter + 1;
-  const planBlock = `## Plan\n${readStripped(planFile)}`;
-  const prompt = retainedRolePrompt({
-    ctx,
-    role: 'creator',
-    stage: 'revision-and-metadata',
-    planVersion: iter,
-    skillFile: ctx.skills.creatorSkill,
-    schemaFile: ctx.skills.creatorSchema,
-    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, ONE_SHOT_OUTPUT_MODE),
-  });
-
-  const status = await providerRun(
-    ctx.provider,
-    'creator',
-    'json',
-    updateFile,
-    ctx.skills.creatorSkill,
-    ctx.skills.creatorSchema,
-    ctx.permissions.creator.updateTools,
-    ctx.permissions.creator.updateDisallowedTools,
-    prompt,
-  );
-  if (status !== 0) {
-    return status;
+  try {
+    sanitizeUpdateJson(updateFile, planVersion);
+  } catch {
+    return false;
   }
-
-  sanitizeUpdateJson(updateFile, planVersion);
   if (!validateSchema(updateFile, ctx.skills.creatorSchema)) {
-    return 3;
+    return false;
   }
   const update = JSON.parse(readFileSync(updateFile, 'utf8')) as JsonValue;
   const planMarkdown = isJsonObject(update) ? update.plan_markdown : null;
   writeFileSync(revisionFile, `${jqRawRender(planMarkdown)}\n`);
   if (!nonEmptyFile(revisionFile)) {
-    return 4;
+    return false;
   }
   normalizePlanDocument(revisionFile);
   normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
   validatePlanDocumentShape(revisionFile);
   if (!planDocumentShapeOk(revisionFile)) {
-    return 4;
+    return false;
   }
-  copyFileSync(revisionFile, nextFile);
   const updateObj: JsonObject = isJsonObject(update) ? update : {};
   const meta = {
     plan_version: updateObj.plan_version ?? null,
@@ -314,10 +380,71 @@ async function runCreatorUpdateOneShot(
   };
   writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`);
   sanitizeUpdateMetaJson(metaFile, planVersion);
-  if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) {
-    return 3;
+  return validateSchema(metaFile, ctx.skills.creatorMetaSchema);
+}
+
+async function runCreatorUpdateOneShot(
+  ctx: RunContext,
+  iter: number,
+  planFile: string,
+  critiqueFile: string,
+  updateFile: string,
+  revisionFile: string,
+  metaFile: string,
+  admissionInput: CreatorUpdateAdmissionInput | undefined,
+): Promise<CreatorUpdateRequestResult> {
+  const planBlock = `## Plan\n${readStripped(planFile)}`;
+  const prompt = retainedRolePrompt({
+    ctx,
+    role: 'creator',
+    stage: 'revision-and-metadata',
+    planVersion: iter,
+    skillFile: ctx.skills.creatorSkill,
+    schemaFile: ctx.skills.creatorSchema,
+    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, ONE_SHOT_OUTPUT_MODE),
+  });
+
+  let admitted: AdmittedCreatorUpdate | undefined;
+  const status = await providerRun(
+    ctx.provider,
+    'creator',
+    'json',
+    updateFile,
+    ctx.skills.creatorSkill,
+    ctx.skills.creatorSchema,
+    ctx.permissions.creator.updateTools,
+    ctx.permissions.creator.updateDisallowedTools,
+    prompt,
+    {
+      validateOutput: () => {
+        if (!materializeOneShotUpdate(ctx, iter, updateFile, revisionFile, metaFile)) {
+          admitted = undefined;
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('one-shot creator update'),
+          };
+        }
+        return semanticCreatorValidation(
+          ctx,
+          updateFile,
+          revisionFile,
+          admissionInput,
+          (value) => {
+            admitted = value;
+          },
+          (error) => {
+            if (error !== undefined) {
+              admitted = undefined;
+            }
+          },
+        );
+      },
+    },
+  );
+  if (status !== 0) {
+    return { status };
   }
-  return 0;
+  return admitted === undefined ? { status: 0 } : { status: 0, admitted };
 }
 
 async function runCreatorUpdatePlan(
@@ -359,9 +486,18 @@ async function runCreatorUpdateMeta(
   originalPlan: string,
   revisedPlan: string,
   critiqueFile: string,
-  outFile: string,
-): Promise<void> {
+  metaFile: string,
+  updateFile: string,
+  admissionInput: CreatorUpdateAdmissionInput | undefined,
+): Promise<AdmittedCreatorUpdate | undefined> {
+  const planVersion = iter + 1;
   const planBlock = `## Original plan\n${readStripped(originalPlan)}\n\n## Revised plan\n${readStripped(revisedPlan)}`;
+  const metadataPrompt = [
+    candidateEvidenceAnchorPrompt(revisedPlan),
+    planBlock,
+    `## Critique\n${creatorMetadataCritique(critiqueFile)}`,
+    `## Output mode\n${SPLIT_META_OUTPUT_MODE}`,
+  ].join('\n\n');
   const prompt = retainedRolePrompt({
     ctx,
     role: 'creator',
@@ -369,22 +505,76 @@ async function runCreatorUpdateMeta(
     planVersion: iter,
     skillFile: ctx.skills.creatorSkill,
     schemaFile: ctx.skills.creatorMetaSchema,
-    basePrompt: creatorUpdatePrompt(planBlock, critiqueFile, SPLIT_META_OUTPUT_MODE),
+    basePrompt: metadataPrompt,
   });
+  let admitted: AdmittedCreatorUpdate | undefined;
+  let admissionError: ReadinessAdmissionError | undefined;
   const status = await providerRun(
     ctx.provider,
     'creator',
     'json',
-    outFile,
+    metaFile,
     ctx.skills.creatorSkill,
     ctx.skills.creatorMetaSchema,
     ctx.permissions.creator.updateTools,
     ctx.permissions.creator.updateDisallowedTools,
     prompt,
+    {
+      validateOutput: () => {
+        try {
+          sanitizeUpdateMetaJson(metaFile, planVersion);
+          if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) {
+            admitted = undefined;
+            admissionError = undefined;
+            return {
+              valid: false,
+              retryPrompt: structuredOutputRepairPrompt('creator update metadata'),
+            };
+          }
+          combineUpdateJson(metaFile, revisedPlan, updateFile);
+          sanitizeUpdateJson(updateFile, planVersion);
+          if (!validateSchema(updateFile, ctx.skills.creatorSchema)) {
+            admitted = undefined;
+            admissionError = undefined;
+            return {
+              valid: false,
+              retryPrompt: structuredOutputRepairPrompt('combined creator update'),
+            };
+          }
+          return semanticCreatorValidation(
+            ctx,
+            updateFile,
+            revisedPlan,
+            admissionInput,
+            (value) => {
+              admitted = value;
+            },
+            (error) => {
+              admissionError = error;
+            },
+          );
+        } catch {
+          admitted = undefined;
+          admissionError = undefined;
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('creator update metadata'),
+          };
+        }
+      },
+    },
   );
   if (status !== 0) {
+    if (admissionError !== undefined) {
+      throw new HaltError(
+        `creator update failed deterministic admission (code=${admissionError.code} path=${admissionError.path})`,
+        3,
+        true,
+      );
+    }
     throw new HaltError(`creator provider call failed (${status})`, status, true);
   }
+  return admitted;
 }
 
 export async function runCreatorUpdate(
@@ -394,26 +584,27 @@ export async function runCreatorUpdate(
   critiqueFile: string,
   updateFile: string,
   nextFile: string,
-): Promise<void> {
+  admissionInput?: CreatorUpdateAdmissionInput,
+): Promise<AdmittedCreatorUpdate | undefined> {
   const revisionFile = path.join(ctx.work, `plan.revision.v${iter}.md`);
   const metaFile = path.join(ctx.work, `update-meta.v${iter}.json`);
-  const planVersion = iter + 1;
 
   if (ctx.quality.creatorOneShot === 1) {
-    const status = await runCreatorUpdateOneShot(
+    const result = await runCreatorUpdateOneShot(
       ctx,
       iter,
       planFile,
       critiqueFile,
       updateFile,
-      nextFile,
       revisionFile,
       metaFile,
+      admissionInput,
     );
-    if (status === 0) {
+    if (result.status === 0) {
+      copyFileSync(revisionFile, nextFile);
       validatePlanDocumentShape(nextFile);
       requirePlanDocumentShape(nextFile);
-      return;
+      return result.admitted;
     }
     log('WARNING: one-shot creator update failed; falling back to split update');
     rmSync(revisionFile, { force: true });
@@ -430,21 +621,21 @@ export async function runCreatorUpdate(
   normalizePlanDocument(revisionFile);
   normalizeRepositoryFileLineReferences(revisionFile, ctx.provider.projectRoot);
 
-  await runCreatorUpdateMeta(ctx, iter, planFile, revisionFile, critiqueFile, metaFile);
-  sanitizeUpdateMetaJson(metaFile, planVersion);
-  if (!validateSchema(metaFile, ctx.skills.creatorMetaSchema)) {
-    throw new HaltError('update metadata failed schema validation', 3, true);
-  }
-
-  combineUpdateJson(metaFile, revisionFile, updateFile);
-  sanitizeUpdateJson(updateFile, planVersion);
-  if (!validateSchema(updateFile, ctx.skills.creatorSchema)) {
-    throw new HaltError('update failed schema validation', 3, true);
-  }
+  const admitted = await runCreatorUpdateMeta(
+    ctx,
+    iter,
+    planFile,
+    revisionFile,
+    critiqueFile,
+    metaFile,
+    updateFile,
+    admissionInput,
+  );
 
   copyFileSync(revisionFile, nextFile);
   validatePlanDocumentShape(nextFile);
   requirePlanDocumentShape(nextFile);
+  return admitted;
 }
 
 export interface ClarifyQuestion {

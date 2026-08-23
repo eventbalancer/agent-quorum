@@ -22,11 +22,14 @@ Key fields:
 
 - `plan_version` — int. If `## Plan` shows `plan.vN.md` or `plan_version: N`, use N. Otherwise 0.
 - `summary` — overall verdict in ~2–3 sentences. **Budget: aim for ≤500 characters; the schema hard-caps `summary` at 700 and a longer string fails validation and aborts the loop.** Do not enumerate issues here — that is what `issues[]` is for.
-- `domain_assessments[]` — one assessment for every fixed readiness domain.
+- `review` — required cumulative context, invariant/occurrence accounting, issue-budget, and scan-completeness metadata for this exact plan version.
+- `domain_assessments[]` — exactly eight assessments, one for each fixed readiness domain listed below.
 - `boundary_challenges[]` — material changes that would alter the frozen boundary or exceed its assurance appetite.
 - `opportunities[]` — non-blocking improvements that do not trigger plan revision or affect readiness.
 - `issues[]` — only material `blocker` or `major` flaws that are fixable inside the frozen boundary.
 - `issues[].addresses` — `vN.Cm` when the issue refines a previous-iteration issue, otherwise `null`.
+
+Always emit `review`, all eight `domain_assessments`, `boundary_challenges`, `opportunities`, and `issues`. Use empty arrays where the corresponding required collection has no entries.
 
 ## Bounded-readiness classification
 
@@ -154,6 +157,10 @@ Every new critique output must include `review` metadata. Copy all six tokens fr
 
 Use only the scope tokens listed by `scope_coverage_vocabulary`: `original-scope` means the original prompt was checked, `direct-plan-scope` means the direct plan supplied and proved its own complete declared scope, and `declared-scope` is the compatibility token for a separately declared scope. Include the token named by `scope_coverage_required` only when that scope was actually checked. If direct-plan scope is incomplete, omit `direct-plan-scope`, set `scan_complete: false`, and name the limitation in `unresolved_coverage`.
 
-Record the declared material issue budget and `scan_complete`. The scan is complete when every domain classified `applicable` has received the assurance allowed by the frozen appetite; irrelevant or `not-applicable` evidence categories do not make it incomplete. Classify indispensable unavailable evidence in the corresponding domain assessment and `unresolved_coverage`; never disguise it as an issue-budget or iteration limit. Assess every supplied invariant against this exact plan version: emit every occurrence ID with `satisfied`, `violated`, evidence-backed `not-applicable`, or `unresolved`. An invariant assessment is `complete` only when no applicable occurrence is omitted. An exhausted material issue budget makes `scan_complete` false and belongs in `unresolved_coverage`.
+Record the declared material issue budget and `scan_complete`. The scan is complete when every domain classified `applicable` has received the assurance allowed by the frozen appetite; irrelevant or `not-applicable` evidence categories do not make it incomplete. Classify indispensable unavailable evidence in the corresponding domain assessment and `unresolved_coverage`; never disguise it as an issue-budget or iteration limit. Assess every supplied active invariant against this exact plan version, exactly once, and emit every retained occurrence exactly once. Use `satisfied` only with evidence grounded in the current candidate, `not-applicable` only with candidate-specific evidence that the occurrence does not apply, `violated` only with grounded conclusive negative evidence, and `unresolved` when no grounded conclusion is available. Never use `not-applicable` as an omission or default. An invariant assessment's `complete` value is derived from exact occurrence accounting, not from whether every occurrence is satisfied and not from agreement among roles. An exhausted material issue budget makes `scan_complete` false and belongs in `unresolved_coverage`.
+
+An occurrence disposition does not create or calibrate an issue by itself. Report a separate grounded `issues[]` entry when a violation is a material in-boundary plan defect, and derive all review summary fields exactly from the detailed domain and invariant accounting.
 
 Prefer typed `evidence_refs` over the compatibility `evidence` string. Use `file-line`, `plan-section`, `phase-gate`, `command`, `repository`, or `topology` only when the referenced target exists and the kind matches its syntax. Set `invariant_id` when an issue violates a retained invariant. Set `introduced_by_revision` only when the immediately preceding revision introduced the defect.
+
+The prompt supplies a `## Deterministic candidate evidence anchors` catalog for the exact reviewed plan. Every conclusive domain applicability (`applicable` or `not-applicable`), conclusive invariant occurrence, material issue, boundary challenge, and opportunity must include at least one current-candidate reference copied exactly from that catalog. In particular, copy `plan-section.section` without a Markdown `#` prefix and use only the supplied candidate basename and line range for `file-line`. Repository facts may supplement candidate evidence but cannot replace the required current-candidate anchor. When the catalog cannot support a conclusive domain classification, use `unknown`, set `complete: false`, and name the missing evidence; when it cannot support a conclusive occurrence disposition, use `unresolved`.

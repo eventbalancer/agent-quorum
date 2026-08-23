@@ -67,11 +67,29 @@ API — the same two entry points; both report `runId`/`name`:
 
 ```ts
 const result = await runPlanLoop({ input: 'my-plan.md', quality: 'balanced' });
-// result.runId, result.name, result.workDir, result.finalPlanPath, …
+// result.runId, result.name, result.workDir, result.finalPlanPath, result.final, …
 
 const launched = await launchPlanLoop({ input: 'task.md' });
 // launched.runId, launched.name, launched.pid, launched.logPath, launched.workDir
 ```
+
+A run that reaches finalization returns one `RunResult.final: FinalProjection`. The
+durable run record stores that exact privacy-safe object as `RunRecord.final`:
+overall and structural status, exact candidate-bound readiness proof,
+reconciled occurrence coverage, and explicit Judge requirement/availability.
+Launch results do not have a final projection because detachment happens before
+completion.
+
+### Resume boundary
+
+`agent-quorum launch --resume …` and `AGENT_QUORUM_RESUME=1` accept only a
+stable `plan.vN.md` paired with matching schema-3 `convergence.vN.json` and a
+current schema-2 `readiness-contract.json`. Resume validates the candidate hash,
+catalog and contract identities, source lineage, and source requirement state
+before archiving any stale finalization artifacts. Missing, malformed, or
+unsupported proof fails through the existing resume-failure contract; current
+versions do not bootstrap state-free revisions or migrate earlier readiness
+schemas.
 
 ## 2. Observe
 
@@ -116,6 +134,12 @@ const scoped = listRuns({ store: '.agents/plans/.runs' }); // one ledger only
 const run = getRun('my-plan'); // by name, runId/prefix, or { kind: 'last' }
 const snapshot = getRunStatus(pid); // { exitCode, output }; no-arg returns the listing
 ```
+
+Run records require `schemaVersion: 1`. Discovery validates the complete record,
+including `final` when present, and skips absent, unsupported, malformed, or
+pre-change record shapes. Listing, picker, `show`, summary, and notification
+surfaces render the shared final projection rather than reconstructing readiness
+from workdir files.
 
 ## 4. Intervene
 

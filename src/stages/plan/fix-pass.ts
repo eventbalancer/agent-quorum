@@ -1,11 +1,24 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { fileLineCount, nonEmptyFile } from '../../runtime/files.js';
 import path from 'node:path';
-import { HaltError } from '../../runtime/halt.js';
-import { err, log } from '../../runtime/log.js';
+import {
+  admitFixReviewer,
+  ReadinessAdmissionError,
+  type AdmittedFixReviewer,
+} from '../../core/readiness-admission.js';
+import { sha256 } from '../../core/digest.js';
+import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
+import {
+  createOccurrenceSourceBinding,
+  type OccurrenceSourceBinding,
+  type ReadinessProofState,
+  type RequiredOccurrenceSourceRequirement,
+} from '../../core/readiness-proof.js';
+import { validateSchema } from '../../core/schema.js';
 import { providerRun } from '../../providers/provider.js';
 import type { ProviderRuntime } from '../../providers/runtime.js';
-import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
+import { fileLineCount, nonEmptyFile } from '../../runtime/files.js';
+import { HaltError } from '../../runtime/halt.js';
+import { err, log } from '../../runtime/log.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import {
   normalizePlanDocument,
@@ -13,10 +26,77 @@ import {
   requirePlanDocumentShape,
   validatePlanDocumentShape,
 } from './plan-shape.js';
-import { validateSchema } from '../../core/schema.js';
-import { validateFinalPlan } from './validate-plan.js';
 import { readStripped, type RunContext } from '../../core/run-context.js';
-import { retainedRolePrompt } from './retained-context.js';
+import { retainedRolePrompt, synchronizeRetainedInterventions } from './retained-context.js';
+import { validateFinalPlan, type FindingsCounts } from './validate-plan.js';
+import {
+  admissionFailureLogLabel,
+  candidateEvidenceAnchorPrompt,
+  readinessAdmissionRepairPrompt,
+  structuredOutputRepairPrompt,
+} from './evidence-anchors.js';
+
+const FIX_REVIEW_REQUIRED_REASON = 'fix-pass-replacement-retained';
+
+export type FixPassExemptionReason =
+  | 'disabled'
+  | 'no-findings'
+  | 'proposal-failed'
+  | 'review-failed'
+  | 'replacement-rejected'
+  | 'pre-fix-restored';
+
+export interface RetainedFixPassCandidate {
+  readonly kind: 'fix-proposal' | 'fix-applied';
+  readonly planVersion: number;
+  readonly path: string;
+  readonly contentDigest: string;
+}
+
+export type FixPassOutcome =
+  | {
+      readonly retainedReplacement: false;
+      readonly requirement: {
+        readonly required: false;
+        readonly reason: FixPassExemptionReason;
+      };
+    }
+  | {
+      readonly retainedReplacement: true;
+      readonly candidate: RetainedFixPassCandidate;
+      readonly requirement: RequiredOccurrenceSourceRequirement;
+      readonly review: AdmittedFixReviewer;
+    };
+
+interface CandidateReviewInput {
+  readonly ctx: RunContext;
+  readonly runtime: ProviderRuntime;
+  readonly candidateFile: string;
+  readonly candidateKind: RetainedFixPassCandidate['kind'];
+  readonly outputFile: string;
+  readonly basePrompt: string;
+}
+
+interface AdmittedCandidateReview {
+  readonly binding: OccurrenceSourceBinding;
+  readonly contentDigest: string;
+  readonly review: AdmittedFixReviewer;
+}
+
+export function exemptFixPass(reason: FixPassExemptionReason): FixPassOutcome {
+  return { retainedReplacement: false, requirement: { required: false, reason } };
+}
+
+export function fixReviewCandidateContent(file: string): string {
+  return readFileSync(file, 'utf8').replace(
+    /^status:[ \t]+(?:clean|needs-review|blocked)[ \t]*\r?$/m,
+    'status: <orchestration-projection>',
+  );
+}
+
+export function fixReviewCandidateDigest(file: string): string {
+  return sha256(fixReviewCandidateContent(file));
+}
 
 function fixPassAcceptPlanCandidate(
   candidate: string,
@@ -38,31 +118,6 @@ function fixPassAcceptPlanCandidate(
   return false;
 }
 
-function reviewCoversActiveInvariants(ctx: RunContext, review: JsonObject): boolean {
-  if (review.coverage_complete !== true) {
-    return false;
-  }
-  if (
-    !Array.isArray(review.unresolved_occurrence_ids) ||
-    review.unresolved_occurrence_ids.length > 0
-  ) {
-    return false;
-  }
-  const assessments = Array.isArray(review.invariant_assessments)
-    ? review.invariant_assessments.filter(isJsonObject)
-    : [];
-  return ctx.convergence.invariants.every((invariant) => {
-    const assessment = assessments.find((entry) => entry.invariant_id === invariant.id);
-    return (
-      assessment?.satisfied === true &&
-      Array.isArray(assessment.unresolved_occurrence_ids) &&
-      assessment.unresolved_occurrence_ids.length === 0
-    );
-  });
-}
-
-// The fix pass overrides the claude wall/semantic timeouts and the retry count
-// locally, exactly like the reference's scoped variable overrides.
 function fixPassRuntime(ctx: RunContext): ProviderRuntime {
   return {
     ...ctx.provider,
@@ -81,71 +136,146 @@ function fixPassRuntime(ctx: RunContext): ProviderRuntime {
   };
 }
 
-interface AppliedCandidateReviewInput {
-  readonly ctx: RunContext;
-  readonly runtime: ProviderRuntime;
-  readonly beforeFix: string;
-  readonly finalPlan: string;
-  readonly findingsFile: string;
-  readonly proposalReviewFile: string;
-}
-
-async function appliedCandidateIsApproved(input: AppliedCandidateReviewInput): Promise<boolean> {
-  const appliedReviewFile = path.join(input.ctx.work, 'fix-applied-review.json');
-  const appliedReviewBase =
-    `## Original plan\n${readStripped(input.beforeFix)}\n\n` +
-    `## Applied fix\n${readStripped(input.finalPlan)}\n\n` +
-    `## Findings\n${readStripped(input.findingsFile)}\n\n` +
-    `## Proposal review\n${readStripped(input.proposalReviewFile)}\n\n` +
-    'Review the exact applied candidate. Assess every active invariant and occurrence. Return ONLY JSON conforming to the schema.';
-  const appliedReviewPrompt = retainedRolePrompt({
+async function reviewCandidate(
+  input: CandidateReviewInput,
+): Promise<AdmittedCandidateReview | undefined> {
+  const readinessProof = synchronizeRetainedInterventions(input.ctx);
+  const candidateContent = fixReviewCandidateContent(input.candidateFile);
+  const contentDigest = sha256(candidateContent);
+  const binding = createOccurrenceSourceBinding(readinessProof, {
+    source: 'fix-reviewer',
+    candidateKind: input.candidateKind,
+    contentDigest,
+  });
+  const evidenceAnchors = candidateEvidenceAnchorPrompt(input.candidateFile, candidateContent);
+  const prompt = retainedRolePrompt({
     ctx: input.ctx,
     role: 'reviewer',
-    stage: 'fix-applied-review',
-    planVersion: input.ctx.convergence.planVersion,
+    stage: binding.lineage.evaluationStage,
+    planVersion: readinessProof.planVersion,
     skillFile: input.ctx.skills.reviewerSkill,
     schemaFile: input.ctx.skills.reviewerSchema,
-    basePrompt: appliedReviewBase,
+    basePrompt:
+      `## Trusted review binding\n` +
+      `candidate_kind: ${input.candidateKind}\n` +
+      `candidate_content_digest: ${contentDigest}\n\n` +
+      `${evidenceAnchors}\n\n` +
+      input.basePrompt,
+    lineageDigest: binding.lineage.lineageDigest,
     persistVersionedState: false,
   });
-  log(`fix-pass: step 4 — ${input.runtime.matrix.reviewer.runner} review exact applied candidate`);
-  const appliedReviewStatus = await providerRun(
+  let admitted: AdmittedFixReviewer | undefined;
+  const status = await providerRun(
     input.runtime,
     'reviewer',
     'json',
-    appliedReviewFile,
+    input.outputFile,
     input.ctx.skills.reviewerSkill,
     input.ctx.skills.reviewerSchema,
     input.ctx.permissions.reviewer.tools,
     input.ctx.permissions.reviewer.disallowedTools,
-    appliedReviewPrompt,
+    prompt,
+    {
+      validateOutput: (outputFile) => {
+        if (
+          !nonEmptyFile(outputFile) ||
+          !validateSchema(outputFile, input.ctx.skills.reviewerSchema)
+        ) {
+          admitted = undefined;
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('fix-reviewer'),
+          };
+        }
+        try {
+          const parsed = JSON.parse(readFileSync(outputFile, 'utf8')) as JsonValue;
+          admitted = admitFixReviewer({
+            value: parsed,
+            catalog: readinessProof.catalog,
+            binding,
+            evidenceContext: {
+              work: input.ctx.work,
+              projectRoot: input.ctx.provider.projectRoot,
+              planVersion: readinessProof.planVersion,
+              candidateContent,
+              candidatePath: input.candidateFile,
+            },
+            requirementReason: FIX_REVIEW_REQUIRED_REASON,
+          });
+          return true;
+        } catch (error) {
+          admitted = undefined;
+          if (error instanceof ReadinessAdmissionError) {
+            log(`WARNING: ${admissionFailureLogLabel('fix-reviewer', error)}`);
+            return { valid: false, retryPrompt: readinessAdmissionRepairPrompt(error) };
+          }
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('fix-reviewer'),
+          };
+        }
+      },
+    },
   );
-  if (appliedReviewStatus !== 0 || !nonEmptyFile(appliedReviewFile)) {
-    return false;
+  if (status !== 0 || admitted === undefined) {
+    return undefined;
   }
-  if (!validateSchema(appliedReviewFile, input.ctx.skills.reviewerSchema)) {
-    return false;
-  }
-  const parsed = JSON.parse(readFileSync(appliedReviewFile, 'utf8')) as JsonValue;
-  const review = isJsonObject(parsed) ? parsed : {};
-  const concerns = Array.isArray(review.concerns) ? review.concerns.filter(isJsonObject) : [];
-  const hasMaterialConcern = concerns.some(
-    (concern) => concern.severity === 'blocker' || concern.severity === 'major',
-  );
-  return (
-    review.approval !== 'reject' &&
-    !hasMaterialConcern &&
-    reviewCoversActiveInvariants(input.ctx, review)
-  );
+  return { binding, contentDigest, review: admitted };
 }
 
-export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<void> {
+function reviewApprovesCandidate(review: AdmittedFixReviewer): boolean {
+  return review.approval !== 'reject' && review.satisfied;
+}
+
+function retainedFixPassOutcome(
+  finalPlan: string,
+  candidateKind: RetainedFixPassCandidate['kind'],
+  admitted: AdmittedCandidateReview,
+  planVersion: number,
+): FixPassOutcome {
+  if (fixReviewCandidateDigest(finalPlan) !== admitted.contentDigest) {
+    throw new TypeError('retained fix-pass candidate does not match its admitted review binding');
+  }
+  return {
+    retainedReplacement: true,
+    candidate: {
+      kind: candidateKind,
+      planVersion,
+      path: path.resolve(finalPlan),
+      contentDigest: admitted.contentDigest,
+    },
+    requirement: {
+      required: true,
+      reason: admitted.review.reason,
+      expectedBinding: admitted.binding,
+    },
+    review: admitted.review,
+  };
+}
+
+function findingsCounts(findings: JsonObject): FindingsCounts {
+  const lengthOf = (value: JsonValue | undefined) => (Array.isArray(value) ? value.length : 0);
+  return {
+    stale: lengthOf(findings.stale_lines),
+    ambiguous: lengthOf(findings.ambiguous),
+    unresolved: lengthOf(findings.unresolved),
+  };
+}
+
+export async function runFixPass(
+  ctx: RunContext,
+  finalPlan: string,
+  readinessProof: ReadinessProofState,
+): Promise<FixPassOutcome> {
+  if (ctx.readinessProof !== readinessProof) {
+    throw new TypeError('fix-pass readiness proof must be the current RunContext proof state');
+  }
   const findingsFile = path.join(ctx.work, 'findings.json');
   const runtime = fixPassRuntime(ctx);
 
   if (!existsSync(findingsFile)) {
     log('fix-pass: no findings.json — skipping');
-    return;
+    return exemptFixPass('no-findings');
   }
 
   let findings: JsonObject = {};
@@ -155,43 +285,40 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
       findings = parsed;
     }
   } catch {
-    /* unreadable findings behave as zero */
+    findings = {};
   }
-  const lengthOf = (value: JsonValue | undefined) => (Array.isArray(value) ? value.length : 0);
-  const staleCount = lengthOf(findings.stale_lines);
-  const ambiguousCount = lengthOf(findings.ambiguous);
-  const unresolvedCount = lengthOf(findings.unresolved);
-  const findingsCount = staleCount + ambiguousCount + unresolvedCount;
-  if (findingsCount === 0) {
+  const counts = findingsCounts(findings);
+  const count = counts.stale + counts.ambiguous + counts.unresolved;
+  if (count === 0) {
     log('fix-pass: 0 findings — skipping');
-    return;
+    return exemptFixPass('no-findings');
   }
   log(
-    `fix-pass: ${findingsCount} findings (stale_lines=${staleCount}, ambiguous=${ambiguousCount}, unresolved=${unresolvedCount})`,
+    `fix-pass: ${count} findings (stale_lines=${counts.stale}, ambiguous=${counts.ambiguous}, unresolved=${counts.unresolved})`,
   );
 
   const beforeFix = path.join(ctx.work, 'plan.final.before-fix.md');
   copyFileSync(finalPlan, beforeFix);
+  const restore = (reason: FixPassExemptionReason): FixPassOutcome => {
+    copyFileSync(beforeFix, finalPlan);
+    return exemptFixPass(reason);
+  };
 
   const proposalFile = path.join(ctx.work, 'fix-proposal.md');
   log(`fix-pass: step 1 — ${runtime.matrix.fixer.runner} propose (${runtime.matrix.fixer.model})`);
-  const proposeBasePrompt =
-    `## Plan\n${readStripped(finalPlan)}\n` +
-    '\n' +
-    `## Findings\n${readStripped(findingsFile)}\n` +
-    '\n' +
-    '(Propose mode: output the full revised plan as plain markdown. No JSON, no fences.)';
   const proposePrompt = retainedRolePrompt({
     ctx,
     role: 'fixer',
     stage: 'fix-proposal',
-    planVersion: ctx.convergence.planVersion,
+    planVersion: readinessProof.planVersion,
     skillFile: ctx.skills.fixerSkill,
     schemaFile: '',
-    basePrompt: proposeBasePrompt,
+    basePrompt:
+      `## Plan\n${readStripped(finalPlan)}\n\n` +
+      `## Findings\n${readStripped(findingsFile)}\n\n` +
+      '(Propose mode: output the full revised plan as plain markdown. No JSON, no fences.)',
     persistVersionedState: false,
   });
-
   const proposeStatus = await providerRun(
     runtime,
     'fixer',
@@ -207,185 +334,132 @@ export async function runFixPass(ctx: RunContext, finalPlan: string): Promise<vo
     err(
       `fix-pass: propose failed/timed out (status=${proposeStatus}) — keeping pre-fix canonical plan, fix-pass skipped`,
     );
-    copyFileSync(beforeFix, finalPlan);
-    return;
+    return restore('proposal-failed');
   }
   log(`fix-pass:   → proposal_lines=${fileLineCount(proposalFile)}`);
   if (!fixPassAcceptPlanCandidate(proposalFile, 'proposal output', ctx.provider.projectRoot)) {
     err('fix-pass: keeping pre-fix canonical plan, fix-pass skipped');
-    copyFileSync(beforeFix, finalPlan);
-    return;
+    return restore('proposal-failed');
   }
 
-  const reviewFile = path.join(ctx.work, 'fix-review.json');
+  const proposalReviewFile = path.join(ctx.work, 'fix-review.json');
   log(
     `fix-pass: step 2 — ${runtime.matrix.reviewer.runner} review (${runtime.matrix.reviewer.model} reasoning=${runtime.matrix.reviewer.reasoning})`,
   );
-  const reviewBasePrompt =
-    `## Original plan\n${readStripped(beforeFix)}\n` +
-    '\n' +
-    `## Proposed fix\n${readStripped(proposalFile)}\n` +
-    '\n' +
-    `## Findings\n${readStripped(findingsFile)}\n` +
-    '\n' +
-    'Return ONLY JSON conforming to the schema. No prose, no markdown fences.';
-  const reviewPrompt = retainedRolePrompt({
+  const proposalReview = await reviewCandidate({
     ctx,
-    role: 'reviewer',
-    stage: 'fix-proposal-review',
-    planVersion: ctx.convergence.planVersion,
-    skillFile: ctx.skills.reviewerSkill,
-    schemaFile: ctx.skills.reviewerSchema,
-    basePrompt: reviewBasePrompt,
+    runtime,
+    candidateFile: proposalFile,
+    candidateKind: 'fix-proposal',
+    outputFile: proposalReviewFile,
+    basePrompt:
+      `## Original plan\n${readStripped(beforeFix)}\n\n` +
+      `## Proposed fix\n${readStripped(proposalFile)}\n\n` +
+      `## Findings\n${readStripped(findingsFile)}\n\n` +
+      'Return ONLY JSON conforming to the schema. No prose, no markdown fences.',
+  });
+  if (proposalReview === undefined) {
+    err('fix-pass: review failed — keeping pre-fix canonical plan, fix-pass skipped');
+    return restore('review-failed');
+  }
+  log(
+    `fix-pass:   → approval=${proposalReview.review.approval} concerns=${proposalReview.review.concerns.length}`,
+  );
+
+  if (proposalReview.review.approval === 'accept') {
+    if (!reviewApprovesCandidate(proposalReview.review)) {
+      err(
+        'fix-pass: proposal review did not resolve every active occurrence — replacement rejected',
+      );
+      return restore('replacement-rejected');
+    }
+    log('fix-pass: clean accept, using proposal as final plan');
+    copyFileSync(proposalFile, finalPlan);
+    markOperatorInterventionsMigrated(ctx.work, 'fixer', 'plan.final.md');
+    log('fix-pass: re-validation');
+    validateFinalPlan(ctx.provider.projectRoot, finalPlan);
+    log('fix-pass: done (backup at plan.final.before-fix.md)');
+    return retainedFixPassOutcome(
+      finalPlan,
+      'fix-proposal',
+      proposalReview,
+      proposalReview.binding.candidate.planVersion,
+    );
+  }
+
+  log(`fix-pass: step 3 — ${runtime.matrix.fixer.runner} apply (${runtime.matrix.fixer.model})`);
+  const applyOut = path.join(ctx.work, 'fix-applied.md');
+  const applyPrompt = retainedRolePrompt({
+    ctx,
+    role: 'fixer',
+    stage: 'fix-apply',
+    planVersion: readinessProof.planVersion,
+    skillFile: ctx.skills.fixerSkill,
+    schemaFile: '',
+    basePrompt:
+      `## Plan\n${readStripped(beforeFix)}\n\n` +
+      `## Findings\n${readStripped(findingsFile)}\n\n` +
+      `## Proposal\n${readStripped(proposalFile)}\n\n` +
+      `## Review\n${readStripped(proposalReviewFile)}\n\n` +
+      '(Apply mode: output the full final plan as plain markdown. Incorporate every blocker/major concern from Review; minor/nit only if you agree.)',
     persistVersionedState: false,
   });
-
-  const reviewStatus = await providerRun(
+  const applyStatus = await providerRun(
     runtime,
-    'reviewer',
-    'json',
-    reviewFile,
-    ctx.skills.reviewerSkill,
-    ctx.skills.reviewerSchema,
-    ctx.permissions.reviewer.tools,
-    ctx.permissions.reviewer.disallowedTools,
-    reviewPrompt,
+    'fixer',
+    'markdown',
+    applyOut,
+    ctx.skills.fixerSkill,
+    '',
+    ctx.permissions.fixer.tools,
+    ctx.permissions.fixer.disallowedTools,
+    applyPrompt,
   );
-  if (reviewStatus !== 0 || !nonEmptyFile(reviewFile)) {
+  if (applyStatus !== 0 || !nonEmptyFile(applyOut)) {
     err(
-      `fix-pass: review failed/timed out (status=${reviewStatus}) — keeping pre-fix canonical plan, fix-pass skipped`,
+      `fix-pass: apply failed/timed out (status=${applyStatus}) — keeping pre-fix canonical plan`,
     );
-    copyFileSync(beforeFix, finalPlan);
-    return;
+    return restore('replacement-rejected');
   }
-  if (!validateSchema(reviewFile, ctx.skills.reviewerSchema)) {
-    err(
-      'fix-pass: review schema validation failed — keeping pre-fix canonical plan, fix-pass skipped',
-    );
-    copyFileSync(beforeFix, finalPlan);
-    return;
+  log(`fix-pass:   → applied_lines=${fileLineCount(applyOut)}`);
+  if (!fixPassAcceptPlanCandidate(applyOut, 'apply output', ctx.provider.projectRoot)) {
+    err('fix-pass: apply output rejected — keeping pre-fix canonical plan');
+    return restore('replacement-rejected');
   }
 
-  const review = JSON.parse(readFileSync(reviewFile, 'utf8')) as JsonValue;
-  const reviewObj: JsonObject = isJsonObject(review) ? review : {};
-  const approvalValue = reviewObj.approval;
-  const approval =
-    typeof approvalValue === 'string' ? approvalValue : JSON.stringify(approvalValue ?? null);
-  const concerns = Array.isArray(reviewObj.concerns) ? reviewObj.concerns : [];
-  const concernCount = concerns.length;
-  const severityCount = (severity: string) =>
-    concerns.filter((concern) => isJsonObject(concern) && concern.severity === severity).length;
-  const blockerCount = severityCount('blocker');
-  const majorCount = severityCount('major');
-  log(
-    `fix-pass:   → approval=${approval} concerns=${concernCount} (blocker=${blockerCount} major=${majorCount})`,
-  );
-
-  let fixPassReplaced = false;
-  let appliedCandidateNeedsReview = false;
-  if (approval === 'accept' && concernCount === 0) {
-    const invariantCoverageComplete = reviewCoversActiveInvariants(ctx, reviewObj);
-    log(
-      invariantCoverageComplete
-        ? 'fix-pass: clean accept, using proposal as final plan'
-        : 'fix-pass: proposal accepted without complete invariant coverage — reviewing exact candidate',
-    );
-    copyFileSync(proposalFile, finalPlan);
-    fixPassReplaced = true;
-    appliedCandidateNeedsReview = !invariantCoverageComplete;
-  } else {
-    log(`fix-pass: step 3 — ${runtime.matrix.fixer.runner} apply (${runtime.matrix.fixer.model})`);
-    const applyBasePrompt =
-      `## Plan\n${readStripped(beforeFix)}\n` +
-      '\n' +
-      `## Findings\n${readStripped(findingsFile)}\n` +
-      '\n' +
-      `## Proposal\n${readStripped(proposalFile)}\n` +
-      '\n' +
-      `## Review\n${readStripped(reviewFile)}\n` +
-      '\n' +
-      '(Apply mode: output the full final plan as plain markdown. Incorporate every blocker/major concern from Review; minor/nit only if you agree.)';
-    const applyPrompt = retainedRolePrompt({
-      ctx,
-      role: 'fixer',
-      stage: 'fix-apply',
-      planVersion: ctx.convergence.planVersion,
-      skillFile: ctx.skills.fixerSkill,
-      schemaFile: '',
-      basePrompt: applyBasePrompt,
-      persistVersionedState: false,
-    });
-
-    const applyOut = path.join(ctx.work, 'fix-applied.md');
-    const applyStatus = await providerRun(
-      runtime,
-      'fixer',
-      'markdown',
-      applyOut,
-      ctx.skills.fixerSkill,
-      '',
-      ctx.permissions.fixer.tools,
-      ctx.permissions.fixer.disallowedTools,
-      applyPrompt,
-    );
-    if (applyStatus !== 0) {
-      err(
-        `fix-pass: apply failed/timed out (status=${applyStatus}) — keeping pre-fix canonical plan`,
-      );
-      copyFileSync(beforeFix, finalPlan);
-      return;
-    }
-    if (!nonEmptyFile(applyOut)) {
-      if (blockerCount === 0 && majorCount === 0) {
-        err('fix-pass: empty apply output — using validated proposal as final');
-        copyFileSync(proposalFile, finalPlan);
-        fixPassReplaced = true;
-        appliedCandidateNeedsReview = !reviewCoversActiveInvariants(ctx, reviewObj);
-      } else {
-        err(
-          'fix-pass: empty apply output after blocker/major review — keeping pre-fix canonical plan',
-        );
-        copyFileSync(beforeFix, finalPlan);
-      }
-    } else {
-      log(`fix-pass:   → applied_lines=${fileLineCount(applyOut)}`);
-      if (fixPassAcceptPlanCandidate(applyOut, 'apply output', ctx.provider.projectRoot)) {
-        copyFileSync(applyOut, finalPlan);
-        fixPassReplaced = true;
-        appliedCandidateNeedsReview = true;
-      } else if (blockerCount === 0 && majorCount === 0) {
-        err('fix-pass: apply output rejected — using validated proposal as final');
-        copyFileSync(proposalFile, finalPlan);
-        fixPassReplaced = true;
-        appliedCandidateNeedsReview = !reviewCoversActiveInvariants(ctx, reviewObj);
-      } else {
-        err(
-          'fix-pass: apply output rejected after blocker/major review — keeping pre-fix canonical plan',
-        );
-        copyFileSync(beforeFix, finalPlan);
-      }
-    }
+  const appliedReviewFile = path.join(ctx.work, 'fix-applied-review.json');
+  log(`fix-pass: step 4 — ${runtime.matrix.reviewer.runner} review exact applied candidate`);
+  const appliedReview = await reviewCandidate({
+    ctx,
+    runtime,
+    candidateFile: applyOut,
+    candidateKind: 'fix-applied',
+    outputFile: appliedReviewFile,
+    basePrompt:
+      `## Original plan\n${readStripped(beforeFix)}\n\n` +
+      `## Applied fix\n${readStripped(applyOut)}\n\n` +
+      `## Findings\n${readStripped(findingsFile)}\n\n` +
+      `## Proposal review\n${readStripped(proposalReviewFile)}\n\n` +
+      'Review the exact applied candidate. Assess every active invariant and occurrence. Return ONLY JSON conforming to the schema.',
+  });
+  if (appliedReview === undefined) {
+    err('fix-pass: exact applied candidate review failed — restoring backup');
+    return restore('review-failed');
   }
-  if (fixPassReplaced && appliedCandidateNeedsReview) {
-    const accepted = await appliedCandidateIsApproved({
-      ctx,
-      runtime,
-      beforeFix,
-      finalPlan,
-      findingsFile,
-      proposalReviewFile: reviewFile,
-    });
-    if (!accepted) {
-      err('fix-pass: exact applied candidate was not independently approved — restoring backup');
-      copyFileSync(beforeFix, finalPlan);
-      fixPassReplaced = false;
-    }
-  }
-  if (fixPassReplaced) {
-    markOperatorInterventionsMigrated(ctx.work, 'fixer', 'plan.final.md');
+  if (!reviewApprovesCandidate(appliedReview.review)) {
+    err('fix-pass: exact applied candidate was not independently approved — restoring backup');
+    return restore('pre-fix-restored');
   }
 
+  copyFileSync(applyOut, finalPlan);
+  markOperatorInterventionsMigrated(ctx.work, 'fixer', 'plan.final.md');
   log('fix-pass: re-validation');
   validateFinalPlan(ctx.provider.projectRoot, finalPlan);
   log('fix-pass: done (backup at plan.final.before-fix.md)');
+  return retainedFixPassOutcome(
+    finalPlan,
+    'fix-applied',
+    appliedReview,
+    appliedReview.binding.candidate.planVersion,
+  );
 }

@@ -16,6 +16,12 @@ import { runFixPass } from '../../src/stages/plan/fix-pass.js';
 import { runFinalJudge, runJudge } from '../../src/stages/plan/judge.js';
 import { runTranslatePass } from '../../src/stages/plan/translate-pass.js';
 import {
+  addReadinessLimit,
+  createReadinessProofCatalog,
+  createReadinessProofState,
+  type ReadinessProofState,
+} from '../../src/core/readiness-proof.js';
+import {
   argvRecords,
   withEnvAsync,
   writeFakeBin,
@@ -47,6 +53,16 @@ const CRITIC_SCOPE_COVERAGE_VOCABULARY = [
   'original-scope',
   'declared-scope',
   'direct-plan-scope',
+] as const;
+const RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
 ] as const;
 
 const roots: string[] = [];
@@ -95,6 +111,7 @@ function writeCurrentCritique(
             category: 'correctness',
             claim: 'current boundary issue',
             evidence: '## Work Plan',
+            evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
             suggested_fix: 'fix the boundary issue',
             confidence: 1,
             duplicate_of: null,
@@ -108,6 +125,17 @@ function writeCurrentCritique(
           scan_complete: true,
           unresolved_coverage: [],
         },
+        domain_assessments: RISK_DOMAINS.map((domain) => ({
+          domain,
+          applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+          risk: 'standard',
+          complete: true,
+          rationale: `Boundary fixture review for ${domain}.`,
+          unavailable_evidence: [],
+          evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+        })),
+        boundary_challenges: [],
+        opportunities: [],
       },
       null,
       2,
@@ -279,7 +307,7 @@ function createBoundaryFixture(
     originalRequestAvailable: mode === 'prompt',
     declaredScope: ['boundary-repository'],
     sources: [],
-    digest: 'authoritative-boundary-digest',
+    digest: '8'.repeat(64),
     crossRepository: false,
     relationships: [],
     limitations: [],
@@ -298,38 +326,7 @@ function createBoundaryFixture(
       gates: ['boundary-green'],
     },
   };
-  ctx.convergence.authoritativeDigest = ctx.systemContext.digest;
-  ctx.convergence.exhaustedLimits = ['iteration-cap'];
-  ctx.convergence.findings = [
-    {
-      id: INVARIANT_ID,
-      issueRef: 'v0.C1',
-      introducedPlanVersion: 1,
-      severity: 'major',
-      claim: MATERIAL_FINDING,
-      disposition: {
-        scope: 'cross-cutting',
-        rationale: 'Every occurrence must preserve the boundary contract.',
-      },
-    },
-  ];
-  ctx.convergence.invariants = [
-    {
-      id: INVARIANT_ID,
-      sourceFinding: INVARIANT_ID,
-      statement: ACTIVE_INVARIANT,
-      status: 'active',
-      occurrences: [
-        {
-          id: OCCURRENCE_ID,
-          dimension: 'provider-boundary',
-          subject: 'all roles',
-          disposition: 'unresolved',
-          evidenceRefs: [],
-        },
-      ],
-    },
-  ];
+  ctx.readinessProof = boundaryProof(ctx);
   return { tmp, work, fakePath: `${fake}:${process.env.PATH ?? ''}`, ctx };
 }
 
@@ -429,13 +426,19 @@ function readinessOutput(fixture: BoundaryFixture): string {
     `${JSON.stringify({
       ready: true,
       rationale: 'boundary fixture is ready',
+      revision_issue: null,
       coverage_complete: true,
       unresolved_occurrence_ids: [],
       invariant_assessments: [
         {
           invariant_id: INVARIANT_ID,
-          satisfied: true,
-          unresolved_occurrence_ids: [],
+          occurrences: [
+            {
+              occurrence_id: OCCURRENCE_ID,
+              disposition: 'satisfied',
+              evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+            },
+          ],
         },
       ],
     })}\n`,
@@ -454,14 +457,64 @@ function reviewerOutput(fixture: BoundaryFixture): string {
       invariant_assessments: [
         {
           invariant_id: INVARIANT_ID,
-          satisfied: true,
-          unresolved_occurrence_ids: [],
+          occurrences: [
+            {
+              occurrence_id: OCCURRENCE_ID,
+              disposition: 'satisfied',
+              evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+            },
+          ],
         },
       ],
       concerns: [],
     })}\n`,
   );
   return file;
+}
+
+function boundaryProof(ctx: RunContext): ReadinessProofState {
+  const invariants = [
+    {
+      id: INVARIANT_ID,
+      sourceFinding: INVARIANT_ID,
+      statement: ACTIVE_INVARIANT,
+      occurrences: [{ id: OCCURRENCE_ID, dimension: 'provider-boundary', subject: 'all roles' }],
+    },
+  ];
+  const state = createReadinessProofState({
+    quality: ctx.settings.quality,
+    matrix: ctx.quality,
+    mode: ctx.mode,
+    sourceDigest: '3'.repeat(64),
+    authoritativeDigest: ctx.systemContext.digest,
+    relationshipIds: [],
+    maxIters: ctx.settings.maxIters,
+    trustedCatalog: createReadinessProofCatalog({
+      expectedPlanVersion: 4,
+      invariants: [{ invariantId: INVARIANT_ID, occurrenceIds: [OCCURRENCE_ID] }],
+      materialIssueIds: [],
+    }),
+    findings: [
+      {
+        id: INVARIANT_ID,
+        issueRef: 'v0.C1',
+        introducedPlanVersion: 1,
+        severity: 'major',
+        claim: MATERIAL_FINDING,
+        disposition: {
+          scope: 'cross-cutting',
+          rationale: 'Every occurrence must preserve the boundary contract.',
+          evidenceRefs: [],
+        },
+      },
+    ],
+    invariants,
+  });
+  return addReadinessLimit(state, { limit: 'iteration-cap' });
+}
+
+function runBoundaryFixPass(fixture: BoundaryFixture, finalPlan: string) {
+  return runFixPass(fixture.ctx, finalPlan, fixture.ctx.readinessProof);
 }
 
 async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; prompts: string[] }> {
@@ -498,6 +551,7 @@ async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; pr
         2,
         path.join(fixture.work, 'plan.v2.md'),
         path.join(fixture.work, 'critic-output.json'),
+        'fixture-critic-lineage',
       ),
     )),
   );
@@ -505,7 +559,6 @@ async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; pr
   prompts.push(...(await captureRevision(fixture, quality, 2)));
   writeCurrentCritique(path.join(fixture.work, 'critique.v3.json'), 3);
   prompts.push(...(await captureRevision(fixture, quality, 3)));
-  fixture.ctx.convergence.planVersion = 4;
   fixture.ctx.lastCritiqueIter = 3;
   const finalPlan = path.join(fixture.work, 'plan.final.md');
   copyFileSync(path.join(fixture.work, 'plan.v4.md'), finalPlan);
@@ -516,6 +569,7 @@ async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; pr
       ...(await capturePrompts(fixture, 'intermediate-judge', readiness, () =>
         runJudge(
           fixture.ctx,
+          fixture.ctx.readinessProof,
           4,
           finalPlan,
           path.join(fixture.work, 'critique.v3.json'),
@@ -525,7 +579,7 @@ async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; pr
     );
     prompts.push(
       ...(await capturePrompts(fixture, 'final-judge', readiness, () =>
-        runFinalJudge(fixture.ctx, finalPlan),
+        runFinalJudge(fixture.ctx, fixture.ctx.readinessProof, finalPlan),
       )),
     );
   }
@@ -554,7 +608,7 @@ async function captureEveryRole(quality: Quality): Promise<{ ctx: RunContext; pr
   writeCodexMarkdownResult(proposalResult, proposal);
   const review = reviewerOutput(fixture);
   prompts.push(
-    ...(await capturePrompts(fixture, 'fix', review, () => runFixPass(fixture.ctx, finalPlan), {
+    ...(await capturePrompts(fixture, 'fix', review, () => runBoundaryFixPass(fixture, finalPlan), {
       FAKE_CODEX_OUTPUT_CALLS: path.join(fixture.tmp, 'fix.calls'),
       FAKE_CODEX_OUTPUT_1: proposalResult,
       FAKE_CODEX_OUTPUT_2: review,
@@ -650,7 +704,9 @@ describe('retained context at provider boundaries', () => {
           expect(occurrences(prompt, FULL_HISTORY)).toBe(1);
         }
       }
-      expect(ctx.convergence.contextDeliveries.map((delivery) => delivery.stage)).toEqual(stages);
+      expect(ctx.readinessProof.contextDeliveries.map((delivery) => delivery.stage)).toEqual(
+        stages,
+      );
     },
     30_000,
   );
@@ -665,6 +721,7 @@ describe('retained context at provider boundaries', () => {
         2,
         path.join(fixture.work, 'plan.v2.md'),
         path.join(fixture.work, 'direct-critic-output.json'),
+        'fixture-direct-critic-lineage',
       ),
     );
 

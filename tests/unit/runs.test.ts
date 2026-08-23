@@ -9,17 +9,13 @@ import {
   type RunRecordDraft,
 } from '../../src/core/run-store.js';
 import { HaltError } from '../../src/runtime/halt.js';
+import { finalProjection } from '../helpers/final-projection.js';
 
 let tmp: string;
 let stateDir: string;
 let savedStateDir: string | undefined;
 
-function seed(
-  name: string,
-  withLog: boolean,
-  withReadiness = false,
-  withConvergence = false,
-): string {
+function seed(name: string, withLog: boolean, final?: 'judge-negative' | 'unable'): string {
   const workDir = path.join(tmp, 'plans', `loop-${name}`);
   mkdirSync(workDir, { recursive: true });
   writeFileSync(path.join(workDir, 'plan.final.md'), '# final\n');
@@ -45,36 +41,30 @@ function seed(
     state: 'finished',
     exitCode: 0,
     endedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    ...(withReadiness
+    ...(final === 'judge-negative'
       ? {
-          finalStatus: 'needs-review' as const,
-          structuralStatus: 'clean' as const,
-          finalReadiness: {
-            evaluated: true,
-            ready: false,
-            rationale: 'missing acceptance gate',
-            planSha256: 'a'.repeat(64),
-          },
+          final: finalProjection(workDir, {
+            status: 'needs-review',
+            decision: 'unable-to-decide',
+            reasonCodes: ['judge-not-ready'],
+            judge: {
+              required: true,
+              evaluated: true,
+              available: true,
+              verdict: false,
+              rationale: 'final-judge-not-ready',
+            },
+          }),
         }
-      : {}),
-    ...(withConvergence
-      ? {
-          finalStatus: 'clean' as const,
-          structuralStatus: 'clean' as const,
-          finalConvergence: {
-            promise: 'cumulative' as const,
-            satisfied: true,
-            artifactPath: path.join(workDir, 'convergence.final.json'),
-            exhaustedLimits: [],
-            unresolvedCoverage: [],
-            decision: 'ready' as const,
-            reasonCodes: [],
-            applicableRiskDomains: ['correctness' as const],
-            highRiskDomains: [],
-            opportunityCount: 1,
-          },
-        }
-      : {}),
+      : final === 'unable'
+        ? {
+            final: finalProjection(workDir, {
+              status: 'needs-review',
+              decision: 'unable-to-decide',
+              reasonCodes: ['fresh-review-required'],
+            }),
+          }
+        : { final: finalProjection(workDir) }),
   });
   return workDir;
 }
@@ -123,24 +113,28 @@ describe('runShowCli', () => {
   });
 
   it('prints final readiness facts for a completed Judge-enabled run', () => {
-    seed('judged', true, true);
+    seed('judged', true, 'judge-negative');
     const sink = collect();
     expect(runShowCli(['judged'], sink.out)).toBe(0);
     expect(sink.text()).toContain('final:   needs-review');
     expect(sink.text()).toContain('structural: clean');
-    expect(sink.text()).toContain('readiness: not-ready');
-    expect(sink.text()).toContain('rationale: missing acceptance gate');
+    expect(sink.text()).toContain('decision: unable-to-decide');
+    expect(sink.text()).toContain('reasons: Readiness proof: unable-to-decide:judge-not-ready');
+    expect(sink.text()).toContain('judge: not-ready');
+    expect(sink.text()).toContain('rationale: final-judge-not-ready');
   });
 
   it('prints final decision facts for a standard-risk run without Judge readiness', () => {
-    seed('standard', true, false, true);
+    seed('standard', true, 'unable');
     const sink = collect();
     expect(runShowCli(['standard'], sink.out)).toBe(0);
-    expect(sink.text()).toContain('final:   clean');
+    expect(sink.text()).toContain('final:   needs-review');
     expect(sink.text()).toContain('structural: clean');
-    expect(sink.text()).toContain('decision: ready');
-    expect(sink.text()).toContain('reasons: none');
-    expect(sink.text()).not.toContain('readiness:');
+    expect(sink.text()).toContain('decision: unable-to-decide');
+    expect(sink.text()).toContain(
+      'reasons: Readiness proof: unable-to-decide:fresh-review-required',
+    );
+    expect(sink.text()).not.toContain('judge:');
   });
 
   it('throws HaltError(2) when nothing resolves', () => {

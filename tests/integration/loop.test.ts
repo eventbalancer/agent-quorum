@@ -12,8 +12,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runIterationLoop } from '../../src/stages/plan/loop.js';
 import type { RunContext } from '../../src/core/run-context.js';
-import { applyReadinessPolicy } from '../../src/core/convergence.js';
-import { RISK_DOMAINS } from '../../src/core/readiness-contract.js';
+import { buildReadinessContract, RISK_DOMAINS } from '../../src/core/readiness-contract.js';
+import { applyFrozenReadinessContract } from '../../src/core/readiness-proof.js';
 import { Scratch } from '../../src/runtime/scratch.js';
 import {
   fixtureMatrix,
@@ -30,7 +30,6 @@ import {
   writeCritique,
   writeFakeBin,
   writeStructuredPlanFile,
-  writeUpdate,
   type StderrCapture,
 } from '../helpers/harness.js';
 
@@ -52,7 +51,7 @@ const ALL_DUPLICATE_ISSUES = [
   {
     id: 'C1',
     addresses: null,
-    severity: 'nit',
+    severity: 'major',
     category: 'correctness',
     claim: 'duplicate issue',
     evidence: 'fixture',
@@ -69,23 +68,54 @@ let scratch: Scratch;
 let capture: StderrCapture;
 
 function makeContext(options: TestContextOptions = {}): RunContext {
-  return makeTestRunContext(tmp, work, scratch, options);
+  const ctx = makeTestRunContext(tmp, work, scratch, options);
+  applyProofPolicy(ctx, false);
+  return ctx;
+}
+
+function applyProofPolicy(ctx: RunContext, highRisk: boolean): void {
+  const contract = buildReadinessContract({
+    assessment: {
+      boundary: {
+        goal: 'Produce an implementation-ready fixture plan.',
+        in_scope: ['fixture repository'],
+        out_of_scope: [],
+        constraints: [],
+      },
+      domain_assessments: RISK_DOMAINS.map((domain) => ({
+        domain,
+        applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
+        risk: domain === 'correctness' && highRisk ? 'high' : 'standard',
+        rationale: `Fixture assessment for ${domain}.`,
+        evidence_refs: [],
+      })),
+      material_questions: [],
+    },
+    sourceDigest: ctx.readinessProof.sourceDigest,
+    systemDigest: ctx.readinessProof.authoritativeDigest,
+    quality: ctx.readinessProof.quality,
+    iterationLimit: ctx.readinessProof.iterationLimit,
+    issueBudget: ctx.readinessProof.issueBudget.limit,
+    operatorDecisionIds: [],
+  });
+  ctx.readinessBoundary = contract.boundary;
+  ctx.readinessProof = applyFrozenReadinessContract(ctx.readinessProof, contract);
 }
 
 function applyHighRiskPolicy(ctx: RunContext): void {
-  applyReadinessPolicy(ctx.convergence, {
-    contractDigest: 'test-readiness-contract',
-    judgeAllowed: true,
-    exhaustiveApplicableDomains: false,
-    unresolvedMaterialQuestionIds: [],
-    riskDomains: RISK_DOMAINS.map((domain) => ({
-      domain,
-      applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
-      risk: domain === 'correctness' ? 'high' : 'standard',
-      rationale: `Fixture assessment for ${domain}.`,
-      evidenceRefs: [],
-    })),
-  });
+  applyProofPolicy(ctx, true);
+}
+
+function preserveHighRiskCritiqueFloor(file: string): void {
+  const value = JSON.parse(readFileSync(file, 'utf8')) as {
+    domain_assessments?: { domain?: string; risk?: string }[];
+  };
+  for (const assessment of value.domain_assessments ?? []) {
+    if (assessment.domain === 'correctness') {
+      assessment.risk = 'high';
+    }
+  }
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function seedWork(): void {
@@ -152,7 +182,7 @@ describe('iteration loop', () => {
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, SINGLE_ISSUE);
     const empty = path.join(tmp, 'empty.json');
-    emptyCritique(empty);
+    emptyCritique(empty, 1);
     const update = path.join(tmp, 'update.json');
     writeAcceptUpdate(update, 1, path.join(tmp, 'input.md'));
     const ctx = makeContext({ maxIters: 2 });
@@ -306,13 +336,14 @@ describe('iteration loop', () => {
     const revision = path.join(tmp, 'revision.md');
     writeStructuredPlanFile(revision, 'Split Revision');
     const empty = path.join(tmp, 'empty.json');
-    emptyCritique(empty);
+    emptyCritique(empty, 1);
     const judge = path.join(tmp, 'judge.json');
     writeFileSync(
       judge,
       JSON.stringify({
         ready: true,
         rationale: 'current revision is implementation-ready',
+        revision_issue: null,
         coverage_complete: true,
         unresolved_occurrence_ids: [],
         invariant_assessments: [],
@@ -329,7 +360,7 @@ describe('iteration loop', () => {
               id: 'C1',
               verdict: 'accept',
               verdict_reason: 'fixture',
-              final_severity: 'minor',
+              final_severity: 'major',
               duplicate_of: null,
             },
           ],
@@ -382,6 +413,141 @@ describe('iteration loop', () => {
     );
   });
 
+  it('retries a schema-valid critique rejected by deterministic semantic admission', async () => {
+    seedWork();
+    const invalid = path.join(tmp, 'invalid-grounding.json');
+    emptyCritique(invalid);
+    const invalidValue = JSON.parse(readFileSync(invalid, 'utf8')) as {
+      domain_assessments: { domain: string; evidence_refs: unknown[] }[];
+    };
+    const migration = invalidValue.domain_assessments.find(
+      (assessment) => assessment.domain === 'data-migrations',
+    );
+    if (migration === undefined) {
+      throw new TypeError('missing data-migrations fixture assessment');
+    }
+    migration.evidence_refs = [{ kind: 'plan-section', section: 'Invented Section' }];
+    writeFileSync(invalid, `${JSON.stringify(invalidValue, null, 2)}\n`);
+    const valid = path.join(tmp, 'valid-grounding.json');
+    emptyCritique(valid);
+    const calls = path.join(tmp, 'critic.calls');
+    const prompt = path.join(tmp, 'critic.prompt');
+    const ctx = makeContext({ maxIters: 1 });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: valid,
+        FAKE_CODEX_OUTPUT_CALLS: calls,
+        FAKE_CODEX_OUTPUT_1: invalid,
+        FAKE_CODEX_OUTPUT_2: valid,
+        FAKE_CODEX_PROMPT: prompt,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic semantic-admission repair');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic candidate evidence anchors');
+    expect(capture.text()).toContain(
+      'critic output failed semantic admission (code=ungrounded-evidence path=domain_assessments.data-migrations.evidence_refs)',
+    );
+    expect(ctx.readinessProof.admittedCriticIssueRefs).toEqual([]);
+  });
+
+  it('retries creator metadata admission without regenerating the revised plan', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, SINGLE_ISSUE);
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty, 1);
+    const revision = path.join(tmp, 'revision.md');
+    writeStructuredPlanFile(revision, 'Semantic Retry Revision');
+    const validMeta = {
+      plan_version: 1,
+      issues: [
+        {
+          id: 'C1',
+          verdict: 'accept',
+          verdict_reason: 'The revised Work Plan addresses the grounded issue.',
+          final_severity: 'major',
+          duplicate_of: null,
+        },
+      ],
+      applied: ['C1'],
+      systemic_dispositions: [
+        {
+          issue_id: 'C1',
+          scope: 'local',
+          rationale: 'The correction is confined to the revised Work Plan.',
+          evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+          invariant: null,
+        },
+      ],
+      rejected_append: [],
+    };
+    const invalidMetaFile = path.join(tmp, 'invalid-meta.json');
+    writeFileSync(
+      invalidMetaFile,
+      `${JSON.stringify(
+        {
+          ...validMeta,
+          systemic_dispositions: [
+            {
+              ...validMeta.systemic_dispositions[0],
+              evidence_refs: [{ kind: 'plan-section', section: 'Invented Section' }],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const validMetaFile = path.join(tmp, 'valid-meta.json');
+    writeFileSync(validMetaFile, `${JSON.stringify(validMeta, null, 2)}\n`);
+    const metadataCalls = path.join(tmp, 'metadata.calls');
+    const markdownCalls = path.join(tmp, 'markdown.calls');
+    const creatorPrompt = path.join(tmp, 'creator.prompt');
+    const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: empty,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_MARKDOWN_RESULT: revision,
+        FAKE_CLAUDE_MARKDOWN_CALLS: markdownCalls,
+        FAKE_CLAUDE_JSON_RESULT: validMetaFile,
+        FAKE_CLAUDE_JSON_CALLS: metadataCalls,
+        FAKE_CLAUDE_JSON_RESULT_1: invalidMetaFile,
+        FAKE_CLAUDE_JSON_RESULT_2: validMetaFile,
+        FAKE_CLAUDE_PROMPT: creatorPrompt,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(readFileSync(markdownCalls, 'utf8')).toBe('1');
+    expect(readFileSync(metadataCalls, 'utf8')).toBe('2');
+    expect(readFileSync(creatorPrompt, 'utf8')).toContain(
+      '## Deterministic semantic-admission repair',
+    );
+    expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
+      readFileSync(revision, 'utf8'),
+    );
+    expect(ctx.readinessProof.findings).toHaveLength(1);
+  });
+
   it('an invalid one-shot update falls back to the split flow', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
@@ -394,7 +560,7 @@ describe('iteration loop', () => {
     const revision = path.join(tmp, 'revision.md');
     writeStructuredPlanFile(revision, 'Fallback Revision');
     const empty = path.join(tmp, 'empty.json');
-    emptyCritique(empty);
+    emptyCritique(empty, 1);
     const meta = path.join(tmp, 'meta.json');
     writeFileSync(
       meta,
@@ -406,7 +572,7 @@ describe('iteration loop', () => {
               id: 'C1',
               verdict: 'accept',
               verdict_reason: 'fixture',
-              final_severity: 'minor',
+              final_severity: 'major',
               duplicate_of: null,
             },
           ],
@@ -460,7 +626,7 @@ describe('iteration loop', () => {
     const revision = path.join(tmp, 'schema-fallback-revision.md');
     writeStructuredPlanFile(revision, 'Schema Fallback Revision');
     const empty = path.join(tmp, 'empty.json');
-    emptyCritique(empty);
+    emptyCritique(empty, 1);
     const meta = path.join(tmp, 'schema-fallback-meta.json');
     writeFileSync(
       meta,
@@ -472,7 +638,7 @@ describe('iteration loop', () => {
               id: 'C1',
               verdict: 'accept',
               verdict_reason: 'fixture',
-              final_severity: 'minor',
+              final_severity: 'major',
               duplicate_of: null,
             },
           ],
@@ -547,26 +713,26 @@ describe('iteration loop', () => {
     );
   });
 
-  it('all-duplicate critique converges without creator update (AC-1)', async () => {
+  it('rejects a material issue carrying a legacy duplicate marker', async () => {
     seedWork();
     writeFileSync(path.join(work, 'rejected-log.jsonl'), `${JSON.stringify({ id: 'r1' })}\n`);
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, ALL_DUPLICATE_ISSUES);
     const ctx = makeContext({ maxIters: 2 });
 
-    await withEnvAsync(
-      {
-        PATH: fakePath(),
-        FAKE_CODEX_OUTPUT: critique,
-        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
-      },
-      () => runIterationLoop(ctx, 0),
+    await expect(
+      withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CODEX_OUTPUT: critique,
+          FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        },
+        () => runIterationLoop(ctx, 0),
+      ),
+    ).rejects.toThrow(
+      /critic output failed deterministic admission \(code=invalid-value path=issues\[0\]\.duplicate_of\)/,
     );
 
-    expect(capture.text()).toContain('ready at v0');
-    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toBe(
-      readFileSync(path.join(work, 'plan.v0.md'), 'utf8'),
-    );
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
   });
 
@@ -582,21 +748,24 @@ describe('iteration loop', () => {
     writeAcceptUpdate(update, 1, next);
     const ctx = makeContext({ maxIters: 1 });
 
-    await withEnvAsync(
-      {
-        PATH: fakePath(),
-        FAKE_CODEX_OUTPUT: critique,
-        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
-        FAKE_CLAUDE_JSON_RESULT: update,
-      },
-      () => runIterationLoop(ctx, 0),
+    await expect(
+      withEnvAsync(
+        {
+          PATH: fakePath(),
+          FAKE_CODEX_OUTPUT: critique,
+          FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+          FAKE_CLAUDE_JSON_RESULT: update,
+        },
+        () => runIterationLoop(ctx, 0),
+      ),
+    ).rejects.toThrow(
+      /critic output failed deterministic admission \(code=invalid-value path=issues\[0\]\.duplicate_of\)/,
     );
 
-    expect(capture.text()).not.toContain('ready at v0');
-    expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(true);
+    expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
   });
 
-  it('health log includes unanchored count for non-duplicate issues (FR-2)', async () => {
+  it('health log reports candidate-grounded material issues without a drift warning', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, SINGLE_ISSUE);
@@ -617,8 +786,9 @@ describe('iteration loop', () => {
     );
 
     const text = capture.text();
-    expect(text).toContain('unanchored=');
-    expect(text).toContain('possible evidence drift');
+    expect(text).toContain('"grounded":1');
+    expect(text).toContain('unanchored=0');
+    expect(text).not.toContain('possible evidence drift');
   });
 
   it('judge ready:true exits at v0 without creator update (AC-4)', async () => {
@@ -637,12 +807,14 @@ describe('iteration loop', () => {
         duplicate_of: null,
       },
     ]);
+    preserveHighRiskCritiqueFloor(critiqueFile);
     const judgeResult = path.join(tmp, 'judge-result.json');
     writeFileSync(
       judgeResult,
       JSON.stringify({
         ready: true,
         rationale: 'implementation-ready',
+        revision_issue: null,
         coverage_complete: true,
         unresolved_occurrence_ids: [],
         invariant_assessments: [],
@@ -680,7 +852,9 @@ describe('iteration loop', () => {
     const critique0 = path.join(tmp, 'critique-0.json');
     const critique1 = path.join(tmp, 'critique-1.json');
     emptyCritique(critique0);
-    emptyCritique(critique1);
+    emptyCritique(critique1, 1);
+    preserveHighRiskCritiqueFloor(critique0);
+    preserveHighRiskCritiqueFloor(critique1);
     const judgeRevision = path.join(tmp, 'judge-revision.json');
     writeFileSync(
       judgeRevision,
@@ -773,18 +947,18 @@ describe('iteration loop', () => {
     expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toContain('# Judge Revision');
     expect(capture.text()).toContain('intermediate judge requested major in-boundary revision');
     expect(capture.text()).toContain('ready at v1');
-    expect(ctx.convergence.decision).toBe('ready');
+    expect(ctx.readinessProof.reduction.decision).toBe('ready');
   });
 
-  it('invalidates a stale Judge approval when the current critique skips Judge', async () => {
+  it('skips the intermediate Judge while material critic work remains open', async () => {
     seedWork();
     const critiqueFile = path.join(tmp, 'critique.json');
     writeCritique(critiqueFile, SINGLE_ISSUE);
+    preserveHighRiskCritiqueFloor(critiqueFile);
     const invalidUpdate = path.join(tmp, 'invalid-update.json');
     writeFileSync(invalidUpdate, '');
     const ctx = makeContext({ quality: 'balanced', maxIters: 1 });
     applyHighRiskPolicy(ctx);
-    ctx.convergence.judgeApprovedPlanVersion = 0;
 
     await expect(
       withEnvAsync(
@@ -799,7 +973,7 @@ describe('iteration loop', () => {
     ).rejects.toThrow();
 
     expect(capture.text()).toContain('intermediate judge skipped');
-    expect(ctx.convergence.judgeApprovedPlanVersion).toBeUndefined();
+    expect(ctx.readinessProof.judgeApprovedPlanVersion).toBeUndefined();
     expect(capture.text()).not.toContain('ready at v0');
   });
 
@@ -852,7 +1026,7 @@ describe('iteration loop', () => {
     const critique = path.join(tmp, 'critique.json');
     writeCritique(critique, SINGLE_ISSUE);
     const update = path.join(tmp, 'update.json');
-    writeUpdate(update, 1, readFileSync(path.join(tmp, 'input.md'), 'utf8'));
+    writeAcceptUpdate(update, 1, path.join(tmp, 'input.md'));
     const claudePrompt = path.join(tmp, 'claude.prompt');
     const ctx = makeContext({ maxIters: 1 });
 

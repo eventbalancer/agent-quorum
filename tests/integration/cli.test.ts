@@ -28,6 +28,7 @@ let tmp: string;
 let fake: string;
 let work: string;
 let highRiskAssessment: string;
+let highRiskCritique: string;
 
 function baseEnv(extra: EnvOverrides = {}): EnvOverrides {
   return {
@@ -69,6 +70,17 @@ beforeEach(() => {
   emptyCritique(path.join(tmp, 'empty.json'));
   highRiskAssessment = path.join(tmp, 'readiness-high.json');
   writeReadinessAssessment(highRiskAssessment, true);
+  highRiskCritique = path.join(tmp, 'critique-high.json');
+  const critique = JSON.parse(readFileSync(path.join(tmp, 'empty.json'), 'utf8')) as {
+    domain_assessments: { domain: string; risk: string }[];
+  };
+  const correctness = critique.domain_assessments.find(
+    (assessment) => assessment.domain === 'correctness',
+  );
+  if (correctness !== undefined) {
+    correctness.risk = 'high';
+  }
+  writeFileSync(highRiskCritique, `${JSON.stringify(critique)}\n`);
 });
 
 afterEach(() => {
@@ -90,7 +102,7 @@ describe('exit-code matrix', () => {
       ],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr).toBe(0);
     for (const artifact of [
       'plan.v0.md',
       'critique.v0.json',
@@ -103,6 +115,38 @@ describe('exit-code matrix', () => {
       expect(existsSync(path.join(work, artifact)), artifact).toBe(true);
     }
     expect(result.stderr).toContain('done. summary:');
+  });
+
+  it('reports dropped provider fields by count without exposing their names to normal logs', () => {
+    const secret = 'CRITIQUE_UNKNOWN_KEY_SECRET_1f7a62';
+    const critique = path.join(tmp, 'critique-with-secret-key.json');
+    const value = JSON.parse(readFileSync(path.join(tmp, 'empty.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    value[secret] = true;
+    writeFileSync(critique, `${JSON.stringify(value)}\n`);
+
+    const result = runCli(
+      [
+        'plan',
+        '--quality',
+        'quick',
+        '--iters',
+        '1',
+        path.join(tmp, 'input.md'),
+        '--no-fix',
+        '--no-translate',
+      ],
+      baseEnv({ FAKE_CODEX_OUTPUT: critique }),
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('dropping unknown top-level fields from critique (count=1)');
+    expect(result.stderr).not.toContain(secret);
+    const runLog = readFileSync(path.join(work, 'run.log'), 'utf8');
+    expect(runLog).toContain('dropping unknown top-level fields from critique (count=1)');
+    expect(runLog).not.toContain(secret);
   });
 
   it('sends a Telegram completion notification for clean runs', async () => {
@@ -124,7 +168,7 @@ describe('exit-code matrix', () => {
         }),
       );
 
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr).toBe(0);
       expect(stub.sent).toHaveLength(1);
       const message = stub.sent[0] ?? '';
       expect(message).toContain('agent-quorum finished: SUCCESS');
@@ -141,9 +185,19 @@ describe('exit-code matrix', () => {
   it('reports a negative final Judge verdict consistently through CLI and Telegram', async () => {
     const stub: TelegramStub = await startTelegramStub();
     try {
-      const rationale = 'missing rollout acceptance gate';
+      const rationale = 'CLI_JUDGE_PROVIDER_RATIONALE_SECRET_d45434';
       const verdict = path.join(tmp, 'judge-not-ready.json');
-      writeFileSync(verdict, `${JSON.stringify({ ready: false, rationale })}\n`);
+      writeFileSync(
+        verdict,
+        `${JSON.stringify({
+          ready: false,
+          rationale,
+          revision_issue: null,
+          coverage_complete: true,
+          unresolved_occurrence_ids: [],
+          invariant_assessments: [],
+        })}\n`,
+      );
       const result = await runCliAsync(
         [
           'plan',
@@ -156,32 +210,37 @@ describe('exit-code matrix', () => {
           '--no-translate',
         ],
         telegramEnv(stub, {
-          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CODEX_OUTPUT: highRiskCritique,
           FAKE_CLAUDE_JSON_RESULT: verdict,
           FAKE_READINESS_ASSESSMENT: highRiskAssessment,
         }),
       );
 
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain('FINAL JUDGE: not-ready');
-      expect(result.stderr).toContain('FINAL: needs-review');
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain(
+        'FINAL: needs-review — Readiness proof: unable-to-decide:judge-not-ready',
+      );
       const summary = readFileSync(path.join(work, 'summary.md'), 'utf8');
-      expect(summary).toContain('readiness=not-ready');
-      expect(summary).not.toContain(rationale);
-      expect(summary).not.toContain('final_judge_rationale:');
+      expect(summary).toContain('decision=unable-to-decide');
+      expect(summary).toContain('verdict=false');
       expect(summary).toContain('- FINAL: needs-review');
+      expect(summary).not.toContain(rationale);
       const record = readRunRecords(path.join(tmp, 'state'))[0];
       expect(record).toMatchObject({
-        finalReadiness: { rationale },
-        finalConvergence: { satisfied: false },
+        final: {
+          reasons: ['Readiness proof: unable-to-decide:judge-not-ready'],
+          readiness: { satisfied: false },
+          judge: { rationale: 'final-judge-not-ready', verdict: false },
+        },
       });
-      expect(record?.finalReason).toContain('Final Judge: not-ready');
-      expect(record?.finalReason).not.toContain(rationale);
+      expect(JSON.stringify(record)).not.toContain(rationale);
       const message = stub.sent[0] ?? '';
       expect(message).toContain('status: needs-review');
       expect(message).toContain('structural: clean');
-      expect(message).toContain('readiness: not-ready');
-      expect(message).toContain(`readiness rationale: ${rationale}`);
+      expect(message).toContain('decision: unable-to-decide');
+      expect(message).toContain('judge: not-ready');
+      expect(message).toContain('judge rationale: final-judge-not-ready');
+      expect(message).not.toContain(rationale);
     } finally {
       await stub.close();
     }
@@ -204,22 +263,21 @@ describe('exit-code matrix', () => {
           '--no-translate',
         ],
         telegramEnv(stub, {
-          FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'),
+          FAKE_CODEX_OUTPUT: highRiskCritique,
           FAKE_CLAUDE_JSON_RESULT: invalid,
           FAKE_READINESS_ASSESSMENT: highRiskAssessment,
         }),
       );
 
-      expect(result.status).toBe(0);
-      expect(result.stderr).toContain('FINAL JUDGE: unknown');
+      expect(result.status, result.stderr).toBe(0);
       expect(result.stderr).toContain('FINAL: needs-review');
       expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain(
-        'final_judge: evaluated=false, readiness=unknown',
+        'final_judge: required=true, allowed=true, evaluated=false, available=false',
       );
       const message = stub.sent[0] ?? '';
       expect(message).toContain('status: needs-review');
-      expect(message).toContain('readiness: unknown');
-      expect(message).not.toContain('readiness: ready');
+      expect(message).toContain('judge: unavailable');
+      expect(message).not.toContain('judge: ready');
     } finally {
       await stub.close();
     }
@@ -237,8 +295,9 @@ describe('exit-code matrix', () => {
   });
 
   it('a schema-invalid critique exits 3', () => {
+    const secret = 'INVALID_ISSUE_ID_SECRET_781e0d';
     const invalid = path.join(tmp, 'invalid-critique.json');
-    writeCritique(invalid, [{ id: 'BAD' }]);
+    writeCritique(invalid, [{ id: secret }]);
     const result = runCli(
       [
         'plan',
@@ -254,6 +313,9 @@ describe('exit-code matrix', () => {
     );
     expect(result.status).toBe(3);
     expect(result.stderr).toContain('schema validation failed');
+    expect(result.stderr).toContain('code=invalid-data');
+    expect(result.stderr).not.toContain(secret);
+    expect(readFileSync(path.join(work, 'run.log'), 'utf8')).not.toContain(secret);
   });
 
   it('sends a Telegram failure notification for schema-invalid critiques', async () => {
@@ -282,7 +344,8 @@ describe('exit-code matrix', () => {
       const message = stub.sent[0] ?? '';
       expect(message).toContain('agent-quorum finished: FAILED (exit 3)');
       expect(message).toContain('input: input.md');
-      expect(message).toContain('reason: critique failed schema validation');
+      expect(message).toContain('reason: run-failed');
+      expect(message).not.toContain('critique failed schema validation');
       expect(message).toContain(`workdir: ${canonicalWorkPath()}`);
       expect(message).not.toContain('summary:');
     } finally {
@@ -334,7 +397,7 @@ describe('exit-code matrix', () => {
       ['plan', '--quality', 'quick', '--iters', '1', broken, '--no-fix', '--no-translate'],
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json') }),
     );
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr).toBe(6);
     expect(result.stderr).toContain('FINAL: blocked');
   });
 
@@ -350,13 +413,13 @@ describe('exit-code matrix', () => {
         }),
       );
 
-      expect(result.status).toBe(6);
+      expect(result.status, result.stderr).toBe(6);
       expect(stub.sent).toHaveLength(1);
       const message = stub.sent[0] ?? '';
       expect(message).toContain('agent-quorum finished: FAILED (exit 6)');
       expect(message).toContain('input: broken.md');
       expect(message).toContain('status: blocked');
-      expect(message).toContain('reason: plan shape broken');
+      expect(message).toContain('reasons: plan shape broken');
       expect(message).toContain(`summary: ${canonicalWorkPath('summary.md')}`);
     } finally {
       await stub.close();
@@ -370,7 +433,7 @@ describe('exit-code matrix', () => {
       const readinessAssessment = path.join(tmp, 'readiness-with-question.json');
       writeReadinessAssessment(readinessAssessment, false, [
         {
-          id: 'deployment-regions',
+          id: 'Q1',
           question: 'How many regions?',
           rationale: 'The answer changes the deployment boundary.',
           options: ['One', 'Two'],
@@ -715,7 +778,7 @@ describe('detached-launch forwarding channel', () => {
   it('fails the run on a malformed AGENT_QUORUM_CONFIG_OVERRIDE_JSON', () => {
     const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_CONFIG_OVERRIDE_JSON: '{not json' }));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('AGENT_QUORUM_CONFIG_OVERRIDE_JSON');
+    expect(result.stderr).toContain('code=config-override-invalid');
   });
 
   it('reads, unlinks, and applies a valid in-dir secret handoff file', () => {
@@ -741,7 +804,7 @@ describe('detached-launch forwarding channel', () => {
     writeFileSync(secretFile, '{not json', { mode: 0o600 });
     const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: secretFile }));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).toContain('code=secrets-handoff-invalid');
   });
 
   it('rejects an out-of-handoff path without deleting it', () => {
@@ -758,7 +821,7 @@ describe('detached-launch forwarding channel', () => {
     mkdirSync(handoff, { recursive: true });
     const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: handoff }));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).toContain('code=secrets-handoff-invalid');
     expect(result.stderr).not.toContain('EISDIR');
     expect(existsSync(handoff)).toBe(true);
   });
@@ -769,7 +832,7 @@ describe('detached-launch forwarding channel', () => {
     mkdirSync(sub, { recursive: true });
     const result = runCli(planArgs(), baseEnv({ AGENT_QUORUM_SECRETS_OVERRIDE_FILE: sub }));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('AGENT_QUORUM_SECRETS_OVERRIDE_FILE');
+    expect(result.stderr).toContain('code=secrets-handoff-invalid');
     expect(result.stderr).not.toContain('EISDIR');
     expect(existsSync(sub)).toBe(true);
   });

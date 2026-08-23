@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   existsSync,
   readFileSync,
@@ -9,7 +8,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
-import { stableTupleId } from './convergence.js';
+import { sha256, stableTupleId } from './digest.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 import { planPhaseGateExists } from './metrics.js';
 import type { RunMode } from '../types.js';
@@ -167,10 +166,6 @@ function createSystemContextAccumulator(): SystemContextAccumulator {
     packageOwners: new Map(),
     packageDependencies: [],
   };
-}
-
-function sha256(value: string | Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 function strings(value: JsonValue | undefined): string[] {

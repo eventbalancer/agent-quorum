@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -71,8 +71,8 @@ describe('honest convergence limits', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('clean');
-    expect(result.convergence?.exhaustedLimits).not.toContain('provider-context');
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness.reasonCodes).not.toContain('provider-context');
     expect(existsSync(path.join(tmp, 'codex.prompt'))).toBe(true);
     expect(readFileSync(path.join(work, 'plan.v0.md'), 'utf8')).toContain('status: clean');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
@@ -95,19 +95,15 @@ describe('honest convergence limits', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('clean');
-    expect(result.convergence?.exhaustedLimits).not.toContain('unknown-provider-context');
-    expect(result.convergence?.unresolvedCoverage).not.toContain(
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness.reasonCodes).not.toContain('unknown-provider-context');
+    expect(result.final?.readiness.unresolvedProofIds).not.toContain(
       'critic:review:unknown-context-bound',
     );
   });
 
-  it('reports issue-budget exhaustion even when all capped findings are duplicates', async () => {
+  it('reports issue-budget exhaustion when unique material findings fill the cap', async () => {
     const critique = path.join(tmp, 'budget.json');
-    writeFileSync(
-      path.join(work, 'rejected-log.jsonl'),
-      `${Array.from({ length: 8 }, (_, index) => JSON.stringify({ id: `r${index + 1}` })).join('\n')}\n`,
-    );
     writeCritique(
       critique,
       Array.from({ length: 8 }, (_, index) => ({
@@ -115,11 +111,11 @@ describe('honest convergence limits', () => {
         addresses: null,
         severity: 'major',
         category: 'convention',
-        claim: `duplicate ${index + 1}`,
+        claim: `material finding ${index + 1}`,
         evidence: '## Work Plan',
-        suggested_fix: 'none',
+        suggested_fix: `fix material finding ${index + 1}`,
         confidence: 1,
-        duplicate_of: `r${index + 1}`,
+        duplicate_of: null,
       })),
     );
     const result = await withEnvAsync(env(critique), () =>
@@ -134,10 +130,10 @@ describe('honest convergence limits', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('needs-review');
-    expect(result.convergence?.exhaustedLimits).toContain('issue-budget');
-    expect(result.convergence?.decision).toBe('limits-exhausted');
-    expect(result.convergence?.reasonCodes).toContain('issue-budget');
+    expect(result.final?.status).toBe('needs-review');
+    expect(result.final?.readiness.exhaustedLimits).toContain('issue-budget');
+    expect(result.final?.readiness.decision).toBe('limits-exhausted');
+    expect(result.final?.readiness.reasonCodes).toContain('issue-budget');
     expect(capture.text()).not.toContain('ready at v0');
   });
 
@@ -157,10 +153,10 @@ describe('honest convergence limits', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('clean');
-    expect(result.convergence?.decision).toBe('ready');
-    expect(result.convergence?.exhaustedLimits).not.toContain('authoritative-scope');
-    expect(result.convergence?.unresolvedCoverage).not.toContain(
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness.decision).toBe('ready');
+    expect(result.final?.readiness.reasonCodes).not.toContain('authoritative-scope');
+    expect(result.final?.readiness.unresolvedProofIds).not.toContain(
       'direct-plan:declared-scope-unproved',
     );
     const prompt = readFileSync(path.join(tmp, 'codex.prompt'), 'utf8');

@@ -2,7 +2,10 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { convergenceHealth } from '../../src/core/metrics.js';
+import {
+  convergenceHealth,
+  evidenceReferencesGroundedAgainstCandidate,
+} from '../../src/core/metrics.js';
 import { sanitizeCritiqueJson } from '../../src/core/schema.js';
 import { REPO_ROOT } from '../helpers/harness.js';
 
@@ -29,7 +32,112 @@ function issue(id: string, evidenceRef: Record<string, unknown>) {
   };
 }
 
+const RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+] as const;
+
+function storedCritique(planVersion: number, summary: string, issues: unknown[]) {
+  return {
+    plan_version: planVersion,
+    summary,
+    review: {
+      considered_context: [
+        'original-scope',
+        'authoritative-system-facts',
+        'operator-decisions',
+        'material-findings',
+        'active-invariants',
+        'quality-and-limits',
+      ],
+      invariant_assessments: [],
+      scope_coverage: ['original-scope'],
+      issue_budget: { limit: 8, used: issues.length, exhausted: false },
+      scan_complete: true,
+      unresolved_coverage: [],
+    },
+    domain_assessments: RISK_DOMAINS.map((domain) => ({
+      domain,
+      applicability: 'not-applicable',
+      risk: 'standard',
+      complete: true,
+      rationale: `${domain} is not applicable to this candidate.`,
+      unavailable_evidence: [],
+      evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+    })),
+    boundary_challenges: [],
+    opportunities: [],
+    issues,
+  };
+}
+
 describe('rich convergence health', () => {
+  it('grounds plan evidence against the exact reviewed candidate', () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-candidate-evidence.'));
+    roots.push(project);
+    const work = path.join(project, 'work');
+    mkdirSync(work);
+    writeFileSync(
+      path.join(work, 'plan.v2.md'),
+      '# Plan\n\n## Versioned Only\n\n### P1\n\nRun `pnpm run legacy`.\n',
+    );
+    writeFileSync(
+      path.join(work, 'system-context.json'),
+      JSON.stringify({ facts: { commands: ['pnpm run legacy'] } }),
+    );
+    const context = {
+      work,
+      projectRoot: project,
+      planVersion: 2,
+      candidatePath: path.join(work, 'fix-applied.md'),
+      candidateContent:
+        '# Plan\n\n## Applied Candidate\n\n### P3\n\nAcceptance gate runs `pnpm run check`.\n',
+    };
+
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'file-line', path: 'fix-applied.md', line: 3 }],
+        context,
+      ),
+    ).toBe(true);
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'plan-section', section: 'Applied Candidate' }],
+        context,
+      ),
+    ).toBe(true);
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'phase-gate', phase: 'P3', gate: 'Acceptance gate' }],
+        context,
+      ),
+    ).toBe(true);
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'command', command: 'pnpm run check' }],
+        context,
+      ),
+    ).toBe(true);
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'plan-section', section: 'Versioned Only' }],
+        context,
+      ),
+    ).toBe(false);
+    expect(
+      evidenceReferencesGroundedAgainstCandidate(
+        [{ kind: 'command', command: 'pnpm run legacy' }],
+        context,
+      ),
+    ).toBe(false);
+  });
+
   it('classifies every typed evidence kind plus malformed, mismatched, and unanchored cases', () => {
     const project = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-evidence.'));
     roots.push(project);
@@ -197,11 +305,9 @@ describe('rich convergence health', () => {
     const work = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-lineage.'));
     roots.push(work);
     const schema = path.join(REPO_ROOT, 'skills', 'plan-critic', 'critique.schema.json');
-    const parent = {
-      plan_version: 0,
-      summary: 'parent',
-      issues: [issue('C1', { kind: 'command', command: 'pnpm run test' })],
-    };
+    const parent = storedCritique(0, 'parent', [
+      issue('C1', { kind: 'command', command: 'pnpm run test' }),
+    ]);
     writeFileSync(path.join(work, 'critique.v0.json'), JSON.stringify(parent));
     writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
     writeFileSync(path.join(work, 'plan.v1.md'), '# Plan\n\n## Work Plan\n');
@@ -233,19 +339,17 @@ describe('rich convergence health', () => {
     const evidence = { kind: 'command', command: 'pnpm run test' };
     writeFileSync(
       path.join(work, 'critique.v0.json'),
-      JSON.stringify({
-        plan_version: 0,
-        summary: 'old parents',
-        issues: [issue('C1', evidence), issue('C2', evidence), issue('C3', evidence)],
-      }),
+      JSON.stringify(
+        storedCritique(0, 'old parents', [
+          issue('C1', evidence),
+          issue('C2', evidence),
+          issue('C3', evidence),
+        ]),
+      ),
     );
     writeFileSync(
       path.join(work, 'critique.v1.json'),
-      JSON.stringify({
-        plan_version: 1,
-        summary: 'immediate parent',
-        issues: [issue('C1', evidence)],
-      }),
+      JSON.stringify(storedCritique(1, 'immediate parent', [issue('C1', evidence)])),
     );
     writeFileSync(
       path.join(work, 'update.v0.json'),

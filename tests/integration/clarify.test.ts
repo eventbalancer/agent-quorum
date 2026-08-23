@@ -578,7 +578,7 @@ describe('run-level clarify transport mapping', () => {
     const assessment = path.join(runTmp, 'readiness-with-question.json');
     writeReadinessAssessment(assessment, false, [
       {
-        id: 'deployment-region',
+        id: 'Q1',
         question: 'Region?',
         rationale: 'The selected region changes the deployment boundary.',
         options: ['Region A', 'Region B'],
@@ -619,12 +619,12 @@ describe('run-level clarify transport mapping', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.status).toBe('needs-review');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('needs-review');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'unable-to-decide',
       satisfied: false,
     });
-    expect(result.convergence?.reasonCodes).toContain('material-question-unresolved');
+    expect(result.final?.readiness.reasonCodes).toContain('material-question-unresolved');
     expect(existsSync(path.join(runWork, 'readiness-contract.json'))).toBe(true);
     expect(existsSync(path.join(runWork, 'clarify.done'))).toBe(false);
     expect(readFileSync(path.join(runWork, 'plan.final.md'), 'utf8')).toContain(

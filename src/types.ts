@@ -1,4 +1,9 @@
 import type { DeepPartial, OperatorConfig } from './core/config.js';
+import type {
+  OccurrenceCoverageProjection as CanonicalOccurrenceCoverageProjection,
+  OccurrenceSourceBinding,
+  OccurrenceSourceProjection as CanonicalOccurrenceSourceProjection,
+} from './core/readiness-proof.js';
 
 export type { Runner } from './providers/registry.js';
 
@@ -18,6 +23,8 @@ export type ReadinessDecision =
   | 'unable-to-decide'
   | 'limits-exhausted';
 
+export type ReadinessLimit = 'issue-budget' | 'iteration-cap' | 'assurance-appetite';
+
 export type RiskApplicability = 'applicable' | 'not-applicable' | 'unknown';
 
 export type RiskLevel = 'standard' | 'high';
@@ -32,41 +39,45 @@ export type RiskDomain =
   | 'production-operability'
   | 'performance-cost';
 
-export type ConvergenceLimit =
-  | 'issue-budget'
-  | 'iteration-cap'
-  | 'provider-context'
-  | 'unknown-provider-context'
-  | 'authoritative-scope'
-  | 'assurance-appetite';
+export type OccurrenceSourceProjection = CanonicalOccurrenceSourceProjection;
 
-export interface ConvergenceReport {
-  readonly promise: CompletenessPromise;
-  readonly satisfied: boolean;
-  readonly artifactPath: string;
-  readonly exhaustedLimits: readonly ConvergenceLimit[];
-  readonly unresolvedCoverage: readonly string[];
+export type OccurrenceCoverageProjection = CanonicalOccurrenceCoverageProjection;
+
+export interface ReadinessProofProjection {
+  readonly proofArtifactPath: string;
+  readonly planVersion: number;
+  readonly canonicalPlanSha256: string;
   readonly decision: ReadinessDecision;
   readonly reasonCodes: readonly string[];
+  readonly satisfied: boolean;
+  readonly exhaustedLimits: readonly ReadinessLimit[];
+  readonly unresolvedProofIds: readonly string[];
   readonly applicableRiskDomains: readonly RiskDomain[];
   readonly highRiskDomains: readonly RiskDomain[];
   readonly opportunityCount: number;
+  readonly occurrenceCoverage: OccurrenceCoverageProjection;
 }
 
-export type ReadinessLabel = 'ready' | 'not-ready' | 'unknown';
-
-export interface FinalReadiness {
+export interface JudgeProofProjection {
+  readonly required: boolean;
+  readonly allowed: boolean;
   readonly evaluated: boolean;
-  readonly ready: boolean | null;
+  readonly available: boolean;
+  readonly candidateUnchanged: boolean;
+  readonly verdict: boolean | null;
   readonly rationale: string;
-  readonly planSha256: string;
+  readonly binding?: OccurrenceSourceBinding;
+  readonly metadataPath?: string;
 }
 
-export function readinessLabel(ready: FinalReadiness['ready']): ReadinessLabel {
-  if (ready === null) {
-    return 'unknown';
-  }
-  return ready ? 'ready' : 'not-ready';
+export interface FinalProjection {
+  readonly status: RunFinalStatus;
+  readonly reasons: readonly string[];
+  readonly structuralStatus: RunFinalStatus;
+  readonly structuralReason: string;
+  readonly artifactPath: string;
+  readonly readiness: ReadinessProofProjection;
+  readonly judge: JudgeProofProjection;
 }
 
 interface RunSecrets {

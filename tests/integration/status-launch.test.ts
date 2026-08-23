@@ -16,12 +16,21 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCli } from '../helpers/cli.js';
 import { pgidOf } from '../../src/runtime/proc.js';
 import {
-  createConvergenceState,
-  fileSha256,
-  writeConvergenceState,
-} from '../../src/core/convergence.js';
-import { qualityMatrix } from '../../src/core/quality.js';
-import { writeStoreConfig, writeFakeBin, writeStructuredPlanFile } from '../helpers/harness.js';
+  createReadinessProofCatalog,
+  createReadinessProofState,
+  recordContextDelivery,
+  replaceOccurrenceCoverageSnapshot,
+} from '../../src/core/readiness-proof.js';
+import { writeReadinessProofState } from '../../src/core/readiness-store.js';
+import { fileSha256 } from '../../src/core/digest.js';
+import { finalizeRunRecord, readRunRecords } from '../../src/core/run-store.js';
+import {
+  emptyCritique,
+  writeStoreConfig,
+  writeFakeBin,
+  writeStructuredPlanFile,
+} from '../helpers/harness.js';
+import { finalProjection } from '../helpers/final-projection.js';
 
 let tmp: string;
 let fake: string;
@@ -159,6 +168,64 @@ afterEach(async () => {
 });
 
 describe('launch + status', () => {
+  it('keeps provider parser details out of a detached run log', async () => {
+    writeFakeBin(fake);
+    const secret = 'DETACHED_PROVIDER_PARSE_SECRET_9a6d2e';
+    const input = path.join(tmp, 'private-error.md');
+    const malformed = path.join(tmp, 'malformed-critique.json');
+    writeStructuredPlanFile(input, 'Detached privacy boundary');
+    emptyCritique(malformed);
+    const critique = JSON.parse(readFileSync(malformed, 'utf8')) as {
+      review: { invariant_assessments: unknown[] };
+    };
+    critique.review.invariant_assessments = [
+      {
+        invariant_id: secret,
+        complete: true,
+        occurrences: [{ occurrence_id: 'O-secret', disposition: 'unresolved', evidence_refs: [] }],
+      },
+    ];
+    writeFileSync(malformed, `${JSON.stringify(critique)}\n`);
+    const result = runCli(
+      ['launch', '--quality', 'quick', '--iters', '1', input, '--no-fix', '--no-translate'],
+      {
+        PATH: `${fake}:${process.env.PATH ?? ''}`,
+        AGENT_QUORUM_HOME: path.join(tmp, 'home'),
+        AGENT_QUORUM_PLANS_DIR: path.join(tmp, 'plans'),
+        AGENT_QUORUM_STATE_DIR: path.join(tmp, 'state'),
+        AGENT_QUORUM_CLARIFY: '0',
+        AGENT_QUORUM_RETRY_COUNT: '0',
+        AGENT_QUORUM_LAUNCH_VERIFY_DELAY: '0.1',
+        AGENT_QUORUM_WORK_DIR: undefined,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'private-error.codex.prompt'),
+        FAKE_CODEX_OUTPUT: malformed,
+        FAKE_CODEX_SILENT_SECONDS: '1',
+      },
+    );
+    expect(result.status).toBe(0);
+    const pid = Number(/pid:\s+([0-9]+)/.exec(result.stdout)?.[1]);
+    const log = /log:\s+(.*)/.exec(result.stdout)?.[1] ?? '';
+    expect(Number.isInteger(pid)).toBe(true);
+    launchedPids.push(pid);
+
+    let content = '';
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (existsSync(log)) {
+        content = readFileSync(log, 'utf8');
+        if (content.includes('critic output failed semantic admission')) {
+          break;
+        }
+      }
+      await sleep(100);
+    }
+
+    expect(content).toContain(
+      'critic output failed semantic admission (code=unknown-identity path=invariant_assessments[0].invariant_id)',
+    );
+    expect(content).not.toContain('code=unexpected-error');
+    expect(content).not.toContain(secret);
+  }, 30_000);
+
   it('resolves a grandchild PID to the root run, lists runs, and tears down without orphans', async () => {
     const runA = await launchHangingRun('alpha');
     expect(existsSync(runA.log)).toBe(true);
@@ -225,12 +292,10 @@ describe('launch + status', () => {
     );
     const afterDecoy = runCli(['status'], statusEnv, undefined, tmp);
     expect(afterDecoy.status).toBe(0);
-    // The decoy is listed, but its start-token mismatch demotes it to a
-    // terminal state — it is never shown as a live/running run.
+    // Unsupported pre-schema records are skipped without being rewritten.
     expect(afterDecoy.stdout).toContain('alpha  [running]');
     expect(afterDecoy.stdout).toContain('beta  [running]');
-    expect(afterDecoy.stdout).toContain('tokendecoy  [failed]');
-    expect(afterDecoy.stdout).not.toMatch(/tokendecoy {2}\[running\]/);
+    expect(afterDecoy.stdout).not.toContain('tokendecoy');
 
     process.kill(runA.pid, 'SIGTERM');
     await sleep(1500);
@@ -311,17 +376,34 @@ describe('status convergence proof', () => {
       }),
     ]);
 
-    const convergence = createConvergenceState({
-      quality: 'balanced',
-      matrix: qualityMatrix('balanced'),
-      mode: 'prompt',
-      sourceDigest: 'source',
-      authoritativeDigest: 'system',
-      relationshipIds: ['R-fixture'],
-      maxIters: 3,
+    const planSha256 = fileSha256(path.join(run.work, 'plan.v2.md'));
+    const criticBinding = {
+      candidate: {
+        kind: 'versioned-plan' as const,
+        planVersion: 2,
+        contentDigest: planSha256,
+      },
+      lineage: {
+        evaluationStage: 'review' as const,
+        lineageDigest: 'c'.repeat(64),
+      },
+    };
+    const catalog = createReadinessProofCatalog({
+      expectedPlanVersion: 2,
+      invariants: [
+        { invariantId: 'I-active', occurrenceIds: ['O-active'] },
+        { invariantId: 'I-resolved', occurrenceIds: ['O-resolved'] },
+      ],
+      materialIssueIds: [],
     });
-    convergence.planVersion = 2;
-    convergence.contextDeliveries.push({
+    let proof = createReadinessProofState(catalog, {
+      critic: {
+        required: true,
+        reason: 'independent-critic-required',
+        expectedBinding: criticBinding,
+      },
+    });
+    proof = recordContextDelivery(proof, {
       role: 'critic',
       stage: 'review',
       planVersion: 2,
@@ -333,42 +415,26 @@ describe('status convergence proof', () => {
       reductions: [],
       omittedCategories: ['resolved-minor-history'],
     });
-    convergence.invariants = [
-      {
-        id: 'I-active',
-        sourceFinding: 'I-active',
-        statement: 'Active fixture invariant',
-        status: 'active',
-        occurrences: [
-          {
-            id: 'O-active',
-            dimension: 'repository',
-            subject: 'fixture',
-            disposition: 'unresolved',
-            evidenceRefs: [],
-          },
-        ],
-      },
-      {
-        id: 'I-resolved',
-        sourceFinding: 'I-resolved',
-        statement: 'Resolved fixture invariant',
-        status: 'resolved',
-        lastReviewedPlanVersion: 2,
-        occurrences: [
-          {
-            id: 'O-resolved',
-            dimension: 'repository',
-            subject: 'fixture',
-            disposition: 'satisfied',
-            evidenceRefs: [],
-          },
-        ],
-      },
-    ];
-    convergence.unresolvedCoverage = ['I-active'];
-    convergence.stopReason = 'unresolved-coverage:I-active';
-    writeConvergenceState(run.work, convergence);
+    proof = replaceOccurrenceCoverageSnapshot(proof, {
+      source: 'critic',
+      catalogDigest: catalog.digest,
+      binding: criticBinding,
+      occurrences: [
+        {
+          invariantId: 'I-active',
+          occurrenceId: 'O-active',
+          disposition: 'unresolved',
+          evidenceGrounded: false,
+        },
+        {
+          invariantId: 'I-resolved',
+          occurrenceId: 'O-resolved',
+          disposition: 'satisfied',
+          evidenceGrounded: true,
+        },
+      ],
+    });
+    writeReadinessProofState(path.join(run.work, 'convergence.v2.json'), proof);
     writeFileSync(
       path.join(run.work, 'system-check.v2.json'),
       `${JSON.stringify({ relationships: [{ id: 'R-fixture', disposition: 'covered' }] })}\n`,
@@ -376,45 +442,53 @@ describe('status convergence proof', () => {
     writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Final plan', {
       status: 'needs-review',
     });
-    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    const stateDir = path.join(tmp, 'state');
+    const record = readRunRecords(stateDir).find((entry) => entry.pid === run.pid);
+    expect(record).toBeDefined();
+    if (record === undefined) {
+      throw new TypeError('launched run record is unavailable');
+    }
+    expect(record.workDir).toBe(realpathSync(run.work));
+    finalizeRunRecord(stateDir, record.runId, {
+      state: 'finished',
+      exitCode: 0,
+      endedAt: '2026-06-15T01:00:00Z',
+      final: finalProjection(record.workDir, {
+        status: 'needs-review',
+        decision: 'unable-to-decide',
+        reasonCodes: ['occurrence-proof-unresolved'],
+      }),
+    });
 
     const status = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(status.status).toBe(0);
+    expect(status.stdout).toContain('lineage={"new":1');
     expect(status.stdout).toContain(
-      'lineage={"new":1,"refinement":1,"reopened":1,"recurring":1,"revision-regression":1,"rejected-duplicate":1,"invalid-lineage":1}',
+      '"revision-regression":1,"rejected-duplicate":1,"invalid-lineage":4',
     );
     expect(status.stdout).toContain(
       'grounding={"grounded":6,"malformed":0,"format-mismatch":1,"unanchored":0}',
     );
     expect(status.stdout).toContain('retained=120B+30B');
-    expect(status.stdout).toContain('invariants=1/1/1');
+    expect(status.stdout).toContain('invariants=2/1/1');
     expect(status.stdout).toContain('relationships=1/1');
     expect(status.stdout).toContain('omitted=resolved-minor-history');
     expect(status.stdout).toContain(
-      'final artifact present; status=needs-review decision=revision-required',
+      'final artifact present; status=needs-review decision=unable-to-decide',
     );
     expect(status.stdout).not.toContain('✓ ready');
     expect(readFileSync(run.log, 'utf8')).not.toContain(RUN_INPUT_BODY_SENTINEL);
 
     writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Clean final');
-    convergence.invariants = [];
-    convergence.unresolvedCoverage = [];
-    convergence.decision = 'ready';
-    convergence.reasonCodes = [];
-    convergence.satisfied = true;
-    convergence.stopReason = 'ready';
-    convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
-    writeConvergenceState(run.work, convergence, 'convergence.final.json');
     appendFileSync(path.join(run.work, 'plan.final.md'), '\nSame-version mutation\n');
     const staleProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(staleProof.status).toBe(0);
     expect(staleProof.stdout).toContain(
-      'final artifact present; status=needs-review decision=ready',
+      'final artifact present; status=needs-review decision=unable-to-decide',
     );
     expect(staleProof.stdout).not.toContain('✓ ready');
 
-    convergence.canonicalPlanSha256 = fileSha256(path.join(run.work, 'plan.final.md'));
-    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    finalizeRunRecord(stateDir, record.runId, { final: finalProjection(record.workDir) });
     const exactProof = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(exactProof.status).toBe(0);
     expect(exactProof.stdout).toContain('✓ ready (final status clean; exact plan bound)');
@@ -428,15 +502,28 @@ describe('status convergence proof', () => {
     writeStructuredPlanFile(path.join(run.work, 'plan.final.md'), 'Blocked final', {
       status: 'blocked',
     });
-    convergence.decision = 'unable-to-decide';
-    convergence.reasonCodes = ['final-artifact-needs-review'];
-    convergence.satisfied = false;
-    convergence.stopReason = 'unable-to-decide:final-artifact-needs-review';
-    writeConvergenceState(run.work, convergence, 'convergence.final.json');
+    const structuralReason =
+      'plan shape broken (title=1 missing_sections=1 impact_graph_mermaid=0 frontmatter=0)';
+    finalizeRunRecord(stateDir, record.runId, {
+      state: 'blocked',
+      exitCode: 6,
+      endedAt: '2026-06-15T02:00:00Z',
+      final: finalProjection(record.workDir, {
+        status: 'blocked',
+        structuralStatus: 'blocked',
+        structuralReason,
+        decision: 'unable-to-decide',
+        reasonCodes: ['final-artifact-needs-review'],
+        reasons: [
+          structuralReason,
+          'Readiness proof: unable-to-decide:final-artifact-needs-review',
+        ],
+      }),
+    });
     const blocked = runCli(['status', String(run.grandchildPid)], statusEnv, undefined, tmp);
     expect(blocked.status).toBe(0);
     expect(blocked.stdout).toContain(
-      'final artifact present; status=blocked decision=unable-to-decide reasons=legacy-proof-incomplete',
+      `final artifact present; status=blocked decision=unable-to-decide reasons=${structuralReason}`,
     );
     expect(blocked.stdout).not.toContain('final artifact present; status=needs-review');
 

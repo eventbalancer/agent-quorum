@@ -2,7 +2,14 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "PlanReadiness",
   "type": "object",
-  "required": ["ready", "rationale"],
+  "required": [
+    "ready",
+    "rationale",
+    "revision_issue",
+    "coverage_complete",
+    "unresolved_occurrence_ids",
+    "invariant_assessments"
+  ],
   "additionalProperties": false,
   "properties": {
     "ready": {
@@ -32,52 +39,85 @@
         },
         "claim": { "type": "string", "minLength": 1 },
         "evidence": { "type": "string", "minLength": 1 },
-        "evidence_refs": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["kind"],
-            "properties": {
-              "kind": {
-                "enum": [
-                  "file-line",
-                  "plan-section",
-                  "phase-gate",
-                  "command",
-                  "repository",
-                  "topology"
-                ]
-              },
-              "value": { "type": "string" },
-              "path": { "type": "string" },
-              "line": { "type": "integer", "minimum": 1 },
-              "section": { "type": "string" },
-              "phase": { "type": "string" },
-              "gate": { "type": "string" },
-              "command": { "type": "string" },
-              "repository": { "type": "string" },
-              "topology_id": { "type": "string" }
-            }
-          }
-        },
+        "evidence_refs": { "$ref": "#/$defs/revisionEvidenceRefs" },
         "suggested_fix": { "type": "string", "minLength": 1 }
       }
     },
-    "coverage_complete": { "type": "boolean" },
-    "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } },
+    "coverage_complete": {
+      "type": "boolean",
+      "description": "True exactly when every active invariant and every retained occurrence is represented exactly once. Explicit unresolved dispositions count as represented."
+    },
+    "unresolved_occurrence_ids": {
+      "type": "array",
+      "description": "Exactly the occurrence ids whose disposition is unresolved, with no omissions or additions.",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "invariant_assessments": {
       "type": "array",
+      "description": "Exactly one assessment for every active invariant.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["invariant_id", "satisfied", "unresolved_occurrence_ids"],
+        "required": ["invariant_id", "occurrences"],
         "properties": {
-          "invariant_id": { "type": "string" },
-          "satisfied": { "type": "boolean" },
-          "unresolved_occurrence_ids": { "type": "array", "items": { "type": "string" } }
+          "invariant_id": { "type": "string", "minLength": 1 },
+          "occurrences": {
+            "type": "array",
+            "description": "Exactly one entry for every retained occurrence of this invariant.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["occurrence_id", "disposition", "evidence_refs"],
+              "properties": {
+                "occurrence_id": { "type": "string", "minLength": 1 },
+                "disposition": {
+                  "enum": ["satisfied", "violated", "not-applicable", "unresolved"],
+                  "description": "satisfied, violated, and not-applicable require grounded evidence for the current candidate; unresolved is explicit when no grounded conclusion is available."
+                },
+                "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
+              }
+            }
+          }
         }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceRefs": {
+      "type": "array",
+      "description": "Grounded references supporting this occurrence disposition. It may be empty only for an unresolved disposition.",
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "revisionEvidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/evidenceRef" }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file-line",
+            "plan-section",
+            "phase-gate",
+            "command",
+            "repository",
+            "topology"
+          ]
+        },
+        "value": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "section": { "type": "string" },
+        "phase": { "type": "string" },
+        "gate": { "type": "string" },
+        "command": { "type": "string" },
+        "repository": { "type": "string" },
+        "topology_id": { "type": "string" }
       }
     }
   }

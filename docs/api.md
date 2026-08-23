@@ -12,12 +12,17 @@ import {
   interveneRun,
   pruneRuns,
   ExitCode,
+  RUN_RECORD_SCHEMA_VERSION,
   type RunPlanLoopOptions,
   type LaunchPlanLoopOptions,
   type RunResult,
   type RunHealth,
   type RunFinalStatus,
-  type FinalReadiness,
+  type FinalProjection,
+  type ReadinessProofProjection,
+  type JudgeProofProjection,
+  type OccurrenceCoverageProjection,
+  type OccurrenceSourceProjection,
   type LaunchResult,
   type CommandResult,
   type InterventionTarget,
@@ -35,8 +40,7 @@ import {
   type RiskApplicability,
   type RiskLevel,
   type RiskDomain,
-  type ConvergenceLimit,
-  type ConvergenceReport,
+  type ReadinessLimit,
 } from 'agent-quorum';
 ```
 
@@ -91,66 +95,84 @@ const result = await runPlanLoop({
 //   health: { critic: 3, addressed: 2, new: 1, invalid: 0, validAddressedPct: 66 },
 //   splitDecision: 'no-split',          // 'split' | 'no-split', present every run
 //   packageDir: undefined,              // '/abs/path/loop-my-plan/plan.package' only when split
-//   status: 'clean',
-//   reason: '',
-//   structuralStatus: 'clean',
-//   structuralReason: '',
-//   readiness: { evaluated: true, ready: true, rationale: 'Ready.', planSha256: '…' },
-//   readinessPath: '/abs/path/loop-my-plan/judge.final.meta.json',
-//   convergence: {
-//     promise: 'cumulative',
-//     decision: 'ready',
-//     reasonCodes: [],
-//     satisfied: true,
+//   final: {
+//     status: 'clean',
+//     reasons: [],
+//     structuralStatus: 'clean',
+//     structuralReason: '',
 //     artifactPath: '/abs/path/loop-my-plan/convergence.final.json',
-//     exhaustedLimits: [],
-//     unresolvedCoverage: [],
-//     applicableRiskDomains: ['correctness'],
-//     highRiskDomains: ['correctness'],
-//     opportunityCount: 0,
+//     readiness: {
+//       proofArtifactPath: '/abs/path/loop-my-plan/convergence.final.json',
+//       planVersion: 2,
+//       canonicalPlanSha256: '…',
+//       decision: 'ready',
+//       reasonCodes: [],
+//       satisfied: true,
+//       exhaustedLimits: [],
+//       unresolvedProofIds: [],
+//       applicableRiskDomains: ['correctness'],
+//       highRiskDomains: ['correctness'],
+//       opportunityCount: 0,
+//       occurrenceCoverage: {
+//         // trusted catalog, source requirements/snapshots, normalized outcomes,
+//         // resolved/violated/unresolved/disagreement ids, and proof flags
+//       },
+//     },
+//     judge: {
+//       required: true,
+//       allowed: true,
+//       evaluated: true,
+//       available: true,
+//       candidateUnchanged: true,
+//       verdict: true,
+//       rationale: 'Ready.',
+//       binding: { candidate: { kind: 'canonical-plan', planVersion: 2, contentDigest: '…' }, lineage: { evaluationStage: 'final-readiness', lineageDigest: '…' } },
+//       metadataPath: '/abs/path/loop-my-plan/judge.final.meta.json',
+//     },
 //   },
 // }
 ```
 
 `exitCode` follows the CLI contract (`ExitCode.Ok`, `ExitCode.SchemaInvalid`,
-`ExitCode.Blocked`, …). The structured fields are built from the same data
-that renders `summary.md`: `health` carries exactly the numbers of the
-`final_health` line, `iterations`/`finalPlanPath`/`summaryPath` mirror their
-summary lines; path fields are present only when the file exists, and failure
-exits may carry `workDir` alone. `splitDecision` (`'split'` | `'no-split'`)
-mirrors the `split_decision` summary line and is present whenever
-`plan.split.json` was written; `packageDir` is present only when the split
-policy fired and a `plan.package/` was emitted. Both are additive —
-`finalPlanPath` is never replaced by a directory-only result, so existing
-callers are unaffected. `runId` and `name` identify the run (the same id the
-start surfaces report); they are additive on `RunResult`/`LaunchResult`.
-Completed runs add `status`/`reason` and the independent
-`structuralStatus`/`structuralReason`. A non-blocked `balanced` or `thorough`
-run with applicable high risk also returns `readiness` and `readinessPath`.
-Standard-risk runs omit those fields regardless of quality. `readiness.ready`
-is `true` or `false` for a schema-valid final verdict; it is `null` with
-`evaluated: false` when the provider retry policy ends without a valid verdict.
-The SHA-256 binds that result to the exact bytes of `plan.final.md`. Negative
-and unknown readiness both return exit code 0 with `status: 'needs-review'`.
-Structurally blocked runs omit the readiness fields. The durable `RunRecord`
-stores the same facts as `finalStatus`/`finalReason`,
-`structuralStatus`/`structuralReason`, and `finalReadiness`. `LaunchResult`
-remains unchanged because detachment occurs before completion.
-`RunResult.convergence` is an additive proof projection with the four-way
-`decision`, stable `reasonCodes`, applicable/high-risk domains, opportunity
-count, selected compatibility promise, satisfaction flag, canonical artifact
-path, exhausted limits, and unresolved coverage IDs. `satisfied` is retained
-for compatibility and is exactly `decision === 'ready'`. `ready` projects to
-final status `clean`; other non-structural decisions project to `needs-review`.
-The durable run record stores the same projection as `finalConvergence`.
-Missing fields on legacy records remain readable and mean unavailable, not
-implicitly satisfied.
-`ConvergenceLimit` identifies `issue-budget`, `iteration-cap`,
-`provider-context`, `unknown-provider-context`, `authoritative-scope`, or
-`assurance-appetite`.
-The two provider-context values remain readable for legacy artifacts and future
-provider/model-aware admission; the current UTF-8 estimate is telemetry-only
-and does not emit them.
+`ExitCode.Blocked`, …). The structured fields are built from the same data that
+renders `summary.md`: `health` carries exactly the numbers of the `final_health`
+line, and `iterations`/`finalPlanPath`/`summaryPath` mirror their summary lines.
+Path fields are present only when the file exists, and failure exits may carry
+`workDir` alone. `splitDecision` (`'split'` | `'no-split'`) mirrors the
+`split_decision` summary line and is present whenever `plan.split.json` was
+written; `packageDir` is present only when the split policy fired and a
+`plan.package/` was emitted. `runId` and `name` identify the run across every
+start and lookup surface.
+
+A run that reaches finalization exposes one readiness-bearing object:
+`RunResult.final`. The
+same `FinalProjection` is persisted as `RunRecord.final` and supplied to the
+summary, CLI, status, and notification renderers; those consumers do not
+recompute readiness. Its fields have distinct ownership:
+
+- `status`, `reasons`, `structuralStatus`, and `structuralReason` report the
+  overall and independent structural outcomes;
+- `readiness` carries the schema-3 proof path, plan version, canonical SHA-256,
+  four-way decision, stable reason codes, limits, unresolved proof IDs, risk
+  domains, opportunities, and canonical occurrence coverage;
+- `judge.required` distinguishes exemption from unavailable evidence, while
+  `allowed`, `evaluated`, `available`, `candidateUnchanged`, `verdict`,
+  `rationale`, and the optional exact binding/metadata path describe the final
+  Judge source without standing in for the overall decision.
+
+`ready` with exact compatible proof projects to `clean`. Structurally broken
+output projects to `blocked`, skips final Judge evaluation, and exits 6. Every
+usable but incomplete, negative, unavailable, inconsistent, stale, or
+mismatched result projects to `needs-review` and exits 0. `ReadinessLimit` is
+the closed set `issue-budget | iteration-cap | assurance-appetite`; configured
+input sizing remains telemetry and is not a readiness limit. `LaunchResult`
+does not contain `final` because detachment happens before completion.
+
+This is an intentional breaking boundary. The former flat status, structural,
+Judge-readiness, and convergence fields are not populated or adapted. Durable
+run records require `schemaVersion: 1`; ledger discovery skips absent,
+unsupported, or malformed record schemas rather than manufacturing current
+proof from them.
 Artifacts land in the resolved workdir; for `home`/`workDir` the precedence is
 option > environment variable > default (`~/.agent-quorum` / `<home>/runs/loop-<name>`).
 Structured `config`/`secrets` resolve in the override tier (override > env >
@@ -168,20 +190,42 @@ environment; ambient `AGENT_QUORUM_*` env still fills any unset key (see
 [configuration.md](configuration.md)).
 
 Every new run performs a read-only creator assessment before `plan.v0.md` and
-writes an immutable `readiness-contract.json`. It freezes source/system digests,
-the implementation boundary, appetite, eight-domain applicability/risk,
-material questions, and operator-decision IDs. With clarification unavailable,
-unresolved material questions preserve a useful plan but force
-`unable-to-decide`. A positional existing plan supplies the assessment boundary
-even though the original request remains explicitly unavailable.
+writes schema-2 `readiness-contract.json`. It freezes source/system digests, the
+implementation boundary, appetite, eight-domain applicability/risk, material
+questions, operator-decision IDs, and the trusted catalog identity used for
+semantic admission. With clarification unavailable, unresolved material
+questions preserve a useful plan but force `unable-to-decide`. A positional
+existing plan supplies the assessment boundary even though the original request
+remains explicitly unavailable.
 
-`convergence.vN.json` and `convergence.final.json` use schema version 2. The
-reader migrates v1 conservatively and requires a fresh review before `ready`;
-legacy resumes without a frozen contract receive a legacy-derived contract and
-cannot be treated as automatically proven. `opportunities.json` stores
-non-blocking improvement fingerprints and first/last-seen versions. Those
-entries are reported by API/summary/status but do not trigger a creator update
-or affect readiness.
+Role JSON first passes its structural schema, then closed-world semantic
+admission verifies the exact plan version, candidate and lineage binding,
+catalog, fixed domains, material issue identities, retained context, invariant
+occurrences, and evidence grounding. Every critic, conditionally required fix
+reviewer, and applicable Judge source reports each retained occurrence exactly
+once as `satisfied`, `not-applicable`, `violated`, or `unresolved`. Grounded
+`satisfied` and grounded `not-applicable` normalize to resolved; `violated` stays
+negative, `unresolved` stays inconclusive, and disagreement between required
+sources stays explicit. An ungrounded `not-applicable` rejects the whole role
+artifact. A fix-review source is required only when reviewed replacement bytes
+are retained; disabled, skipped, rejected, or restored paths record an explicit
+exemption.
+
+`convergence.vN.json` and `convergence.final.json` use schema version 3, while
+`judge.final.meta.json` uses schema version 2. Earlier readiness artifact,
+contract, and Judge-metadata schemas are unsupported. Resume requires a matching
+current-schema `plan.vN.md`/`convergence.vN.json` pair and current frozen
+contract; missing, malformed, or unsupported proof fails before stale artifacts
+are archived. `opportunities.json` stores non-blocking improvement fingerprints
+and first/last-seen versions. Those entries are reported by
+API/summary/status but do not trigger a creator update or affect readiness.
+
+Finalization settles one exact canonical candidate before constructing
+`FinalProjection`. The canonical proof, deterministic system check, any required
+fix review, and applicable final Judge evidence must bind those same bytes. A
+late content mutation invalidates current evidence, and a downgrade to
+`needs-review` is monotonic within that finalization pass; package and localized
+outputs derive only from the settled candidate.
 
 When a bot token and chat id resolve (from `secrets`/`config`, the
 `<home>/secrets.json`+`config.json` store, or ambient env), `runPlanLoop` also

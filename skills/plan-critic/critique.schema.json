@@ -2,7 +2,15 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "PlanCritique",
   "type": "object",
-  "required": ["plan_version", "summary", "issues"],
+  "required": [
+    "plan_version",
+    "summary",
+    "review",
+    "domain_assessments",
+    "boundary_challenges",
+    "opportunities",
+    "issues"
+  ],
   "additionalProperties": false,
   "properties": {
     "plan_version": {
@@ -39,22 +47,31 @@
         },
         "invariant_assessments": {
           "type": "array",
+          "description": "Exactly one assessment for every active invariant in retained context.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["invariant_id", "complete", "occurrences"],
             "properties": {
-              "invariant_id": { "type": "string" },
-              "complete": { "type": "boolean" },
+              "invariant_id": { "type": "string", "minLength": 1 },
+              "complete": {
+                "type": "boolean",
+                "description": "Derived from exact retained-occurrence accounting, not from satisfaction or role agreement."
+              },
               "occurrences": {
                 "type": "array",
+                "description": "Exactly one entry for every retained occurrence of this invariant.",
+                "minItems": 1,
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["occurrence_id", "disposition", "evidence_refs"],
                   "properties": {
-                    "occurrence_id": { "type": "string" },
-                    "disposition": { "enum": ["satisfied", "violated", "not-applicable", "unresolved"] },
+                    "occurrence_id": { "type": "string", "minLength": 1 },
+                    "disposition": {
+                      "enum": ["satisfied", "violated", "not-applicable", "unresolved"],
+                      "description": "satisfied, violated, and not-applicable require grounded evidence for the current candidate; unresolved is explicit when no grounded conclusion is available."
+                    },
                     "evidence_refs": { "$ref": "#/$defs/evidenceRefs" }
                   }
                 }
@@ -75,7 +92,7 @@
           "additionalProperties": false,
           "required": ["limit", "used", "exhausted"],
           "properties": {
-            "limit": { "type": "integer", "minimum": 1 },
+            "limit": { "type": "integer", "minimum": 0 },
             "used": { "type": "integer", "minimum": 0 },
             "exhausted": { "type": "boolean" }
           }
@@ -86,7 +103,9 @@
     },
     "domain_assessments": {
       "type": "array",
-      "description": "Assessment of the fixed readiness domains for this exact plan version. Emit one entry per domain; an empty array is accepted only as a compatibility input and cannot prove readiness.",
+      "description": "Exactly eight assessments for this plan version, one for each fixed readiness domain. Identity uniqueness is validated semantically against the trusted domain catalog.",
+      "minItems": 8,
+      "maxItems": 8,
       "items": {
         "type": "object",
         "additionalProperties": false,

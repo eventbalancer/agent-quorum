@@ -4,7 +4,6 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HaltError } from '../runtime/halt.js';
 import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
-import { readinessLabel } from '../types.js';
 import { pruneRuns, resolveRunState, type RetentionPolicy } from '../core/run-store.js';
 import { LOGS_USAGE, PRUNE_USAGE, SHOW_USAGE } from './help.js';
 import { systemProbes } from './probes.js';
@@ -128,25 +127,21 @@ export function runShowCli(args: readonly string[], out: Writer = stdout): numbe
     lines.push(
       `run ${resolved.runId} (${resolved.name}) — ${resolveRunState(resolved, systemProbes)}`,
     );
-    if (
-      resolved.finalStatus !== undefined ||
-      resolved.structuralStatus !== undefined ||
-      resolved.finalReadiness !== undefined ||
-      resolved.finalConvergence !== undefined
-    ) {
-      lines.push(`  final:   ${resolved.finalStatus ?? 'unknown'}`);
-      lines.push(`  structural: ${resolved.structuralStatus ?? 'unknown'}`);
-    }
-    if (resolved.finalConvergence !== undefined) {
-      lines.push(`  decision: ${resolved.finalConvergence.decision}`);
-      lines.push(
-        `  reasons: ${resolved.finalConvergence.reasonCodes.length > 0 ? resolved.finalConvergence.reasonCodes.join(',') : 'none'}`,
-      );
-    }
-    if (resolved.finalReadiness !== undefined) {
-      const readiness = resolved.finalReadiness;
-      lines.push(`  readiness: ${readinessLabel(readiness.ready)}`);
-      lines.push(`  rationale: ${readiness.rationale}`);
+    if (resolved.final !== undefined) {
+      const final = resolved.final;
+      lines.push(`  final:   ${final.status}`);
+      lines.push(`  structural: ${final.structuralStatus}`);
+      lines.push(`  decision: ${final.readiness.decision}`);
+      lines.push(`  reasons: ${final.reasons.length > 0 ? final.reasons.join(',') : 'none'}`);
+      if (final.judge.required) {
+        const verdict = final.judge.available
+          ? final.judge.verdict === true
+            ? 'ready'
+            : 'not-ready'
+          : 'unavailable';
+        lines.push(`  judge: ${verdict}`);
+        lines.push(`  rationale: ${final.judge.rationale}`);
+      }
     }
   }
   lines.push(`  workdir: ${workDir}`);
