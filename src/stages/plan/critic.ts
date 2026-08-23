@@ -28,6 +28,7 @@ export async function runCritic(
   iter: number,
   planFile: string,
   outFile: string,
+  lineageDigest: string,
 ): Promise<void> {
   const prompt = retainedRolePrompt({
     ctx,
@@ -37,6 +38,7 @@ export async function runCritic(
     skillFile: ctx.skills.criticSkill,
     schemaFile: ctx.skills.criticSchema,
     basePrompt: criticPrompt(planFile),
+    lineageDigest,
   });
   const status = await providerRun(
     ctx.provider,

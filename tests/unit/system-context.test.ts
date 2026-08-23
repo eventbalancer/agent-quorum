@@ -133,6 +133,9 @@ describe('authoritative system context', () => {
     );
     expect(repositoryEdge).toBeDefined();
     if (repositoryEdge !== undefined) {
+      expect(repositoryEdge.id).toBe(
+        'R-8587da9ab5f2cf6b97126b1a4aadd86622ac85577706df79bbb842fcd9fb7e4f',
+      );
       const exactRow = rows.find((row) => row.includes(repositoryEdge.id)) ?? '';
       writeFileSync(plan, complete.replace(exactRow, exactRow.replace('| P1 |', '| P10 |')));
       expect(validateSystemCoverage(context, plan, 0).mismatches).toContain(

@@ -2,7 +2,13 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "PlanUpdateMeta",
   "type": "object",
-  "required": ["plan_version", "issues", "applied", "rejected_append"],
+  "required": [
+    "plan_version",
+    "issues",
+    "applied",
+    "systemic_dispositions",
+    "rejected_append"
+  ],
   "additionalProperties": false,
   "properties": {
     "plan_version": {
@@ -28,18 +34,18 @@
               "reject_hallucinated",
               "reject_out_of_scope",
               "reject_taste",
-              "downgrade",
-              "duplicate_of_prior"
+              "downgrade"
             ]
           },
           "verdict_reason": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "final_severity": {
             "enum": ["blocker", "major", "minor", "nit"]
           },
           "duplicate_of": {
-            "type": ["string", "null"]
+            "type": "null"
           }
         }
       }
@@ -52,29 +58,13 @@
       }
     },
     "systemic_dispositions": {
+      "description": "Exactly one grounded disposition for every accepted or downgraded blocker/major issue. Use an empty array when no such material issue was accepted or downgraded.",
       "$ref": "#/$defs/systemicDispositions"
     },
     "rejected_append": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "claim", "reason"],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^C[0-9]+$"
-          },
-          "claim": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string",
-            "pattern": "^(not_value_adding|conflicts_with: C[0-9]+|out_of_plan_scope|requires_external_decision)$",
-            "description": "Allowed values: not_value_adding | conflicts_with: C<id> | out_of_plan_scope | requires_external_decision"
-          }
-        }
-      }
+      "maxItems": 0,
+      "description": "Must be empty because current critic output contains only material issues."
     }
   },
   "$defs": {
@@ -83,7 +73,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["issue_id", "scope", "rationale", "invariant"],
+        "required": ["issue_id", "scope", "rationale", "evidence_refs", "invariant"],
         "properties": {
           "issue_id": { "type": "string", "pattern": "^C[0-9]+$" },
           "scope": { "enum": ["local", "cross-cutting"] },

@@ -90,14 +90,25 @@ manifest pin are clean:
 pnpm run benchmark:planning:smoke -- --output <outside-repository-dir>
 ```
 
-The standard sentinel covers prompt assessment, creation, exact critic review,
-Judge exemption, and `ready` to `clean` finalization. The high-risk sentinel
+The standard sentinel covers prompt assessment, creation, admitted exact critic
+review, explicit fix-reviewer and Judge exemptions, catalog-exact all-resolved
+occurrence coverage, and `ready` to `clean` finalization. The high-risk sentinel
 starts from a structured plan with one seeded material storage fault and must
-produce a creator revision, fresh critic proof, intermediate and final Judge
-approval, and exact final SHA-256 binding. Reducer branches such as boundary
-challenges, unavailable evidence, limits, opportunities, migration, and resume
-invalidation stay in deterministic tests rather than provider-dependent merge
-gates.
+produce a creator revision, fresh admitted critic proof, every conditionally
+required exact fix-review source, intermediate and final Judge approval,
+cross-source occurrence reconciliation, and exact final SHA-256 binding.
+`smoke-results.json` must report 2/2 using readiness-proof schema 3, contract and
+Judge-metadata schema 2, and run-record schema 1. Reducer branches such as
+boundary challenges, unavailable evidence, all four occurrence dispositions,
+limits, opportunities, unsupported-schema rejection, and resume invalidation
+stay in deterministic tests rather than provider-dependent merge gates.
+
+For a breaking readiness-contract change, the implementation commit and the
+smoke-manifest pin are separate reviewable commits. First run deterministic
+verification on the clean implementation commit; then pin that exact revision
+with a manifest-only commit and run the live smoke with output outside the
+repository. Do not reuse a pre-change manifest pin or treat older readiness
+artifacts/records as compatible smoke evidence.
 
 The ten-task `benchmark:planning -- run`, blind bundle, independent reviews, and
 scoring are release calibration, not an every-merge check. Run that full flow

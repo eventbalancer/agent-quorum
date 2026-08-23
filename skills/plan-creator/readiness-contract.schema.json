@@ -75,7 +75,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "minLength": 1
+            "pattern": "^Q[0-9]{1,9}$"
           },
           "question": {
             "type": "string",

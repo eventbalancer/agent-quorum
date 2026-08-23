@@ -8,27 +8,38 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { structuredPatch } from 'diff';
+import { fileSha256 } from '../../core/digest.js';
 import { fileLineCount } from '../../runtime/files.js';
 import { HaltError } from '../../runtime/halt.js';
 import { err, log } from '../../runtime/log.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
-import { convergenceHealth, critiqueDuplicateIsValid, critiqueHealth } from '../../core/metrics.js';
+import { convergenceHealth, critiqueHealth } from '../../core/metrics.js';
+import {
+  admitCreatorUpdate,
+  admitCritique,
+  type AdmittedJudgeRevisionIssue,
+  type ExpectedCreatorIssue,
+} from '../../core/readiness-admission.js';
+import {
+  addReadinessLimit,
+  bindVersionedPlan,
+  createOccurrenceSourceBinding,
+  recordAdmittedCreatorUpdate,
+  recordAdmittedCritique,
+  recordAdmittedJudgeProof,
+  recordSystemProof,
+  reduceReadinessProofState,
+  type OccurrenceSourceBinding,
+  type ReadinessProofState,
+} from '../../core/readiness-proof.js';
+import { writeReadinessProofState } from '../../core/readiness-store.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { runCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
-import { runJudge, type JudgeRevisionIssue } from './judge.js';
+import { runJudge } from './judge.js';
+import { synchronizeRetainedInterventions } from './retained-context.js';
 import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
 import type { RunContext } from '../../core/run-context.js';
-import {
-  addConvergenceLimit,
-  classifyTerminal,
-  recordCreatorUpdate,
-  recordCritique,
-  recordSystemCheck,
-  requiresReadinessJudge,
-  requiresSystemCoverage,
-  writeConvergenceState,
-} from '../../core/convergence.js';
 import { validateSystemCoverage, writeSystemCheck } from '../../core/system-context.js';
 
 function readJson(file: string): JsonValue {
@@ -98,9 +109,9 @@ function openBlockerMajor(critiqueJson: JsonValue): MaterialIssueCounts {
 function appendJudgeRevisionIssue(
   critiqueFile: string,
   critiqueJson: JsonValue,
-  issue: JudgeRevisionIssue,
+  issue: AdmittedJudgeRevisionIssue,
   criticSchema: string,
-): JsonValue {
+): { readonly expectedIssue: ExpectedCreatorIssue } {
   const critique = isJsonObject(critiqueJson) ? critiqueJson : {};
   const issues = Array.isArray(critique.issues) ? critique.issues.filter(isJsonObject) : [];
   const nextNumber =
@@ -150,7 +161,83 @@ function appendJudgeRevisionIssue(
   if (!validateSchema(critiqueFile, criticSchema)) {
     throw new HaltError('Judge revision issue failed critique schema validation', 3, true);
   }
-  return augmented;
+  return {
+    expectedIssue: {
+      id: `C${nextNumber}`,
+      severity: issue.severity,
+      claim: issue.claim,
+      evidence: issue.evidence,
+      suggestedFix: issue.suggestedFix,
+      provenance: 'intermediate-judge',
+    },
+  };
+}
+
+function hasApplicableHighRisk(state: ReadinessProofState): boolean {
+  return state.riskDomains.some(
+    (domain) => domain.applicability === 'applicable' && domain.risk === 'high',
+  );
+}
+
+function requiresSystemCoverage(state: ReadinessProofState): boolean {
+  return state.riskDomains.some(
+    (domain) =>
+      domain.domain === 'cross-repository-delivery' && domain.applicability === 'applicable',
+  );
+}
+
+function persistReadinessProof(ctx: RunContext): void {
+  ctx.readinessProof = reduceReadinessProofState(ctx.readinessProof);
+  writeReadinessProofState(
+    path.join(ctx.work, `convergence.v${ctx.readinessProof.planVersion}.json`),
+    ctx.readinessProof,
+  );
+}
+
+interface BoundVersionedPlan {
+  readonly planSha256: string;
+  readonly critic: OccurrenceSourceBinding;
+  readonly intermediateJudge?: OccurrenceSourceBinding;
+}
+
+function bindPlanForReview(
+  ctx: RunContext,
+  planFile: string,
+  planVersion: number,
+): BoundVersionedPlan {
+  if (ctx.readinessProof.planVersion !== planVersion) {
+    throw new TypeError(
+      `readiness proof plan version ${ctx.readinessProof.planVersion} does not match v${planVersion}`,
+    );
+  }
+  ctx.readinessProof = synchronizeRetainedInterventions(ctx);
+  const planSha256 = fileSha256(planFile);
+  const critic = createOccurrenceSourceBinding(ctx.readinessProof, {
+    source: 'critic',
+    candidateKind: 'versioned-plan',
+    contentDigest: planSha256,
+  });
+  const intermediateJudge = hasApplicableHighRisk(ctx.readinessProof)
+    ? createOccurrenceSourceBinding(ctx.readinessProof, {
+        source: 'intermediate-judge',
+        candidateKind: 'versioned-plan',
+        contentDigest: planSha256,
+      })
+    : undefined;
+  ctx.readinessProof = bindVersionedPlan(ctx.readinessProof, {
+    planVersion,
+    planSha256,
+    criticLineageDigest: critic.lineage.lineageDigest,
+    ...(intermediateJudge === undefined
+      ? {}
+      : { intermediateJudgeLineageDigest: intermediateJudge.lineage.lineageDigest }),
+  });
+  persistReadinessProof(ctx);
+  return {
+    planSha256,
+    critic,
+    ...(intermediateJudge === undefined ? {} : { intermediateJudge }),
+  };
 }
 
 const UNANCHORED_WARN_RATIO = 0.5;
@@ -216,23 +303,25 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
   const matrix = ctx.provider.matrix;
   let iter = startIter;
 
-  classifyTerminal(ctx.convergence);
+  ctx.readinessProof = reduceReadinessProofState(ctx.readinessProof);
+  const initialDecision = ctx.readinessProof.reduction;
   if (
-    ctx.convergence.readinessContractDigest !== undefined &&
-    (ctx.convergence.decision === 'limits-exhausted' ||
-      (ctx.convergence.decision === 'unable-to-decide' &&
-        ctx.convergence.reasonCodes.some((reason) =>
+    ctx.readinessProof.readinessContractDigest !== undefined &&
+    (initialDecision.decision === 'limits-exhausted' ||
+      (initialDecision.decision === 'unable-to-decide' &&
+        initialDecision.reasonCodes.some((reason) =>
           [
             'boundary-challenge',
             'material-question-unresolved',
             'risk-applicability-unresolved',
             'required-evidence-unavailable',
-            'legacy-state-requires-review',
           ].includes(reason),
         )))
   ) {
-    copyFileSync(path.join(ctx.work, `plan.v${iter}.md`), path.join(ctx.work, 'plan.final.md'));
-    writeConvergenceState(ctx.work, ctx.convergence);
+    const plan = path.join(ctx.work, `plan.v${iter}.md`);
+    bindPlanForReview(ctx, plan, iter);
+    copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
+    persistReadinessProof(ctx);
     return { iter, converged: false };
   }
 
@@ -245,61 +334,90 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     log(
       `iter=${iter} — critic (${matrix.critic.runner} ${matrix.critic.model} reasoning=${matrix.critic.reasoning})`,
     );
-    await runCritic(ctx, iter, plan, critique);
+    const bindings = bindPlanForReview(ctx, plan, iter);
+    await runCritic(ctx, iter, plan, critique, bindings.critic.lineage.lineageDigest);
     sanitizeCritiqueJson(critique, iter);
     if (!validateSchema(critique, ctx.skills.criticSchema)) {
       throw new HaltError('critique failed schema validation', 3, true);
     }
     ctx.lastCritiqueIter = iter;
-    let critiqueJson = readJson(critique);
-    recordCritique(ctx.convergence, critiqueJson, iter, {
-      work: ctx.work,
-      projectRoot: ctx.provider.projectRoot,
+    const critiqueJson = readJson(critique);
+    const admittedCritique = admitCritique({
+      value: critiqueJson,
+      catalog: ctx.readinessProof.catalog,
+      binding: bindings.critic,
+      evidenceContext: {
+        work: ctx.work,
+        projectRoot: ctx.provider.projectRoot,
+        planVersion: iter,
+        candidateContent: readFileSync(plan, 'utf8'),
+        candidatePath: plan,
+      },
+      expectedScopeToken: ctx.mode === 'prompt' ? 'original-scope' : 'direct-plan-scope',
+      issueBudgetLimit: ctx.readinessProof.issueBudget.limit,
+      currentRiskDomains: ctx.readinessProof.riskDomains,
+      admittedPriorIssueRefs: ctx.readinessProof.admittedCriticIssueRefs.filter(
+        (issueRef) => !issueRef.startsWith(`v${iter}.`),
+      ),
     });
+    ctx.readinessProof = recordAdmittedCritique(ctx.readinessProof, admittedCritique);
+    const expectedIssues: ExpectedCreatorIssue[] = admittedCritique.materialIssues.map((issue) => ({
+      id: issue.id,
+      severity: issue.severity,
+      claim: issue.claim,
+      evidence: issue.evidence,
+      suggestedFix: issue.suggestedFix,
+      provenance: 'critic',
+    }));
+
+    if (bindings.intermediateJudge === undefined && hasApplicableHighRisk(ctx.readinessProof)) {
+      bindPlanForReview(ctx, plan, iter);
+    }
+
     const systemCheck = validateSystemCoverage(ctx.systemContext, plan, iter, {
-      required: requiresSystemCoverage(ctx.convergence),
+      required: requiresSystemCoverage(ctx.readinessProof),
       inScope: ctx.readinessBoundary?.inScope ?? ctx.systemContext.declaredScope,
       outOfScope: ctx.readinessBoundary?.outOfScope ?? [],
     });
-    recordSystemCheck(ctx.convergence, systemCheck);
+    ctx.readinessProof = recordSystemProof(ctx.readinessProof, {
+      binding: {
+        planVersion: iter,
+        planSha256: systemCheck.planSha256,
+        authoritativeDigest: systemCheck.systemDigest,
+      },
+      passed: systemCheck.passed,
+      mismatchIds: systemCheck.mismatches,
+      unavailableEvidenceIds: systemCheck.requiredEvidenceUnavailable,
+    });
     writeSystemCheck(ctx.work, systemCheck);
-    const rawIssues =
-      isJsonObject(critiqueJson) && Array.isArray(critiqueJson.issues) ? critiqueJson.issues : [];
-    const duplicateCount = rawIssues.filter((issue) =>
-      critiqueDuplicateIsValid(issue, ctx.work),
-    ).length;
-    const issuesCount = rawIssues.length - duplicateCount;
-    if (duplicateCount > 0) {
-      log(`  → ${issuesCount} actionable issues (${duplicateCount} duplicate)`);
-    } else {
-      log(`  → ${issuesCount} issues`);
-    }
+    log(`  → ${admittedCritique.materialIssues.length} issues`);
 
     logCritiqueHealth(ctx, iter, critique);
 
-    if (requiresReadinessJudge(ctx.convergence) && ctx.convergence.judgeAllowed) {
+    if (hasApplicableHighRisk(ctx.readinessProof) && ctx.readinessProof.judgeAllowed) {
       const { blockers, majors } = openBlockerMajor(critiqueJson);
       if (blockers === 0 && majors === 0) {
         log(
           `iter=${iter} — intermediate judge (${matrix.judge.runner} ${matrix.judge.model} reasoning=${matrix.judge.reasoning})`,
         );
+        bindPlanForReview(ctx, plan, iter);
         const judgeFile = path.join(ctx.work, `judge.v${iter}.json`);
-        const verdict = await runJudge(ctx, iter, plan, critique, judgeFile);
-        log(`  → intermediate judge ready=${verdict.ready}`);
-        if (!verdict.ready && verdict.revisionIssue !== undefined) {
-          critiqueJson = appendJudgeRevisionIssue(
-            critique,
-            critiqueJson,
-            verdict.revisionIssue,
-            ctx.skills.criticSchema,
-          );
-          recordCritique(ctx.convergence, critiqueJson, iter, {
-            work: ctx.work,
-            projectRoot: ctx.provider.projectRoot,
-          });
-          log(
-            `  → intermediate judge requested ${verdict.revisionIssue.severity} in-boundary revision`,
-          );
+        const judged = await runJudge(ctx, ctx.readinessProof, iter, plan, critique, judgeFile);
+        const judgeReady = judged.available && judged.candidateUnchanged && judged.admitted.verdict;
+        log(`  → intermediate judge ready=${String(judgeReady)}`);
+        if (judged.available && judged.candidateUnchanged) {
+          ctx.readinessProof = recordAdmittedJudgeProof(ctx.readinessProof, judged.admitted);
+          const revisionIssue = judged.admitted.revisionIssue;
+          if (revisionIssue !== undefined) {
+            const augmented = appendJudgeRevisionIssue(
+              critique,
+              critiqueJson,
+              revisionIssue,
+              ctx.skills.criticSchema,
+            );
+            expectedIssues.push(augmented.expectedIssue);
+            log(`  → intermediate judge requested ${revisionIssue.severity} in-boundary revision`);
+          }
         }
       } else {
         log(
@@ -308,9 +426,8 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       }
     }
 
-    classifyTerminal(ctx.convergence);
-    writeConvergenceState(ctx.work, ctx.convergence);
-    const decision = ctx.convergence.decision;
+    persistReadinessProof(ctx);
+    const decision = ctx.readinessProof.reduction.decision;
     if (decision === 'ready') {
       log(`ready at v${iter}`);
       copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
@@ -318,21 +435,44 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     }
     if (decision === 'unable-to-decide' || decision === 'limits-exhausted') {
       log(
-        `v${iter} retained with decision=${ctx.convergence.decision} reasons=${ctx.convergence.reasonCodes.join(',')}`,
+        `v${iter} retained with decision=${decision} reasons=${ctx.readinessProof.reduction.reasonCodes.join(',')}`,
       );
       copyFileSync(plan, path.join(ctx.work, 'plan.final.md'));
       break;
     }
 
+    ctx.readinessProof = synchronizeRetainedInterventions(ctx);
+    persistReadinessProof(ctx);
     log(`iter=${iter} — creator update (${matrix.creator.runner} ${matrix.creator.model})`);
     await runCreatorUpdate(ctx, iter, plan, critique, update, next);
     markOperatorInterventionsMigrated(ctx.work, 'creator', `plan.v${iter + 1}.md`);
 
+    if (!existsSync(next) || statSync(next).size === 0) {
+      err('creator produced empty plan');
+      throw new HaltError('creator produced empty plan', 4, true);
+    }
+
     const updateJson = readJson(update);
-    recordCreatorUpdate(ctx.convergence, critiqueJson, updateJson, iter, {
-      work: ctx.work,
-      projectRoot: ctx.provider.projectRoot,
+    const admittedUpdate = admitCreatorUpdate({
+      value: updateJson,
+      currentCatalog: ctx.readinessProof.catalog,
+      fromPlanVersion: iter,
+      expectedPlanVersion: iter + 1,
+      expectedIssues,
+      retainedFindings: ctx.readinessProof.findings,
+      retainedInvariants: ctx.readinessProof.invariants,
+      evidenceContext: {
+        work: ctx.work,
+        projectRoot: ctx.provider.projectRoot,
+        planVersion: iter + 1,
+        candidateContent: readFileSync(next, 'utf8'),
+        candidatePath: next,
+      },
+      operatorInterventionIds: ctx.readinessProof.interventionIds,
+      admittedCriticIssueRefs: ctx.readinessProof.admittedCriticIssueRefs,
+      admittedJudgeRevisionIssueIds: ctx.readinessProof.intermediateJudgeMaterialIssueIds,
     });
+    ctx.readinessProof = recordAdmittedCreatorUpdate(ctx.readinessProof, admittedUpdate);
     const blockers = issueCount(
       updateJson,
       (issue) =>
@@ -355,10 +495,6 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       `  → accepted=${acceptedTotal} (blockers=${blockers}, majors=${majors}), applied=${applied}, rejected=${rejectedNow}`,
     );
 
-    if (!existsSync(next) || statSync(next).size === 0) {
-      err('creator produced empty plan');
-      throw new HaltError('creator produced empty plan', 4, true);
-    }
     const planLines = fileLineCount(next);
     log(`  → plan_lines=${planLines}`);
     const maxPlanLines = ctx.maxPlanLines;
@@ -367,7 +503,7 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     }
 
     appendRejectedEntries(ctx.work, iter, updateJson);
-    writeConvergenceState(ctx.work, ctx.convergence);
+    bindPlanForReview(ctx, next, iter + 1);
 
     const changed = changedLineCount(plan, next);
     log(`  → diff_lines=${changed}`);
@@ -380,17 +516,14 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
 
   if (!existsSync(path.join(ctx.work, 'plan.final.md'))) {
     log(`hit MAX_ITERS=${ctx.settings.maxIters} without proof — using last revision`);
-    addConvergenceLimit(
-      ctx.convergence,
-      'iteration-cap',
-      `plan.v${iter}:not-independently-reviewed`,
-    );
-    ctx.convergence.stopReason = 'iteration-cap';
+    ctx.readinessProof = addReadinessLimit(ctx.readinessProof, {
+      limit: 'iteration-cap',
+      unresolvedProofId: `plan.v${iter}:not-independently-reviewed`,
+    });
     copyFileSync(path.join(ctx.work, `plan.v${iter}.md`), path.join(ctx.work, 'plan.final.md'));
   }
 
-  classifyTerminal(ctx.convergence);
-  writeConvergenceState(ctx.work, ctx.convergence);
+  persistReadinessProof(ctx);
 
-  return { iter, converged: ctx.convergence.satisfied };
+  return { iter, converged: ctx.readinessProof.reduction.satisfied };
 }

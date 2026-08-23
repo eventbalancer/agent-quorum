@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { HaltError } from './runtime/halt.js';
+import { haltDiagnostic, HaltError } from './runtime/halt.js';
 import { resolveConfigForHome, type DeepPartial, type OperatorConfig } from './core/config.js';
 import { knownStateDirs, resolveArtifactRoots } from './runtime/paths.js';
 import { runInterveneCli } from './cli/intervene.js';
@@ -21,20 +21,17 @@ import {
   type RetentionPolicy,
   type RunRecord,
 } from './core/run-store.js';
-import type {
-  ConvergenceReport,
-  FinalReadiness,
-  Quality,
-  RunFinalStatus,
-  RunOverrides,
-} from './types.js';
+import type { FinalProjection, Quality, RunOverrides } from './types.js';
 
 export { ExitCode } from './exit-codes.js';
 export type {
-  FinalReadiness,
   CompletenessPromise,
-  ConvergenceLimit,
-  ConvergenceReport,
+  FinalProjection,
+  JudgeProofProjection,
+  OccurrenceCoverageProjection,
+  OccurrenceSourceProjection,
+  ReadinessProofProjection,
+  ReadinessLimit,
   ReadinessDecision,
   RiskApplicability,
   RiskDomain,
@@ -47,6 +44,7 @@ export type {
   Runner,
 } from './types.js';
 export type { DeepPartial, OperatorConfig, ResolvedConfig, Secrets } from './core/config.js';
+export { RUN_RECORD_SCHEMA_VERSION } from './core/run-store.js';
 export type { PruneResult, RetentionPolicy, RunRecord, RunState } from './core/run-store.js';
 export {
   configStorePath,
@@ -114,13 +112,7 @@ export interface RunResult {
   health?: RunHealth;
   splitDecision?: string;
   packageDir?: string;
-  status?: RunFinalStatus;
-  reason?: string;
-  structuralStatus?: RunFinalStatus;
-  structuralReason?: string;
-  readiness?: FinalReadiness;
-  readinessPath?: string;
-  convergence?: ConvergenceReport;
+  final?: FinalProjection;
 }
 
 export interface CommandResult {
@@ -183,6 +175,7 @@ function toRunResult(outcome: RunOutcome): RunResult {
   if (report === undefined) {
     return { exitCode: outcome.exitCode };
   }
+  const final = report.final;
   return {
     exitCode: outcome.exitCode,
     workDir: report.workDir,
@@ -204,20 +197,14 @@ function toRunResult(outcome: RunOutcome): RunResult {
       : {}),
     ...(report.splitDecision !== undefined ? { splitDecision: report.splitDecision } : {}),
     ...(report.packageDir !== undefined ? { packageDir: report.packageDir } : {}),
-    ...(report.status !== undefined ? { status: report.status } : {}),
-    ...(report.reason !== undefined ? { reason: report.reason } : {}),
-    ...(report.structuralStatus !== undefined ? { structuralStatus: report.structuralStatus } : {}),
-    ...(report.structuralReason !== undefined ? { structuralReason: report.structuralReason } : {}),
-    ...(report.readiness !== undefined ? { readiness: report.readiness } : {}),
-    ...(report.readinessPath !== undefined ? { readinessPath: report.readinessPath } : {}),
-    ...(report.convergence !== undefined ? { convergence: report.convergence } : {}),
+    ...(final !== undefined ? { final } : {}),
   };
 }
 
 function haltToExit(error: unknown): number {
   if (error instanceof HaltError) {
     if (!error.logged) {
-      process.stderr.write(`${error.message}\n`);
+      process.stderr.write(`${haltDiagnostic(error)}\n`);
     }
     return error.exitCode;
   }

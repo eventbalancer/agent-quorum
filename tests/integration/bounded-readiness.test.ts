@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readReadinessProofState } from '../../src/core/readiness-store.js';
 import { runPlanLoop } from '../../src/index.js';
 import {
   captureStderr,
@@ -49,6 +50,7 @@ function writeVerdict(name: string, ready = true): string {
       {
         ready,
         rationale: `${name} rationale`,
+        revision_issue: null,
         coverage_complete: true,
         unresolved_occurrence_ids: [],
         invariant_assessments: [],
@@ -69,6 +71,18 @@ function extendCritique(
 ): void {
   const critique = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
   Object.assign(critique, extension);
+  writeFileSync(file, `${JSON.stringify(critique, null, 2)}\n`);
+}
+
+function preserveHighRiskCritiqueFloor(file: string): void {
+  const critique = JSON.parse(readFileSync(file, 'utf8')) as {
+    domain_assessments?: { domain?: string; risk?: string }[];
+  };
+  for (const assessment of critique.domain_assessments ?? []) {
+    if (assessment.domain === 'correctness') {
+      assessment.risk = 'high';
+    }
+  }
   writeFileSync(file, `${JSON.stringify(critique, null, 2)}\n`);
 }
 
@@ -123,8 +137,8 @@ describe('bounded planning readiness', () => {
       FAKE_CLAUDE_JSON_CALLS: judgeCalls,
     });
 
-    expect(result.status).toBe('clean');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'ready',
       satisfied: true,
       applicableRiskDomains: ['correctness'],
@@ -139,6 +153,7 @@ describe('bounded planning readiness', () => {
   it('runs intermediate and final Judge for balanced high-risk work', async () => {
     const critique = path.join(tmp, 'clean.json');
     emptyCritique(critique);
+    preserveHighRiskCritiqueFloor(critique);
     const verdict = writeVerdict('ready');
     const judgeCalls = path.join(tmp, 'judge.calls');
 
@@ -149,17 +164,23 @@ describe('bounded planning readiness', () => {
       FAKE_CLAUDE_JSON_CALLS: judgeCalls,
     });
 
-    expect(result.status).toBe('clean');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'ready',
       satisfied: true,
       highRiskDomains: ['correctness'],
+    });
+    expect(result.final?.judge).toMatchObject({
+      required: true,
+      allowed: true,
+      evaluated: true,
+      available: true,
+      verdict: true,
     });
     expect(readFileSync(judgeCalls, 'utf8')).toBe('2');
     expect(existsSync(path.join(work, 'judge.v0.json'))).toBe(true);
     expect(existsSync(path.join(work, 'judge.final.json'))).toBe(true);
     expect(capture.text()).toContain('intermediate judge');
-    expect(capture.text()).toContain('final Judge');
   });
 
   it('stops on a boundary challenge without asking the creator to revise scope', async () => {
@@ -185,13 +206,13 @@ describe('bounded planning readiness', () => {
       FAKE_CLAUDE_JSON_CALLS: creatorCalls,
     });
 
-    expect(result.status).toBe('needs-review');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('needs-review');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'unable-to-decide',
       satisfied: false,
     });
-    expect(result.convergence?.reasonCodes).toContain('boundary-challenge');
-    expect(result.convergence?.unresolvedCoverage).toContain('boundary-challenge:B1');
+    expect(result.final?.readiness.reasonCodes).toContain('boundary-challenge');
+    expect(result.final?.readiness.unresolvedProofIds).toContain('boundary-challenge:B1');
     expect(existsSync(creatorCalls)).toBe(false);
     expect(existsSync(path.join(work, 'update.v0.json'))).toBe(false);
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
@@ -209,8 +230,8 @@ describe('bounded planning readiness', () => {
       FAKE_CODEX_OUTPUT: critique,
     });
 
-    expect(result.status).toBe('needs-review');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('needs-review');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'limits-exhausted',
       satisfied: false,
       exhaustedLimits: ['assurance-appetite'],
@@ -243,24 +264,22 @@ describe('bounded planning readiness', () => {
       FAKE_CLAUDE_JSON_CALLS: creatorCalls,
     });
 
-    expect(result.status).toBe('clean');
-    expect(result.convergence).toMatchObject({ decision: 'ready', opportunityCount: 1 });
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({ decision: 'ready', opportunityCount: 1 });
     expect(existsSync(creatorCalls)).toBe(false);
     expect(existsSync(path.join(work, 'update.v0.json'))).toBe(false);
-    expect(JSON.parse(readFileSync(path.join(work, 'opportunities.json'), 'utf8'))).toEqual({
-      schemaVersion: 1,
-      opportunities: [
-        {
-          fingerprint: 'fixture-readable-heading',
-          claim: 'The verification heading could be more specific.',
-          evidence: '## Verification',
-          suggestedImprovement: 'Name the deterministic fixture check in the heading.',
-          evidenceRefs: [{ kind: 'plan-section', section: 'Verification' }],
-          firstSeenPlanVersion: 0,
-          lastSeenPlanVersion: 0,
-        },
-      ],
-    });
+    const proof = readReadinessProofState(path.join(work, 'convergence.final.json'));
+    expect(proof.opportunities).toEqual([
+      {
+        fingerprint: 'fixture-readable-heading',
+        claim: 'The verification heading could be more specific.',
+        evidence: '## Verification',
+        suggestedImprovement: 'Name the deterministic fixture check in the heading.',
+        evidenceRefs: [{ kind: 'plan-section', section: 'Verification' }],
+        firstSeenPlanVersion: 0,
+        lastSeenPlanVersion: 0,
+      },
+    ]);
     expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('opportunities=1');
   });
 
@@ -282,12 +301,14 @@ describe('bounded planning readiness', () => {
       FAKE_READINESS_ASSESSMENT: standardAssessment,
       FAKE_CODEX_OUTPUT: firstCritique,
     });
-    expect(first.convergence?.decision).toBe('ready');
+    expect(first.final?.readiness.decision).toBe('ready');
     const contractBefore = readFileSync(path.join(work, 'readiness-contract.json'));
     const contractDigest = (
       JSON.parse(contractBefore.toString('utf8')) as { contractDigest: string }
     ).contractDigest;
-    const opportunitiesBefore = readFileSync(path.join(work, 'opportunities.json'));
+    const opportunitiesBefore = readReadinessProofState(
+      path.join(work, 'convergence.final.json'),
+    ).opportunities;
 
     const secondCritique = path.join(tmp, 'second-clean.json');
     emptyCritique(secondCritique);
@@ -297,72 +318,54 @@ describe('bounded planning readiness', () => {
       FAKE_CODEX_OUTPUT: secondCritique,
     });
 
-    expect(second.convergence).toMatchObject({
+    expect(second.final?.readiness).toMatchObject({
       decision: 'ready',
       opportunityCount: 1,
     });
     expect(readFileSync(path.join(work, 'readiness-contract.json'))).toEqual(contractBefore);
-    expect(second.convergence?.artifactPath).toBe(
+    expect(second.final?.readiness.proofArtifactPath).toBe(
       path.join(second.workDir ?? work, 'convergence.final.json'),
     );
-    const resumedState = JSON.parse(
-      readFileSync(path.join(work, 'convergence.final.json'), 'utf8'),
-    ) as { readinessContractDigest: string };
+    const resumedState = readReadinessProofState(path.join(work, 'convergence.final.json'));
+    expect(resumedState.schemaVersion).toBe(3);
     expect(resumedState.readinessContractDigest).toBe(contractDigest);
-    expect(readFileSync(path.join(work, 'opportunities.json'))).toEqual(opportunitiesBefore);
+    expect(resumedState.reduction).toMatchObject({ decision: 'ready', satisfied: true });
+    expect(resumedState.opportunities).toEqual(opportunitiesBefore);
     expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- resume_start: 0');
   });
 
-  it('requires a fresh exact critique when resumed proof is not bound to the frozen contract', async () => {
+  it('rejects resume when the selected schema-3 proof is not bound to the frozen contract', async () => {
     const firstCritique = path.join(tmp, 'first-clean.json');
     emptyCritique(firstCritique);
     const first = await run('balanced', {
       FAKE_READINESS_ASSESSMENT: standardAssessment,
       FAKE_CODEX_OUTPUT: firstCritique,
     });
-    expect(first.convergence?.decision).toBe('ready');
+    expect(first.final?.readiness.decision).toBe('ready');
 
     const stateFile = path.join(work, 'convergence.v0.json');
     const unbound = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
     expect(unbound).toMatchObject({
+      schemaVersion: 3,
       lastCritiquedPlanVersion: 0,
       scanComplete: true,
       systemCheckPassed: true,
     });
     delete unbound.readinessContractDigest;
     writeFileSync(stateFile, `${JSON.stringify(unbound, null, 2)}\n`);
+    const invalidProofBeforeResume = readFileSync(stateFile);
 
-    const secondCritique = path.join(tmp, 'second-clean.json');
     const criticCalls = path.join(tmp, 'resume-critic.calls');
-    emptyCritique(secondCritique);
     const second = await run('balanced', {
       AGENT_QUORUM_RESUME: '1',
       FAKE_READINESS_ASSESSMENT: standardAssessment,
-      FAKE_CODEX_OUTPUT: secondCritique,
       FAKE_CODEX_OUTPUT_CALLS: criticCalls,
     });
 
-    expect(readFileSync(criticCalls, 'utf8')).toBe('1');
-    expect(second.convergence).toMatchObject({ decision: 'ready', satisfied: true });
-    const resumedState = JSON.parse(
-      readFileSync(path.join(work, 'convergence.final.json'), 'utf8'),
-    ) as {
-      lastCritiquedPlanVersion: number;
-      scanComplete: boolean;
-      riskDomains: {
-        domain: string;
-        complete: boolean;
-        lastAssessedPlanVersion?: number;
-      }[];
-      unresolvedCoverage: string[];
-    };
-    expect(resumedState.lastCritiquedPlanVersion).toBe(0);
-    expect(resumedState.scanComplete).toBe(true);
-    expect(
-      resumedState.riskDomains.find((domain) => domain.domain === 'correctness'),
-    ).toMatchObject({ complete: true, lastAssessedPlanVersion: 0 });
-    expect(resumedState.unresolvedCoverage).not.toContain(
-      'plan.v0:readiness-contract-proof-unbound',
-    );
+    expect(second.exitCode).toBe(4);
+    expect(second.final).toBeUndefined();
+    expect(existsSync(criticCalls)).toBe(false);
+    expect(capture.text()).toContain('invalid readiness proof for plan.v0.md');
+    expect(readFileSync(stateFile)).toEqual(invalidProofBeforeResume);
   });
 });

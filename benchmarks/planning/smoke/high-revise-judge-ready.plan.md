@@ -105,7 +105,7 @@ existing focused suite passes.
    same-directory temporary path, rename is later, and rename targets the
    reserved `.json` record. Keep the helper private.
 4. Make failure propagation unconditional and observable. Create an accepted
-   test record whose enumerable nested `finalReadiness` value contains a
+   test record whose enumerable nested `final` projection contains a
    self-reference through a narrowly scoped test-only cast; native
    `JSON.stringify` must throw before either filesystem mock is called. Configure
    the same hoisted mock to throw a sentinel error once from the temporary

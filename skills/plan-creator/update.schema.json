@@ -2,7 +2,14 @@
   "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "PlanUpdate",
   "type": "object",
-  "required": ["plan_version", "plan_markdown", "issues", "applied", "rejected_append"],
+  "required": [
+    "plan_version",
+    "plan_markdown",
+    "issues",
+    "applied",
+    "systemic_dispositions",
+    "rejected_append"
+  ],
   "additionalProperties": false,
   "properties": {
     "plan_version": {
@@ -33,13 +40,13 @@
               "reject_hallucinated",
               "reject_out_of_scope",
               "reject_taste",
-              "downgrade",
-              "duplicate_of_prior"
+              "downgrade"
             ],
-            "description": "accept — apply it; reject_hallucinated — evidence is false or missing; reject_out_of_scope — outside the plan's scope; reject_taste — taste-only with no justification; downgrade — keep it but lower the severity; duplicate_of_prior — already rejected in rejected-log."
+            "description": "accept — apply it; reject_hallucinated — evidence is false or missing; reject_out_of_scope — outside the plan's scope; reject_taste — taste-only with no justification; downgrade — keep it but lower the severity."
           },
           "verdict_reason": {
             "type": "string",
+            "minLength": 1,
             "description": "One sentence. Required for any reject_* and for downgrade."
           },
           "final_severity": {
@@ -47,8 +54,8 @@
             "description": "Final severity after judgment. For reject_* it equals the original but does not count toward the stop tally."
           },
           "duplicate_of": {
-            "type": ["string", "null"],
-            "description": "Id of the rejected-log.jsonl entry when verdict=duplicate_of_prior, otherwise null."
+            "type": "null",
+            "description": "Reserved lineage field. It is null for every current creator verdict."
           }
         }
       }
@@ -62,25 +69,13 @@
       }
     },
     "systemic_dispositions": {
+      "description": "Exactly one grounded disposition for every accepted or downgraded blocker/major issue. Use an empty array when no such material issue was accepted or downgraded.",
       "$ref": "#/$defs/systemicDispositions"
     },
     "rejected_append": {
       "type": "array",
-      "description": "Issues the creator rejected despite the critic's accept. Allowed only for minor/nit.",
-      "items": {
-        "type": "object",
-        "required": ["id", "claim", "reason"],
-        "additionalProperties": false,
-        "properties": {
-          "id": { "type": "string", "pattern": "^C[0-9]+$" },
-          "claim": { "type": "string" },
-          "reason": {
-            "type": "string",
-            "pattern": "^(not_value_adding|conflicts_with: C[0-9]+|out_of_plan_scope|requires_external_decision)$",
-            "description": "Allowed values: not_value_adding | conflicts_with: C<id> | out_of_plan_scope | requires_external_decision"
-          }
-        }
-      }
+      "maxItems": 0,
+      "description": "Must be empty. Current critic output contains only blocker/major issues; optional improvements are separate opportunities."
     }
   },
   "$defs": {
@@ -89,7 +84,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["issue_id", "scope", "rationale", "invariant"],
+        "required": ["issue_id", "scope", "rationale", "evidence_refs", "invariant"],
         "properties": {
           "issue_id": { "type": "string", "pattern": "^C[0-9]+$" },
           "scope": { "enum": ["local", "cross-cutting"] },

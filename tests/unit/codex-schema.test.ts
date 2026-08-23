@@ -11,9 +11,50 @@ import { SKILLS_DIR } from '../helpers/harness.js';
 
 const Ajv2019 = ajvModule.default;
 const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json');
+const JUDGE_SCHEMA = path.join(SKILLS_DIR, 'plan-judge', 'readiness.schema.json');
+const CRITIC_RISK_DOMAINS = [
+  'correctness',
+  'public-compatibility',
+  'data-migrations',
+  'security-privacy-authorization',
+  'concurrency-distributed-ordering',
+  'cross-repository-delivery',
+  'production-operability',
+  'performance-cost',
+];
 
-function readSchema(): JsonObject {
-  const parsed = JSON.parse(readFileSync(CRITIC_SCHEMA, 'utf8')) as JsonValue;
+function completeCriticReview(): JsonObject {
+  return {
+    considered_context: [
+      'original-scope',
+      'authoritative-system-facts',
+      'operator-decisions',
+      'material-findings',
+      'active-invariants',
+      'quality-and-limits',
+    ],
+    invariant_assessments: [],
+    scope_coverage: ['original-scope'],
+    issue_budget: { limit: 8, used: 0, exhausted: false },
+    scan_complete: true,
+    unresolved_coverage: [],
+  };
+}
+
+function completeDomainAssessments(): JsonObject[] {
+  return CRITIC_RISK_DOMAINS.map((domain) => ({
+    domain,
+    applicability: 'not-applicable',
+    risk: 'standard',
+    complete: true,
+    rationale: `${domain} does not apply to this candidate.`,
+    unavailable_evidence: [],
+    evidence_refs: [{ kind: 'plan-section', section: 'Scope' }],
+  }));
+}
+
+function readSchema(file = CRITIC_SCHEMA): JsonObject {
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   if (!isJsonObject(parsed)) {
     throw new TypeError('fixture schema must be an object');
   }
@@ -36,17 +77,17 @@ function expectEveryPropertyRequired(value: JsonValue): void {
 }
 
 describe('Codex structured-output schema projection', () => {
-  it('requires every object property while making canonical optional fields nullable', () => {
+  it('requires every object property without making required critic fields nullable', () => {
     const projected = projectCodexJsonSchema(readSchema());
 
     expect(projected.changed).toBe(true);
     expectEveryPropertyRequired(projected.schema);
     const properties = projected.schema.properties as JsonObject;
     const review = properties.review;
-    expect(isJsonObject(review) ? review.type : undefined).toEqual(['object', 'null']);
+    expect(isJsonObject(review) ? review.type : undefined).toBe('object');
     for (const field of ['domain_assessments', 'boundary_challenges', 'opportunities']) {
       const property = properties[field];
-      expect(isJsonObject(property) ? property.type : undefined).toEqual(['array', 'null']);
+      expect(isJsonObject(property) ? property.type : undefined).toBe('array');
     }
   });
 
@@ -72,10 +113,10 @@ describe('Codex structured-output schema projection', () => {
     const projectedOutput: JsonValue = {
       plan_version: 0,
       summary: 'No issues.',
-      review: null,
-      domain_assessments: null,
-      boundary_challenges: null,
-      opportunities: null,
+      review: completeCriticReview(),
+      domain_assessments: completeDomainAssessments(),
+      boundary_challenges: [],
+      opportunities: [],
       issues: [
         {
           id: 'C1',
@@ -112,6 +153,10 @@ describe('Codex structured-output schema projection', () => {
     expect(normalized).toEqual({
       plan_version: 0,
       summary: 'No issues.',
+      review: completeCriticReview(),
+      domain_assessments: completeDomainAssessments(),
+      boundary_challenges: [],
+      opportunities: [],
       issues: [
         {
           id: 'C1',
@@ -148,18 +193,20 @@ describe('Codex structured-output schema projection', () => {
     const projectedOutput: JsonValue = {
       plan_version: 3,
       summary: 'The boundary must be revised before readiness can be decided.',
-      review: null,
-      domain_assessments: [
-        {
-          domain: 'security-privacy-authorization',
-          applicability: 'applicable',
-          risk: 'high',
-          complete: false,
-          rationale: 'The required policy source is unavailable.',
-          unavailable_evidence: ['deployed policy source'],
-          evidence_refs: [projectedEvidenceRef],
-        },
-      ],
+      review: completeCriticReview(),
+      domain_assessments: completeDomainAssessments().map((assessment) =>
+        assessment.domain === 'security-privacy-authorization'
+          ? {
+              domain: 'security-privacy-authorization',
+              applicability: 'applicable',
+              risk: 'high',
+              complete: false,
+              rationale: 'The required policy source is unavailable.',
+              unavailable_evidence: ['deployed policy source'],
+              evidence_refs: [projectedEvidenceRef],
+            }
+          : assessment,
+      ),
       boundary_challenges: [
         {
           id: 'B1',
@@ -187,17 +234,20 @@ describe('Codex structured-output schema projection', () => {
     expect(normalized).toEqual({
       plan_version: 3,
       summary: 'The boundary must be revised before readiness can be decided.',
-      domain_assessments: [
-        {
-          domain: 'security-privacy-authorization',
-          applicability: 'applicable',
-          risk: 'high',
-          complete: false,
-          rationale: 'The required policy source is unavailable.',
-          unavailable_evidence: ['deployed policy source'],
-          evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
-        },
-      ],
+      review: completeCriticReview(),
+      domain_assessments: completeDomainAssessments().map((assessment) =>
+        assessment.domain === 'security-privacy-authorization'
+          ? {
+              domain: 'security-privacy-authorization',
+              applicability: 'applicable',
+              risk: 'high',
+              complete: false,
+              rationale: 'The required policy source is unavailable.',
+              unavailable_evidence: ['deployed policy source'],
+              evidence_refs: [{ kind: 'plan-section', section: 'Security' }],
+            }
+          : assessment,
+      ),
       boundary_challenges: [
         {
           id: 'B1',
@@ -218,6 +268,76 @@ describe('Codex structured-output schema projection', () => {
         },
       ],
       issues: [],
+    });
+    const validate = new Ajv2019({ strict: false }).compile(canonical);
+    expect(validate(normalized)).toBe(true);
+  });
+
+  it('normalizes required Judge occurrence evidence through shared schema definitions', () => {
+    const canonical = readSchema(JUDGE_SCHEMA);
+    const projectedOutput: JsonValue = {
+      ready: false,
+      rationale: 'An occurrence is unresolved.',
+      revision_issue: null,
+      coverage_complete: true,
+      unresolved_occurrence_ids: ['O2'],
+      invariant_assessments: [
+        {
+          invariant_id: 'I1',
+          occurrences: [
+            {
+              occurrence_id: 'O1',
+              disposition: 'satisfied',
+              evidence_refs: [
+                {
+                  kind: 'plan-section',
+                  value: null,
+                  path: null,
+                  line: null,
+                  section: 'Verification',
+                  phase: null,
+                  gate: null,
+                  command: null,
+                  repository: null,
+                  topology_id: null,
+                },
+              ],
+            },
+            {
+              occurrence_id: 'O2',
+              disposition: 'unresolved',
+              evidence_refs: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const normalized = normalizeCodexJsonValue(projectedOutput, canonical);
+
+    expect(normalized).toEqual({
+      ready: false,
+      rationale: 'An occurrence is unresolved.',
+      revision_issue: null,
+      coverage_complete: true,
+      unresolved_occurrence_ids: ['O2'],
+      invariant_assessments: [
+        {
+          invariant_id: 'I1',
+          occurrences: [
+            {
+              occurrence_id: 'O1',
+              disposition: 'satisfied',
+              evidence_refs: [{ kind: 'plan-section', section: 'Verification' }],
+            },
+            {
+              occurrence_id: 'O2',
+              disposition: 'unresolved',
+              evidence_refs: [],
+            },
+          ],
+        },
+      ],
     });
     const validate = new Ajv2019({ strict: false }).compile(canonical);
     expect(validate(normalized)).toBe(true);

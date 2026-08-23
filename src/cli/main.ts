@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { HaltError } from '../runtime/halt.js';
+import { haltDiagnostic, HaltError } from '../runtime/halt.js';
 import { findStage, stages } from '../stages/registry.js';
 import { globalHelp, packageVersion, type StageSummary } from './help.js';
 import { runConfigShowCli } from './config-show.js';
@@ -85,12 +85,11 @@ main()
   .catch((error: unknown) => {
     if (error instanceof HaltError) {
       if (!error.logged) {
-        process.stderr.write(`${error.message}\n`);
+        process.stderr.write(`${haltDiagnostic(error)}\n`);
       }
       process.exitCode = error.exitCode;
       return;
     }
-    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-    process.stderr.write(`${message}\n`);
+    process.stderr.write('agent-quorum: failed (code=unexpected-error)\n');
     process.exitCode = 1;
   });

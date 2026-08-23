@@ -292,8 +292,10 @@ pnpm run test:smoke:cursor    # quick creator/critic path on cursor composer-2.5
 Each general smoke is a single quick-quality iteration with no fix or translate
 pass. Clarification is explicitly disabled, quick quality disables the judge,
 and `--no-fix --no-translate` leaves the fixer, reviewer, and translator paths
-inactive. A pass ends with `FINAL: clean` or `FINAL: needs-review` and exit 0,
-leaving `plan.final.md` and `summary.md` in the workdir.
+inactive. The schema-3 proof must represent the inactive fix-reviewer and Judge
+sources as explicit exemptions; absence is not proof. A pass ends with
+`FINAL: clean` or `FINAL: needs-review` and exit 0, leaving `plan.final.md`,
+`convergence.final.json`, and `summary.md` in the workdir.
 `test:smoke:claude` runs on `sonnet`: in `default` permission mode a cheap
 claude creator returns a complete plan, but the `haiku` critic still emits
 schema-invalid critique JSON, so `sonnet` is the smallest claude tier that turns
@@ -319,6 +321,15 @@ artifact against its canonical draft 2019-09 schema, reports one pass/fail line
 per contract, and stops at the first failure. It prints `claude --version` for
 the verification record but does not gate on the version string. The default
 model is `sonnet`; `SMOKE_MODEL` overrides it.
+
+These are strict current role schemas. At runtime, readiness-bearing critic,
+creator-update, fix-reviewer, and Judge payloads additionally pass closed-world
+semantic admission for exact plan/candidate and lineage binding, trusted catalog
+identities, all retained occurrences, material dispositions, and grounded
+evidence. Each occurrence uses `satisfied`, grounded `not-applicable`,
+`violated`, or `unresolved`; the schema smoke proves representability, while the
+deterministic admission/proof suites own identity rejection and cross-source
+reconciliation. Pre-change role payloads are not backfilled.
 
 `test:smoke:claude-schemas` requires an authenticated Claude CLI and performs six
 live provider calls. It is an opt-in release verification command, outside

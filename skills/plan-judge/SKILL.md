@@ -45,7 +45,18 @@ JSON conforming to `readiness.schema.json`:
   "revision_issue": null,
   "coverage_complete": true | false,
   "unresolved_occurrence_ids": [],
-  "invariant_assessments": []
+  "invariant_assessments": [
+    {
+      "invariant_id": "INV-1",
+      "occurrences": [
+        {
+          "occurrence_id": "INV-1:api",
+          "disposition": "satisfied" | "violated" | "not-applicable" | "unresolved",
+          "evidence_refs": [{ "kind": "plan-section", "section": "Verification" }]
+        }
+      ]
+    }
+  ]
 }
 ```
 
@@ -60,7 +71,20 @@ fix inside the frozen boundary. Include `severity`, `category`, `claim`,
 to `null` for a positive verdict, unavailable required evidence, a boundary
 challenge, an operator-owned question, or any `scope: final` verdict. Report the
 single highest-priority fixable gap; the next critic pass will reassess the exact
-revision.
+revision. `revision_issue` is required in every output and is always either that
+object or explicit `null`; an occurrence disposition alone does not invent a
+revision issue or its severity.
+
+Assess every active invariant exactly once and emit every retained occurrence
+exactly once. Use `satisfied` only with evidence grounded in the current
+candidate, `not-applicable` only with candidate-specific evidence that the
+occurrence does not apply, `violated` only with grounded conclusive negative
+evidence, and `unresolved` when no grounded conclusion is available. Never use
+`not-applicable` as an omission or default. Derive `coverage_complete` from exact
+invariant and occurrence accounting; explicit unresolved occurrences still
+count as represented. Derive `unresolved_occurrence_ids` as the exact set of IDs
+carrying the `unresolved` disposition, with no omissions or additions. These
+summary fields report the detailed matrix and are not consensus signals.
 
 ## What to assess
 
@@ -71,7 +95,7 @@ Return `ready: true` **only** when all of the following hold:
 3. **No open blocker or major concern.** If you see any concern that a skilled reviewer would call a blocker or major, return `ready: false`. Non-blocking opportunities are advisory and do not affect the verdict.
 4. **No ambiguous design gaps.** The plan must not leave open design questions that an implementer would have to resolve during execution (e.g., "TBD approach", "choose between X and Y", "see if this works").
 5. **Consistent internal references.** File paths, function names, and line anchors cited in the plan are plausible given the stated context (you are not required to read the codebase, but internally contradictory references are a gap).
-6. **Cumulative coverage.** Independently assess every retained invariant and occurrence against the exact candidate, and verify every authoritative relationship has coherent implementation and release coverage. Set `coverage_complete` only when none is omitted; list every unresolved occurrence ID. Prior role conclusions are disputable evidence and cannot override current plan facts.
+6. **Cumulative coverage.** Independently assess every retained invariant and occurrence against the exact candidate, and verify every authoritative relationship has coherent implementation and release coverage. Use the exact-accounting and derived-summary rules above. Prior role conclusions are disputable evidence and cannot override current plan facts.
 
 Return `ready: false` and a brief `rationale` if **any** of those conditions fail. Do not approve a plan that has open gaps just because the critic raised no material issue — the critique covers the plan's logical issues, not its completeness.
 

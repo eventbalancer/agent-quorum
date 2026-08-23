@@ -5,6 +5,7 @@ import {
   telegramGetUpdates,
   type TelegramRuntime,
 } from '../../src/channels/telegram/index.js';
+import { finalProjection } from '../helpers/final-projection.js';
 
 const RUNTIME: TelegramRuntime = {
   botToken: 't',
@@ -37,7 +38,7 @@ describe('Telegram completion notification rendering', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/input.md',
       exitCode: 0,
-      status: 'clean',
+      final: finalProjection('/tmp/work'),
       reason: 'this should not be included',
       iterations: 2,
       summaryPath: '/tmp/work/summary.md',
@@ -48,18 +49,24 @@ describe('Telegram completion notification rendering', () => {
         'agent-quorum finished: SUCCESS',
         'input: input.md',
         'status: clean',
+        'structural: clean',
+        'decision: ready',
+        'reasons: none',
         'iterations: 2',
         'summary: /tmp/work/summary.md',
       ].join('\n'),
     );
   });
 
-  it('renders a needs-review success with a compact reason', () => {
+  it('renders a needs-review success with the stable aggregate reason', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/review-plan.md',
       exitCode: 0,
-      status: 'needs-review',
-      reason: '2 stale line reference(s)\nremain after fix-pass',
+      final: finalProjection('/tmp/work', {
+        status: 'needs-review',
+        decision: 'unable-to-decide',
+        reasonCodes: ['stale-line-reference', 'fix-pass-incomplete'],
+      }),
       iterations: 3,
       summaryPath: '/tmp/work/summary.md',
     });
@@ -67,58 +74,89 @@ describe('Telegram completion notification rendering', () => {
     expect(message).toContain('agent-quorum finished: SUCCESS');
     expect(message).toContain('input: review-plan.md');
     expect(message).toContain('status: needs-review');
-    expect(message).toContain('reason: 2 stale line reference(s) remain after fix-pass');
+    expect(message).toContain('decision: unable-to-decide');
+    expect(message).toContain(
+      'reasons: Readiness proof: unable-to-decide:stale-line-reference,fix-pass-incomplete',
+    );
   });
 
   it('renders final Judge readiness separately from structural status', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/review-plan.md',
       exitCode: 0,
-      status: 'needs-review',
-      reason: 'Final Judge: missing rollout acceptance gate',
-      structuralStatus: 'clean',
-      readiness: {
-        evaluated: true,
-        ready: false,
-        rationale: 'missing rollout acceptance gate',
-        planSha256: 'a'.repeat(64),
-      },
+      final: finalProjection('/tmp/work', {
+        status: 'needs-review',
+        decision: 'revision-required',
+        reasonCodes: ['judge-not-ready'],
+        judge: {
+          required: true,
+          evaluated: true,
+          available: true,
+          verdict: false,
+          rationale: 'final-judge-not-ready',
+        },
+      }),
       iterations: 2,
     });
 
     expect(message).toContain('status: needs-review');
     expect(message).toContain('structural: clean');
-    expect(message).toContain('readiness: not-ready');
-    expect(message).toContain('readiness rationale: missing rollout acceptance gate');
+    expect(message).toContain('decision: revision-required');
+    expect(message).toContain('judge: not-ready');
+    expect(message).toContain('judge rationale: final-judge-not-ready');
   });
 
   it('renders final Judge approval on a clean success', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/ready-plan.md',
       exitCode: 0,
-      status: 'clean',
-      structuralStatus: 'clean',
-      readiness: {
-        evaluated: true,
-        ready: true,
-        rationale: 'implementation ready',
-        planSha256: 'a'.repeat(64),
-      },
+      final: finalProjection('/tmp/work', {
+        judge: {
+          required: true,
+          evaluated: true,
+          available: true,
+          verdict: true,
+          rationale: 'final-judge-ready',
+        },
+      }),
       iterations: 1,
     });
 
     expect(message).toContain('status: clean');
     expect(message).toContain('structural: clean');
-    expect(message).toContain('readiness: ready');
-    expect(message).toContain('readiness rationale: implementation ready');
+    expect(message).toContain('decision: ready');
+    expect(message).toContain('judge: ready');
+    expect(message).toContain('judge rationale: final-judge-ready');
   });
 
-  it('renders a blocked failure with summary details', () => {
+  it('does not render an arbitrary Judge rationale from a supplied projection', () => {
+    const providerSecret = 'TELEGRAM_JUDGE_RATIONALE_SECRET_90b640';
+    const message = renderTelegramCompletionNotification({
+      inputPath: '/tmp/private/review-plan.md',
+      exitCode: 0,
+      final: finalProjection('/tmp/work', {
+        status: 'needs-review',
+        decision: 'unable-to-decide',
+        judge: {
+          required: true,
+          evaluated: true,
+          available: true,
+          verdict: false,
+          rationale: providerSecret,
+        },
+      }),
+    });
+
+    expect(message).toContain('judge rationale: unavailable');
+    expect(message).not.toContain(providerSecret);
+  });
+
+  it('renders a blocked failure with a stable reason code and summary details', () => {
+    const failureSecret = 'TELEGRAM_FAILURE_DETAIL_SECRET_b728f6';
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/broken.md',
       exitCode: 6,
-      status: 'blocked',
-      reason: 'plan shape broken (title=0 missing_sections=7 impact_graph_mermaid=0)',
+      reason: failureSecret,
       summaryPath: '/tmp/work/summary.md',
       workDir: '/tmp/work',
     });
@@ -127,32 +165,32 @@ describe('Telegram completion notification rendering', () => {
       [
         'agent-quorum finished: FAILED (exit 6)',
         'input: broken.md',
-        'status: blocked',
-        'reason: plan shape broken (title=0 missing_sections=7 impact_graph_mermaid=0)',
+        'reason: run-failed',
         'summary: /tmp/work/summary.md',
       ].join('\n'),
     );
+    expect(message).not.toContain(failureSecret);
   });
 
-  it('compacts long multiline failure reasons', () => {
+  it('does not render long multiline failure details', () => {
+    const failureDetail = `${'schema validation failed '.repeat(12)}\nwith many details`;
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/private/schema.md',
       exitCode: 3,
-      reason: `${'schema validation failed '.repeat(12)}\nwith many details`,
+      reason: failureDetail,
       workDir: '/tmp/work',
     });
-    const reasonLine = message.split('\n').find((line) => line.startsWith('reason: '));
 
-    expect(reasonLine).toBeDefined();
-    expect(reasonLine?.length).toBeLessThanOrEqual('reason: '.length + 180);
-    expect(reasonLine?.endsWith('...')).toBe(true);
+    expect(message).toContain('reason: run-failed');
+    expect(message).not.toContain(failureDetail);
+    expect(message).not.toContain('schema validation failed');
   });
 
   it('uses only the input basename', () => {
     const message = renderTelegramCompletionNotification({
       inputPath: '/tmp/secret/project/task.md',
       exitCode: 0,
-      status: 'clean',
+      final: finalProjection('/tmp/work'),
       iterations: 0,
     });
 

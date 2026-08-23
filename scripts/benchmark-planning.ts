@@ -15,7 +15,7 @@ const USAGE = `usage:
   pnpm run benchmark:planning -- blind --results <file> --output <dir> --key <file> --seed <text> [--manifest <file>]
   pnpm run benchmark:planning -- score --results <file> --key <file> --review <file> --review <file> [--output <file>] [--manifest <file>]
 
-Smoke and run invoke the source planning CLI and configured providers.
+Smoke invokes the source planning API; run invokes the source planning CLI. Both use configured providers.
 Blind and score are deterministic local artifact operations.
 `;
 

@@ -10,6 +10,7 @@ import {
   type RunRecordDraft,
 } from '../../src/core/run-store.js';
 import { pgidOf, procStartToken } from '../../src/runtime/proc.js';
+import { finalProjection } from '../helpers/final-projection.js';
 
 const ESC = String.fromCharCode(27);
 
@@ -100,6 +101,7 @@ describe('listCandidates', () => {
       state: 'finished',
       exitCode: 0,
       endedAt: '2026-06-13T10:00:00Z',
+      final: finalProjection(done.workDir),
     });
 
     const candidates = listCandidates();
@@ -115,7 +117,12 @@ describe('listCandidates', () => {
         stateDir,
         draft({ name: `done-${i}`, startedAt: `2026-06-1${i}T00:00:00Z` }),
       );
-      finalizeRunRecord(stateDir, done.runId, { state: 'finished', exitCode: 0 });
+      finalizeRunRecord(stateDir, done.runId, {
+        state: 'finished',
+        exitCode: 0,
+        endedAt: `2026-06-1${i}T01:00:00Z`,
+        final: finalProjection(done.workDir),
+      });
     }
     const saved = process.env.AGENT_QUORUM_RETAIN_COUNT;
     process.env.AGENT_QUORUM_RETAIN_COUNT = '1';
@@ -167,18 +174,25 @@ describe('renderListing', () => {
     finalizeRunRecord(stateDir, written.runId, {
       state: 'finished',
       exitCode: 0,
-      finalStatus: 'needs-review',
-      structuralStatus: 'clean',
-      finalReadiness: {
-        evaluated: true,
-        ready: false,
-        rationale: 'missing gate',
-        planSha256: 'a'.repeat(64),
-      },
+      endedAt: '2026-06-13T10:00:00Z',
+      final: finalProjection(written.workDir, {
+        status: 'needs-review',
+        decision: 'unable-to-decide',
+        reasonCodes: ['judge-not-ready'],
+        judge: {
+          required: true,
+          evaluated: true,
+          available: true,
+          verdict: false,
+          rationale: 'final-judge-not-ready',
+        },
+      }),
     });
 
     const plain = renderListing(listCandidates(), { color: false });
-    expect(plain).toContain('[finished]  final=needs-review readiness=not-ready');
+    expect(plain).toContain(
+      '[finished]  final=needs-review decision=unable-to-decide reasons=Readiness proof: unable-to-decide:judge-not-ready judge=not-ready',
+    );
   });
 
   it('adds decision facts for terminal standard-risk runs without Judge readiness', () => {
@@ -186,27 +200,19 @@ describe('renderListing', () => {
     finalizeRunRecord(stateDir, written.runId, {
       state: 'finished',
       exitCode: 0,
-      finalStatus: 'needs-review',
-      structuralStatus: 'clean',
-      finalConvergence: {
-        promise: 'cumulative',
-        satisfied: false,
-        artifactPath: path.join(written.workDir, 'convergence.final.json'),
-        exhaustedLimits: [],
-        unresolvedCoverage: ['canonical-plan:fresh-review-required'],
+      endedAt: '2026-06-13T10:00:00Z',
+      final: finalProjection(written.workDir, {
+        status: 'needs-review',
         decision: 'unable-to-decide',
         reasonCodes: ['fresh-review-required'],
-        applicableRiskDomains: ['correctness'],
-        highRiskDomains: [],
-        opportunityCount: 0,
-      },
+      }),
     });
 
     const plain = renderListing(listCandidates(), { color: false });
     expect(plain).toContain(
-      '[finished]  final=needs-review decision=unable-to-decide reasons=fresh-review-required',
+      '[finished]  final=needs-review decision=unable-to-decide reasons=Readiness proof: unable-to-decide:fresh-review-required',
     );
-    expect(plain).not.toContain('readiness=');
+    expect(plain).not.toContain('judge=');
   });
 });
 

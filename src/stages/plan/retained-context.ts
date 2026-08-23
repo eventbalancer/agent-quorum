@@ -4,9 +4,13 @@ import type { Role } from '../../types.js';
 import {
   type ContextDelivery,
   type ContextReduction,
-  writeConvergenceState,
-} from '../../core/convergence.js';
+  projectOccurrenceCoverage,
+  recordContextDelivery,
+  recordInterventions,
+  type ReadinessProofState,
+} from '../../core/readiness-proof.js';
 import { readReadinessContract } from '../../core/readiness-contract.js';
+import { writeReadinessProofState } from '../../core/readiness-store.js';
 import { isJsonObject, type JsonValue } from '../../core/json.js';
 import { operatorInterventionsContext } from './interventions.js';
 import type { RunContext } from '../../core/run-context.js';
@@ -39,6 +43,7 @@ export interface RetainedRolePromptInput {
   readonly skillFile: string;
   readonly schemaFile: string;
   readonly basePrompt: string;
+  readonly lineageDigest?: string;
   readonly persistVersionedState?: boolean;
 }
 
@@ -199,14 +204,17 @@ function systemFacts(ctx: RunContext): string {
 }
 
 function findingsAndInvariants(ctx: RunContext): string {
-  const state = ctx.convergence;
+  const state = ctx.readinessProof;
+  const outcomeByOccurrence = new Map(
+    projectOccurrenceCoverage(state).outcomes.map((outcome) => [outcome.occurrenceId, outcome]),
+  );
   const findings =
     state.findings.length === 0
       ? '- none'
       : state.findings
           .map(
             (finding) =>
-              `- ${finding.id} issue=${finding.issueRef} severity=${finding.severity} scope=${finding.disposition.scope} claim=${finding.claim} rationale=${finding.disposition.rationale || 'unavailable'} evidence_refs=${JSON.stringify(finding.disposition.evidenceRefs ?? [])} superseded_by=${finding.disposition.supersededBy ?? 'none'}`,
+              `- ${finding.id} issue=${finding.issueRef} severity=${finding.severity} scope=${finding.disposition.scope} claim=${finding.claim} rationale=${finding.disposition.rationale || 'unavailable'} evidence_refs=${JSON.stringify(finding.disposition.evidenceRefs)} superseded_by=${finding.disposition.supersededBy ?? 'none'}`,
           )
           .join('\n');
   const invariants =
@@ -215,12 +223,17 @@ function findingsAndInvariants(ctx: RunContext): string {
       : state.invariants
           .map((invariant) => {
             const occurrences = invariant.occurrences
-              .map(
-                (occurrence) =>
-                  `  - ${occurrence.id} dimension=${occurrence.dimension} subject=${occurrence.subject} disposition=${occurrence.disposition} evidence_refs=${JSON.stringify(occurrence.evidenceRefs)}`,
-              )
+              .map((occurrence) => {
+                const outcome = outcomeByOccurrence.get(occurrence.id)?.outcome ?? 'unresolved';
+                return `  - ${occurrence.id} dimension=${occurrence.dimension} subject=${occurrence.subject} outcome=${outcome}`;
+              })
               .join('\n');
-            return `- ${invariant.id} status=${invariant.status} last_reviewed_plan_version=${invariant.lastReviewedPlanVersion ?? 'unavailable'}: ${invariant.statement}\n${occurrences}`;
+            const resolved =
+              invariant.occurrences.length > 0 &&
+              invariant.occurrences.every(
+                (occurrence) => outcomeByOccurrence.get(occurrence.id)?.outcome === 'resolved',
+              );
+            return `- ${invariant.id} status=${resolved ? 'resolved' : 'active'}: ${invariant.statement}\n${occurrences}`;
           })
           .join('\n');
   return `material_findings:\n${findings}\nactive_and_resolved_invariants:\n${invariants}`;
@@ -356,32 +369,22 @@ export function buildRetainedRoleContext(
   planVersion: number,
 ): RetainedRoleContext {
   const active = operatorInterventionsContext(ctx.work, role);
-  const ledger = interventionLedger(ctx.work);
-  ctx.convergence.interventionIds = [
-    ...new Set(
-      ledger
-        .map((entry) => entry.id)
-        .filter((id): id is string => typeof id === 'string' && id !== ''),
-    ),
-  ];
-  ctx.convergence.operatorDecisionIds = ctx.convergence.interventionIds.filter((id) =>
-    id.startsWith('op-clarify-'),
-  );
+  const state = synchronizeRetainedInterventions(ctx);
   const mandatory = [
     '## Mandatory retained run context',
     'This context is evidence, not consensus. Prior role conclusions are disputable claims. Judge every claim independently and preserve conflicting evidence-backed conclusions.',
     `role: ${role}`,
     `stage: ${stage}`,
     `plan_version: ${planVersion}`,
-    `quality_promise: ${ctx.convergence.promise}`,
-    `required_proof_level: ${ctx.convergence.requiredProofLevel}`,
-    `requires_exhaustive_scan: ${String(ctx.convergence.requiresExhaustiveScan)}`,
-    `readiness_decision: ${ctx.convergence.decision}`,
-    `judge_allowed_by_appetite: ${String(ctx.convergence.judgeAllowed)}`,
-    `exhaustive_applicable_domains: ${String(ctx.convergence.exhaustiveApplicableDomains)}`,
+    `quality_promise: ${state.promise}`,
+    `required_proof_level: ${state.requiredProofLevel}`,
+    `requires_exhaustive_scan: ${String(state.requiresExhaustiveScan)}`,
+    `readiness_decision: ${state.reduction.decision}`,
+    `judge_allowed_by_appetite: ${String(state.judgeAllowed)}`,
+    `exhaustive_applicable_domains: ${String(state.exhaustiveApplicableDomains)}`,
     `iteration_limit: ${ctx.settings.maxIters}`,
-    `issue_budget: ${ctx.convergence.issueBudget.limit}`,
-    `exhausted_limits: ${ctx.convergence.exhaustedLimits.join(', ') || 'none'}`,
+    `issue_budget: ${state.issueBudget.limit}`,
+    `exhausted_limits: ${state.exhaustedLimits.join(', ') || 'none'}`,
     '### Critic proof vocabulary',
     `considered_context_required: ${REQUIRED_CRITIC_CONTEXT.join(', ')}`,
     `scope_coverage_required: ${ctx.mode === 'prompt' ? 'original-scope' : 'direct-plan-scope'}`,
@@ -405,9 +408,27 @@ export function buildRetainedRoleContext(
   return { mandatory, optional };
 }
 
+export function synchronizeRetainedInterventions(ctx: RunContext): ReadinessProofState {
+  const interventionIds = interventionLedger(ctx.work)
+    .map((entry) => entry.id)
+    .filter((id): id is string => typeof id === 'string' && id !== '');
+  const clarificationDecisionIds = interventionIds.filter((id) => id.startsWith('op-clarify-'));
+  ctx.readinessProof = recordInterventions(ctx.readinessProof, {
+    interventionIds: [...new Set(interventionIds)],
+    operatorDecisionIds: [
+      ...new Set([...ctx.readinessProof.operatorDecisionIds, ...clarificationDecisionIds]),
+    ],
+  });
+  return ctx.readinessProof;
+}
+
 export function retainedRolePrompt(input: RetainedRolePromptInput): string {
   const retained = buildRetainedRoleContext(input.ctx, input.role, input.stage, input.planVersion);
   const optional = retained.optional;
+  const lineage =
+    input.lineageDigest === undefined
+      ? ''
+      : `occurrence_source_lineage_digest: ${input.lineageDigest}`;
   const reductions: ContextReduction[] = [];
   const omittedCategories: string[] = [];
   if (input.ctx.quality.previousCritiques === 'compact' && optional !== '') {
@@ -420,8 +441,9 @@ export function retainedRolePrompt(input: RetainedRolePromptInput): string {
       });
     }
   }
-  const prompt = [retained.mandatory, optional, input.basePrompt].filter(Boolean).join('\n\n');
-  const mandatoryBytes = Buffer.byteLength(retained.mandatory);
+  const mandatory = [retained.mandatory, lineage].filter(Boolean).join('\n\n');
+  const prompt = [mandatory, optional, input.basePrompt].filter(Boolean).join('\n\n');
+  const mandatoryBytes = Buffer.byteLength(mandatory);
   const optionalBytes = Buffer.byteLength(optional);
   const totalInputBytes =
     skillAndSchemaBytes(input.skillFile, input.schemaFile) +
@@ -440,9 +462,17 @@ export function retainedRolePrompt(input: RetainedRolePromptInput): string {
     reductions,
     omittedCategories,
   };
-  input.ctx.convergence.contextDeliveries.push(delivery);
-  if (input.persistVersionedState !== false) {
-    writeConvergenceState(input.ctx.work, input.ctx.convergence);
+  input.ctx.readinessProof = recordContextDelivery(input.ctx.readinessProof, delivery);
+  if (
+    input.persistVersionedState !== false &&
+    input.ctx.readinessProof.readinessContractDigest !== undefined &&
+    input.ctx.readinessProof.planSha256 !== undefined &&
+    input.ctx.readinessProof.planVersion === input.planVersion
+  ) {
+    writeReadinessProofState(
+      path.join(input.ctx.work, `convergence.v${input.ctx.readinessProof.planVersion}.json`),
+      input.ctx.readinessProof,
+    );
   }
   return prompt;
 }

@@ -1,163 +1,159 @@
-import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { admitJudge, type AdmittedJudge } from '../../core/readiness-admission.js';
+import { sha256 } from '../../core/digest.js';
+import type { JsonValue } from '../../core/json.js';
+import {
+  createOccurrenceSourceBinding,
+  type OccurrenceSourceBinding,
+  type ReadinessProofState,
+} from '../../core/readiness-proof.js';
+import { readStripped, type RunContext } from '../../core/run-context.js';
+import { validateSchema } from '../../core/schema.js';
 import { providerRun } from '../../providers/provider.js';
 import { log } from '../../runtime/log.js';
-import { isJsonObject, type JsonValue } from '../../core/json.js';
-import { validateSchema } from '../../core/schema.js';
-import { readStripped, type RunContext } from '../../core/run-context.js';
-import type { FinalReadiness } from '../../types.js';
-import { retainedRolePrompt } from './retained-context.js';
+import { retainedRolePrompt, synchronizeRetainedInterventions } from './retained-context.js';
 
 const FINAL_PLAN_ARTIFACT = 'plan.final.md';
 const FINAL_JUDGE_RAW = 'judge.final.raw';
 const FINAL_JUDGE_VERDICT = 'judge.final.json';
 export const FINAL_JUDGE_METADATA = 'judge.final.meta.json';
-const MAX_REPORTED_RATIONALE_LENGTH = 180;
-const UNKNOWN_RATIONALE = 'Final Judge did not produce a valid verdict after provider retries.';
+export const FINAL_JUDGE_METADATA_SCHEMA_VERSION = 2;
 
-interface JudgeVerdict {
-  readonly ready: boolean;
-  readonly rationale: string;
-  readonly coverageComplete: boolean;
-  readonly unresolvedOccurrenceIds: readonly string[];
-  readonly assessedInvariantIds: readonly string[];
-  readonly revisionIssue?: JudgeRevisionIssue;
-}
+export type JudgeStage = 'intermediate' | 'final';
 
-const NOT_READY = { ready: false, rationale: '' } as const;
+export type IntermediateJudgeOperationalRationale =
+  | 'intermediate-judge-ready'
+  | 'intermediate-judge-not-ready'
+  | 'intermediate-judge-proof-unavailable'
+  | 'intermediate-judge-candidate-mutated';
 
-export interface JudgeResult {
-  readonly ready: boolean;
-  readonly rationale: string;
-  readonly revisionIssue?: JudgeRevisionIssue;
-}
+export type FinalJudgeOperationalRationale =
+  | 'final-judge-ready'
+  | 'final-judge-not-ready'
+  | 'final-judge-proof-unavailable'
+  | 'final-judge-candidate-mutated';
 
-export interface JudgeRevisionIssue {
-  readonly severity: 'blocker' | 'major';
-  readonly category:
-    | 'correctness'
-    | 'scope'
-    | 'risk'
-    | 'testability'
-    | 'clarity'
-    | 'convention'
-    | 'missing_context'
-    | 'assumption';
-  readonly claim: string;
-  readonly evidence: string;
-  readonly evidenceRefs: readonly JsonValue[];
-  readonly suggestedFix: string;
-}
+export type JudgeOperationalRationale =
+  | IntermediateJudgeOperationalRationale
+  | FinalJudgeOperationalRationale;
 
-export interface FinalJudgeResult {
-  readonly readiness: FinalReadiness;
-  readonly metadataPath: string;
-  readonly coverageProved: boolean;
+export interface JudgeUnavailableResult<Stage extends JudgeStage = JudgeStage> {
+  readonly available: false;
+  readonly stage: Stage;
+  readonly binding: OccurrenceSourceBinding;
   readonly candidateUnchanged: boolean;
+  readonly rationale: string;
 }
 
-interface JudgePromptOptions {
-  readonly scope?: 'intermediate' | 'final';
-  readonly planSha256?: string;
-  readonly planContent?: string;
+export interface JudgeAvailableResult<Stage extends JudgeStage = JudgeStage> {
+  readonly available: true;
+  readonly stage: Stage;
+  readonly binding: OccurrenceSourceBinding;
+  readonly candidateUnchanged: boolean;
+  readonly rationale: string;
+  readonly admitted: AdmittedJudge;
 }
 
-interface FinalJudgeFiles {
+export type JudgeEvaluationResult<Stage extends JudgeStage = JudgeStage> =
+  | JudgeUnavailableResult<Stage>
+  | JudgeAvailableResult<Stage>;
+
+export type IntermediateJudgeResult = JudgeEvaluationResult<'intermediate'>;
+
+interface FinalJudgeArtifacts {
   readonly raw: string;
   readonly verdict: string;
   readonly metadata: string;
 }
 
+interface FinalJudgeOccurrenceProof {
+  readonly coverageComplete: true;
+  readonly satisfied: boolean;
+  readonly unresolvedOccurrenceIds: readonly string[];
+  readonly violatedOccurrenceIds: readonly string[];
+  readonly occurrences: AdmittedJudge['snapshot']['occurrences'];
+  readonly materialIssueIds: readonly string[];
+}
+
 interface FinalJudgeMetadata {
-  readonly canonical_plan: string;
-  readonly plan_sha256: string;
+  readonly schemaVersion: typeof FINAL_JUDGE_METADATA_SCHEMA_VERSION;
+  readonly canonicalPlan: typeof FINAL_PLAN_ARTIFACT;
+  readonly planVersion: number;
+  readonly planSha256: string;
+  readonly observedPlanSha256: string | null;
+  readonly readinessContractDigest: string | null;
+  readonly catalogDigest: string;
+  readonly source: 'final-judge';
+  readonly binding: OccurrenceSourceBinding;
   readonly evaluated: boolean;
+  readonly available: boolean;
+  readonly candidateUnchanged: boolean;
   readonly ready: boolean | null;
-  readonly rationale: string;
-  readonly verdict_artifact: string | null;
+  readonly rationale: FinalJudgeOperationalRationale;
+  readonly occurrenceProof: FinalJudgeOccurrenceProof | null;
+  readonly verdictArtifact: typeof FINAL_JUDGE_VERDICT | null;
 }
 
-function compactRationale(rationale: string): string {
-  const compacted = rationale.replace(/\s+/g, ' ').trim();
-  if (compacted.length <= MAX_REPORTED_RATIONALE_LENGTH) {
-    return compacted;
-  }
-  return `${compacted.slice(0, MAX_REPORTED_RATIONALE_LENGTH - 3).trimEnd()}...`;
+interface FinalJudgeResultFields {
+  readonly metadataPath: string;
 }
 
-function readJudgeVerdict(outputFile: string, schemaFile: string): JudgeVerdict | undefined {
-  if (!validateSchema(outputFile, schemaFile)) {
-    return undefined;
-  }
-  let parsed: JsonValue;
-  try {
-    parsed = JSON.parse(readFileSync(outputFile, 'utf8')) as JsonValue;
-  } catch {
-    return undefined;
-  }
-  if (!isJsonObject(parsed) || typeof parsed.ready !== 'boolean') {
-    return undefined;
-  }
-  const revision = isJsonObject(parsed.revision_issue) ? parsed.revision_issue : undefined;
-  return {
-    ready: parsed.ready,
-    rationale: typeof parsed.rationale === 'string' ? parsed.rationale : '',
-    coverageComplete: parsed.coverage_complete === true,
-    unresolvedOccurrenceIds: Array.isArray(parsed.unresolved_occurrence_ids)
-      ? parsed.unresolved_occurrence_ids.filter(
-          (id): id is string => typeof id === 'string' && id !== '',
-        )
-      : ['coverage-metadata-unavailable'],
-    assessedInvariantIds: Array.isArray(parsed.invariant_assessments)
-      ? parsed.invariant_assessments
-          .filter(isJsonObject)
-          .filter(
-            (assessment) =>
-              assessment.satisfied === true &&
-              Array.isArray(assessment.unresolved_occurrence_ids) &&
-              assessment.unresolved_occurrence_ids.length === 0,
-          )
-          .map((assessment) => assessment.invariant_id)
-          .filter((id): id is string => typeof id === 'string')
-      : [],
-    ...(!parsed.ready && revision !== undefined
-      ? {
-          revisionIssue: {
-            severity: revision.severity === 'blocker' ? 'blocker' : 'major',
-            category:
-              typeof revision.category === 'string'
-                ? (revision.category as JudgeRevisionIssue['category'])
-                : 'clarity',
-            claim: typeof revision.claim === 'string' ? revision.claim : '',
-            evidence: typeof revision.evidence === 'string' ? revision.evidence : '',
-            evidenceRefs: Array.isArray(revision.evidence_refs) ? revision.evidence_refs : [],
-            suggestedFix: typeof revision.suggested_fix === 'string' ? revision.suggested_fix : '',
-          },
-        }
-      : {}),
-  };
+export type FinalJudgeResult = JudgeEvaluationResult<'final'> & FinalJudgeResultFields;
+
+interface JudgePromptOptions {
+  readonly scope?: JudgeStage;
+  readonly planSha256?: string;
+  readonly planContent?: string;
 }
 
-function judgeCoverageProved(ctx: RunContext, verdict: JudgeVerdict | undefined): boolean {
-  if (verdict === undefined) {
-    return false;
-  }
-  return (
-    verdict.coverageComplete &&
-    verdict.unresolvedOccurrenceIds.length === 0 &&
-    ctx.convergence.invariants.every((invariant) =>
-      verdict.assessedInvariantIds.includes(invariant.id),
-    )
-  );
+interface CandidateIdentity {
+  readonly unchanged: boolean;
+  readonly observedSha256?: string;
 }
 
-function finalJudgeRationale(verdict: JudgeVerdict): string {
-  const compact = compactRationale(verdict.rationale);
-  if (compact !== '') {
-    return compact;
+function synchronizeJudgeState(
+  ctx: RunContext,
+  state: ReadinessProofState,
+  stage: JudgeStage,
+): ReadinessProofState {
+  if (ctx.readinessProof !== state) {
+    throw new TypeError(`${stage} Judge requires the current run-context proof state`);
   }
-  return `Final Judge returned ready=${String(verdict.ready)} without a rationale.`;
+  const synchronized = synchronizeRetainedInterventions(ctx);
+  if (
+    synchronized.planVersion !== state.planVersion ||
+    synchronized.catalog.digest !== state.catalog.digest
+  ) {
+    throw new TypeError(`${stage} Judge proof state does not match the run context`);
+  }
+  return synchronized;
+}
+
+function intermediateJudgeOperationalRationale(
+  candidateUnchanged: boolean,
+  verdict: boolean | null,
+): IntermediateJudgeOperationalRationale {
+  if (!candidateUnchanged) {
+    return 'intermediate-judge-candidate-mutated';
+  }
+  if (verdict === null) {
+    return 'intermediate-judge-proof-unavailable';
+  }
+  return verdict ? 'intermediate-judge-ready' : 'intermediate-judge-not-ready';
+}
+
+export function finalJudgeOperationalRationale(
+  candidateUnchanged: boolean,
+  verdict: boolean | null,
+): FinalJudgeOperationalRationale {
+  if (!candidateUnchanged) {
+    return 'final-judge-candidate-mutated';
+  }
+  if (verdict === null) {
+    return 'final-judge-proof-unavailable';
+  }
+  return verdict ? 'final-judge-ready' : 'final-judge-not-ready';
 }
 
 function resolveFinalCritiqueFile(ctx: RunContext): string | undefined {
@@ -206,16 +202,136 @@ export function judgePrompt(
   ].join('\n\n');
 }
 
+function candidateIdentity(file: string, expectedSha256: string): CandidateIdentity {
+  try {
+    const observedSha256 = sha256(readFileSync(file));
+    return { unchanged: observedSha256 === expectedSha256, observedSha256 };
+  } catch {
+    return { unchanged: false };
+  }
+}
+
+function parseJsonFile(file: string): JsonValue | undefined {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
+  } catch {
+    return undefined;
+  }
+}
+
+interface RequestJudgeInput<Stage extends JudgeStage> {
+  readonly ctx: RunContext;
+  readonly state: ReadinessProofState;
+  readonly stage: Stage;
+  readonly candidateFile: string;
+  readonly candidateContent: string;
+  readonly binding: OccurrenceSourceBinding;
+  readonly outputFile: string;
+  readonly prompt: string;
+}
+
+async function requestJudge<Stage extends JudgeStage>(
+  input: RequestJudgeInput<Stage>,
+): Promise<AdmittedJudge | undefined> {
+  let admitted: AdmittedJudge | undefined;
+  const validateOutput = (outputFile: string): boolean => {
+    if (!validateSchema(outputFile, input.ctx.skills.judgeSchema)) {
+      log(`WARNING: ${input.stage} Judge output failed schema validation`);
+      return false;
+    }
+    const value = parseJsonFile(outputFile);
+    if (value === undefined) {
+      log(`WARNING: ${input.stage} Judge output is not valid JSON`);
+      return false;
+    }
+    try {
+      admitted = admitJudge({
+        value,
+        stage: input.stage,
+        catalog: input.state.catalog,
+        binding: input.binding,
+        evidenceContext: {
+          work: input.ctx.work,
+          projectRoot: input.ctx.provider.projectRoot,
+          planVersion: input.state.planVersion,
+          candidateContent: input.candidateContent,
+          candidatePath: input.candidateFile,
+        },
+      });
+      return true;
+    } catch {
+      admitted = undefined;
+      log(`WARNING: ${input.stage} Judge output failed semantic admission`);
+      return false;
+    }
+  };
+  const status = await providerRun(
+    input.ctx.provider,
+    'judge',
+    'json',
+    input.outputFile,
+    input.ctx.skills.judgeSkill,
+    input.ctx.skills.judgeSchema,
+    input.ctx.permissions.judge.tools,
+    input.ctx.permissions.judge.disallowedTools,
+    input.prompt,
+    { validateOutput },
+  );
+  if (status !== 0) {
+    log(`WARNING: ${input.stage} Judge provider call failed (${status}) — proof unavailable`);
+    return undefined;
+  }
+  if (admitted !== undefined) {
+    return admitted;
+  }
+  return validateOutput(input.outputFile) ? admitted : undefined;
+}
+
+function unavailableResult<Stage extends JudgeStage>(
+  stage: Stage,
+  binding: OccurrenceSourceBinding,
+  candidateUnchanged: boolean,
+): JudgeUnavailableResult<Stage> {
+  const rationale =
+    stage === 'final'
+      ? finalJudgeOperationalRationale(candidateUnchanged, null)
+      : intermediateJudgeOperationalRationale(candidateUnchanged, null);
+  return { available: false, stage, binding, candidateUnchanged, rationale };
+}
+
+function availableResult<Stage extends JudgeStage>(
+  stage: Stage,
+  binding: OccurrenceSourceBinding,
+  admitted: AdmittedJudge,
+  candidateUnchanged: boolean,
+): JudgeAvailableResult<Stage> {
+  const rationale =
+    stage === 'final'
+      ? finalJudgeOperationalRationale(candidateUnchanged, admitted.verdict)
+      : intermediateJudgeOperationalRationale(candidateUnchanged, admitted.verdict);
+  return { available: true, stage, binding, admitted, candidateUnchanged, rationale };
+}
+
 export async function runJudge(
   ctx: RunContext,
+  state: ReadinessProofState,
   iter: number,
   planFile: string,
   critiqueFile: string,
   outFile: string,
-): Promise<JudgeResult> {
-  delete ctx.convergence.judgeApprovedPlanVersion;
-  delete ctx.convergence.judgeEvaluatedPlanVersion;
-  delete ctx.convergence.judgeReady;
+): Promise<IntermediateJudgeResult> {
+  if (iter !== state.planVersion) {
+    throw new TypeError('intermediate Judge iteration must match readiness proof plan version');
+  }
+  const synchronizedState = synchronizeJudgeState(ctx, state, 'intermediate');
+  const planBytes = readFileSync(planFile);
+  const planContent = planBytes.toString('utf8');
+  const planSha256 = sha256(planBytes);
+  const binding = createOccurrenceSourceBinding(synchronizedState, {
+    source: 'intermediate-judge',
+    candidateKind: 'versioned-plan',
+    contentDigest: planSha256,
+  });
   const prompt = retainedRolePrompt({
     ctx,
     role: 'judge',
@@ -223,45 +339,32 @@ export async function runJudge(
     planVersion: iter,
     skillFile: ctx.skills.judgeSkill,
     schemaFile: ctx.skills.judgeSchema,
-    basePrompt: judgePrompt(planFile, critiqueFile),
+    basePrompt: judgePrompt(planFile, critiqueFile, {
+      scope: 'intermediate',
+      planSha256,
+      planContent,
+    }),
+    lineageDigest: binding.lineage.lineageDigest,
+    persistVersionedState: false,
   });
-  const status = await providerRun(
-    ctx.provider,
-    'judge',
-    'json',
-    outFile,
-    ctx.skills.judgeSkill,
-    ctx.skills.judgeSchema,
-    ctx.permissions.judge.tools,
-    ctx.permissions.judge.disallowedTools,
+  const admitted = await requestJudge({
+    ctx,
+    state: synchronizedState,
+    stage: 'intermediate',
+    candidateFile: planFile,
+    candidateContent: planContent,
+    binding,
+    outputFile: outFile,
     prompt,
-  );
-  if (status !== 0) {
-    log(`WARNING: judge provider call failed (${status}) — treating as not ready`);
-    return NOT_READY;
+  });
+  const candidateUnchanged = candidateIdentity(planFile, planSha256).unchanged;
+  if (admitted === undefined) {
+    return unavailableResult('intermediate', binding, candidateUnchanged);
   }
-  const verdict = readJudgeVerdict(outFile, ctx.skills.judgeSchema);
-  if (verdict === undefined) {
-    log('WARNING: judge output failed schema validation — treating as not ready');
-    return NOT_READY;
-  }
-  ctx.convergence.judgeEvaluatedPlanVersion = iter;
-  ctx.convergence.judgeReady = verdict.ready;
-  const coverageProved = judgeCoverageProved(ctx, verdict);
-  if (verdict.ready && coverageProved) {
-    ctx.convergence.judgeApprovedPlanVersion = iter;
-    ctx.convergence.unresolvedCoverage = ctx.convergence.unresolvedCoverage.filter(
-      (id) => id !== `plan.v${iter}:judge`,
-    );
-  }
-  return {
-    ready: verdict.ready,
-    rationale: compactRationale(verdict.rationale),
-    ...(verdict.revisionIssue === undefined ? {} : { revisionIssue: verdict.revisionIssue }),
-  };
+  return availableResult('intermediate', binding, admitted, candidateUnchanged);
 }
 
-function resolveFinalJudgeFiles(work: string): FinalJudgeFiles {
+function resolveFinalJudgeArtifacts(work: string): FinalJudgeArtifacts {
   return {
     raw: path.join(work, FINAL_JUDGE_RAW),
     verdict: path.join(work, FINAL_JUDGE_VERDICT),
@@ -269,70 +372,67 @@ function resolveFinalJudgeFiles(work: string): FinalJudgeFiles {
   };
 }
 
-async function requestFinalJudge(
-  ctx: RunContext,
-  rawFile: string,
-  prompt: string,
-): Promise<JudgeVerdict | undefined> {
-  let verdict: JudgeVerdict | undefined;
-  const validateOutput = (outputFile: string): boolean => {
-    verdict = readJudgeVerdict(outputFile, ctx.skills.judgeSchema);
-    if (verdict === undefined) {
-      log('WARNING: final Judge output is invalid — retrying under provider policy');
-    }
-    return verdict !== undefined;
-  };
-  const status = await providerRun(
-    ctx.provider,
-    'judge',
-    'json',
-    rawFile,
-    ctx.skills.judgeSkill,
-    ctx.skills.judgeSchema,
-    ctx.permissions.judge.tools,
-    ctx.permissions.judge.disallowedTools,
-    prompt,
-    { validateOutput },
-  );
-  return status === 0 ? verdict : undefined;
-}
-
-function finalReadiness(verdict: JudgeVerdict | undefined, planSha256: string): FinalReadiness {
-  if (verdict === undefined) {
-    return {
-      evaluated: false,
-      ready: null,
-      rationale: UNKNOWN_RATIONALE,
-      planSha256,
-    };
-  }
+function finalMetadata(
+  state: ReadinessProofState,
+  binding: OccurrenceSourceBinding,
+  candidate: CandidateIdentity,
+  result: JudgeEvaluationResult<'final'>,
+): FinalJudgeMetadata {
+  const usable = result.available && result.candidateUnchanged;
   return {
-    evaluated: true,
-    ready: verdict.ready,
-    rationale: finalJudgeRationale(verdict),
-    planSha256,
+    schemaVersion: FINAL_JUDGE_METADATA_SCHEMA_VERSION,
+    canonicalPlan: FINAL_PLAN_ARTIFACT,
+    planVersion: state.planVersion,
+    planSha256: binding.candidate.contentDigest,
+    observedPlanSha256: candidate.observedSha256 ?? null,
+    readinessContractDigest: state.readinessContractDigest ?? null,
+    catalogDigest: state.catalog.digest,
+    source: 'final-judge',
+    binding,
+    evaluated: result.available,
+    available: usable,
+    candidateUnchanged: result.candidateUnchanged,
+    ready: result.available ? result.admitted.verdict : null,
+    rationale: finalJudgeOperationalRationale(
+      result.candidateUnchanged,
+      result.available ? result.admitted.verdict : null,
+    ),
+    occurrenceProof: result.available
+      ? {
+          coverageComplete: result.admitted.coverageComplete,
+          satisfied: result.admitted.satisfied,
+          unresolvedOccurrenceIds: result.admitted.unresolvedOccurrenceIds,
+          violatedOccurrenceIds: result.admitted.violatedOccurrenceIds,
+          occurrences: result.admitted.snapshot.occurrences,
+          materialIssueIds: result.admitted.materialIssueIds,
+        }
+      : null,
+    verdictArtifact: usable ? FINAL_JUDGE_VERDICT : null,
   };
 }
 
-function persistFinalJudgeResult(files: FinalJudgeFiles, readiness: FinalReadiness): void {
-  if (readiness.evaluated) {
+function persistFinalJudgeResult(files: FinalJudgeArtifacts, metadata: FinalJudgeMetadata): void {
+  if (metadata.verdictArtifact !== null) {
     copyFileSync(files.raw, files.verdict);
   }
-  const metadata: FinalJudgeMetadata = {
-    canonical_plan: FINAL_PLAN_ARTIFACT,
-    plan_sha256: readiness.planSha256,
-    evaluated: readiness.evaluated,
-    ready: readiness.ready,
-    rationale: readiness.rationale,
-    verdict_artifact: readiness.evaluated ? FINAL_JUDGE_VERDICT : null,
-  };
   writeFileSync(files.metadata, `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
-export async function runFinalJudge(ctx: RunContext, finalPlan: string): Promise<FinalJudgeResult> {
-  const files = resolveFinalJudgeFiles(ctx.work);
+export async function runFinalJudge(
+  ctx: RunContext,
+  state: ReadinessProofState,
+  finalPlan: string,
+): Promise<FinalJudgeResult> {
+  const synchronizedState = synchronizeJudgeState(ctx, state, 'final');
+  const files = resolveFinalJudgeArtifacts(ctx.work);
   const planBytes = readFileSync(finalPlan);
-  const planSha256 = createHash('sha256').update(planBytes).digest('hex');
+  const planContent = planBytes.toString('utf8');
+  const planSha256 = sha256(planBytes);
+  const binding = createOccurrenceSourceBinding(synchronizedState, {
+    source: 'final-judge',
+    candidateKind: 'canonical-plan',
+    contentDigest: planSha256,
+  });
   rmSync(files.raw, { force: true });
   rmSync(files.verdict, { force: true });
   rmSync(files.metadata, { force: true });
@@ -341,38 +441,33 @@ export async function runFinalJudge(ctx: RunContext, finalPlan: string): Promise
     ctx,
     role: 'judge',
     stage: 'final-readiness',
-    planVersion: ctx.convergence.planVersion,
+    planVersion: synchronizedState.planVersion,
     skillFile: ctx.skills.judgeSkill,
     schemaFile: ctx.skills.judgeSchema,
     basePrompt: judgePrompt(finalPlan, resolveFinalCritiqueFile(ctx), {
       scope: 'final',
       planSha256,
-      planContent: planBytes.toString('utf8'),
+      planContent,
     }),
+    lineageDigest: binding.lineage.lineageDigest,
     persistVersionedState: false,
   });
-  const verdict = await requestFinalJudge(ctx, files.raw, prompt);
-  const candidateUnchanged =
-    createHash('sha256').update(readFileSync(finalPlan)).digest('hex') === planSha256;
-  const readiness = finalReadiness(verdict, planSha256);
-  if (verdict === undefined) {
-    delete ctx.convergence.judgeEvaluatedPlanVersion;
-    delete ctx.convergence.judgeReady;
-    delete ctx.convergence.judgeApprovedPlanVersion;
-  } else {
-    ctx.convergence.judgeEvaluatedPlanVersion = ctx.convergence.planVersion;
-    ctx.convergence.judgeReady = verdict.ready;
-    if (verdict.ready && candidateUnchanged && judgeCoverageProved(ctx, verdict)) {
-      ctx.convergence.judgeApprovedPlanVersion = ctx.convergence.planVersion;
-    } else {
-      delete ctx.convergence.judgeApprovedPlanVersion;
-    }
-  }
-  persistFinalJudgeResult(files, readiness);
-  return {
-    readiness,
-    metadataPath: files.metadata,
-    coverageProved: candidateUnchanged && judgeCoverageProved(ctx, verdict),
-    candidateUnchanged,
-  };
+  const admitted = await requestJudge({
+    ctx,
+    state: synchronizedState,
+    stage: 'final',
+    candidateFile: finalPlan,
+    candidateContent: planContent,
+    binding,
+    outputFile: files.raw,
+    prompt,
+  });
+  const candidate = candidateIdentity(finalPlan, planSha256);
+  const result: JudgeEvaluationResult<'final'> =
+    admitted === undefined
+      ? unavailableResult('final', binding, candidate.unchanged)
+      : availableResult('final', binding, admitted, candidate.unchanged);
+  const metadata = finalMetadata(synchronizedState, binding, candidate, result);
+  persistFinalJudgeResult(files, metadata);
+  return { ...result, metadataPath: files.metadata };
 }

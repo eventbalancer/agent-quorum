@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import ajvModule from 'ajv/dist/2019.js';
 import type { ValidateFunction } from 'ajv/dist/2019.js';
 import { HaltError } from '../runtime/halt.js';
 import { err, log } from '../runtime/log.js';
-import { isJsonObject, jqAlt, type JsonObject, type JsonValue } from './json.js';
+import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 
 const Ajv2019 = ajvModule.default;
 
@@ -51,20 +50,15 @@ export function validateSchema(file: string, schemaPath: string): boolean {
   let validate: ValidateFunction;
   try {
     validate = compiledSchema(schemaPath);
-  } catch (error) {
-    err(`schema validation failed: ${file} vs ${schemaPath}`);
-    const message = error instanceof Error ? error.message : String(error);
-    for (const line of message.split('\n')) {
-      process.stderr.write(`    ${line}\n`);
-    }
+  } catch {
+    err(`schema validation failed: ${file} vs ${schemaPath} (code=compile-failed)`);
     return false;
   }
   if (!validate(data)) {
-    err(`schema validation failed: ${file} vs ${schemaPath}`);
-    const detail = JSON.stringify(validate.errors, null, 2);
-    for (const line of detail.split('\n')) {
-      process.stderr.write(`    ${line}\n`);
-    }
+    const violations = validate.errors?.length ?? 0;
+    err(
+      `schema validation failed: ${file} vs ${schemaPath} (code=invalid-data violations=${String(violations)})`,
+    );
     return false;
   }
   return true;
@@ -226,15 +220,15 @@ function sanitizedSystemicDispositions(value: JsonValue): JsonValue {
 
 function sanitizedCritiqueIssue(issue: JsonObject): JsonObject {
   return {
-    id: typeof issue.id === 'string' ? issue.id.replace(/^v[0-9]+\./, '') : (issue.id ?? null),
-    addresses: 'addresses' in issue ? issue.addresses : null,
-    severity: issue.severity ?? null,
-    category: issue.category ?? null,
-    claim: issue.claim ?? null,
-    evidence: issue.evidence ?? null,
-    suggested_fix: issue.suggested_fix ?? null,
-    confidence: 'confidence' in issue ? issue.confidence : null,
-    duplicate_of: 'duplicate_of' in issue ? issue.duplicate_of : null,
+    ...('id' in issue ? { id: issue.id } : {}),
+    ...('addresses' in issue ? { addresses: issue.addresses } : {}),
+    ...('severity' in issue ? { severity: issue.severity } : {}),
+    ...('category' in issue ? { category: issue.category } : {}),
+    ...('claim' in issue ? { claim: issue.claim } : {}),
+    ...('evidence' in issue ? { evidence: issue.evidence } : {}),
+    ...('suggested_fix' in issue ? { suggested_fix: issue.suggested_fix } : {}),
+    ...('confidence' in issue ? { confidence: issue.confidence } : {}),
+    ...('duplicate_of' in issue ? { duplicate_of: issue.duplicate_of } : {}),
     ...('evidence_refs' in issue
       ? { evidence_refs: sanitizedEvidenceRefs(issue.evidence_refs) }
       : {}),
@@ -245,71 +239,26 @@ function sanitizedCritiqueIssue(issue: JsonObject): JsonObject {
   };
 }
 
-function critiqueOpportunityFingerprint(
-  claim: string,
-  evidence: string,
-  suggestedImprovement: string,
-): string {
-  const input = JSON.stringify([claim.trim(), evidence.trim(), suggestedImprovement.trim()]);
-  return `O-${createHash('sha256').update(input).digest('hex')}`;
-}
-
 function sanitizedCritiqueOpportunity(opportunity: JsonObject): JsonObject {
-  const claim = typeof opportunity.claim === 'string' ? opportunity.claim : '';
-  const evidence = typeof opportunity.evidence === 'string' ? opportunity.evidence : '';
-  const suggestedImprovement =
-    typeof opportunity.suggested_improvement === 'string' ? opportunity.suggested_improvement : '';
-  const fingerprint =
-    typeof opportunity.fingerprint === 'string' && opportunity.fingerprint !== ''
-      ? opportunity.fingerprint
-      : critiqueOpportunityFingerprint(claim, evidence, suggestedImprovement);
   return {
-    fingerprint,
-    claim,
-    evidence,
-    suggested_improvement: suggestedImprovement,
-    evidence_refs: Array.isArray(opportunity.evidence_refs)
-      ? sanitizedEvidenceRefs(opportunity.evidence_refs)
-      : [],
-  };
-}
-
-function legacyIssueOpportunity(issue: JsonObject): JsonObject {
-  return sanitizedCritiqueOpportunity({
-    claim: typeof issue.claim === 'string' ? issue.claim : '',
-    evidence: typeof issue.evidence === 'string' ? issue.evidence : '',
-    suggested_improvement: typeof issue.suggested_fix === 'string' ? issue.suggested_fix : '',
-    evidence_refs: Array.isArray(issue.evidence_refs) ? issue.evidence_refs : [],
-  });
-}
-
-function critiqueReviewWithMaterialIssueCount(
-  review: JsonValue | undefined,
-  materialIssueCount: number,
-  didMoveLegacyIssues: boolean,
-): JsonValue | undefined {
-  if (!didMoveLegacyIssues || !isJsonObject(review) || !isJsonObject(review.issue_budget)) {
-    return review;
-  }
-  return {
-    ...review,
-    issue_budget: {
-      ...review.issue_budget,
-      used: materialIssueCount,
-      exhausted:
-        typeof review.issue_budget.limit === 'number'
-          ? materialIssueCount >= review.issue_budget.limit
-          : review.issue_budget.exhausted === true,
-    },
+    ...('fingerprint' in opportunity ? { fingerprint: opportunity.fingerprint } : {}),
+    ...('claim' in opportunity ? { claim: opportunity.claim } : {}),
+    ...('evidence' in opportunity ? { evidence: opportunity.evidence } : {}),
+    ...('suggested_improvement' in opportunity
+      ? { suggested_improvement: opportunity.suggested_improvement }
+      : {}),
+    ...('evidence_refs' in opportunity
+      ? { evidence_refs: sanitizedEvidenceRefs(opportunity.evidence_refs) }
+      : {}),
   };
 }
 
 export function sanitizeCritiqueJson(file: string, expectedVersion?: number | string): void {
-  const expected = checkExpectedVersion('sanitize_critique_json', expectedVersion);
+  checkExpectedVersion('sanitize_critique_json', expectedVersion);
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   const obj: JsonObject = isJsonObject(parsed) ? parsed : {};
 
-  const extras = sortedExtraKeys(obj, [
+  const extraCount = sortedExtraKeys(obj, [
     'plan_version',
     'summary',
     'issues',
@@ -317,82 +266,54 @@ export function sanitizeCritiqueJson(file: string, expectedVersion?: number | st
     'domain_assessments',
     'boundary_challenges',
     'opportunities',
-  ]).join(',');
-  if (extras) {
-    log(`WARNING: dropping unknown top-level fields from critique: ${extras}`);
+  ]).length;
+  if (extraCount > 0) {
+    log(`WARNING: dropping unknown top-level fields from critique (count=${String(extraCount)})`);
   }
 
   const issues = Array.isArray(obj.issues) ? obj.issues : [];
   const issueObjects = issues.map((issue) => (isJsonObject(issue) ? issue : {}));
 
-  const issueExtras = [
-    ...new Set(
-      issueObjects
-        .map((issue) => sortedExtraKeys(issue, CRITIQUE_ISSUE_KEYS).join(','))
-        .filter((joined) => joined.length > 0),
-    ),
-  ]
-    .sort()
-    .join(';');
-  if (issueExtras) {
-    log(`WARNING: dropping unknown critique issue fields: ${issueExtras}`);
-  }
-
-  const prefixedIds = issueObjects.filter(
-    (issue) => typeof issue.id === 'string' && /^v[0-9]+\.C[0-9]+$/.test(issue.id),
-  ).length;
-  if (prefixedIds > 0) {
-    log(
-      `WARNING: normalizing ${prefixedIds} critique issue id(s) with a version prefix (vN.Cn -> Cn)`,
-    );
-  }
-
-  const materialIssues = issueObjects.filter(
-    (issue) => issue.severity !== 'minor' && issue.severity !== 'nit',
+  const issueExtraCount = issueObjects.reduce(
+    (count, issue) => count + sortedExtraKeys(issue, CRITIQUE_ISSUE_KEYS).length,
+    0,
   );
-  const legacyOpportunityIssues = issueObjects.filter(
-    (issue) => issue.severity === 'minor' || issue.severity === 'nit',
-  );
-  if (legacyOpportunityIssues.length > 0) {
-    log(
-      `WARNING: moving ${legacyOpportunityIssues.length} non-material critique issue(s) to opportunities`,
-    );
+  if (issueExtraCount > 0) {
+    log(`WARNING: dropping unknown critique issue fields (count=${String(issueExtraCount)})`);
   }
 
   const suppliedOpportunities = Array.isArray(obj.opportunities) ? obj.opportunities : [];
   const opportunityObjects = suppliedOpportunities.map((opportunity) =>
     isJsonObject(opportunity) ? opportunity : {},
   );
-  const opportunityExtras = [
-    ...new Set(
-      opportunityObjects
-        .map((opportunity) => sortedExtraKeys(opportunity, CRITIQUE_OPPORTUNITY_KEYS).join(','))
-        .filter((joined) => joined.length > 0),
-    ),
-  ]
-    .sort()
-    .join(';');
-  if (opportunityExtras) {
-    log(`WARNING: dropping unknown critique opportunity fields: ${opportunityExtras}`);
+  const opportunityExtraCount = opportunityObjects.reduce(
+    (count, opportunity) => count + sortedExtraKeys(opportunity, CRITIQUE_OPPORTUNITY_KEYS).length,
+    0,
+  );
+  if (opportunityExtraCount > 0) {
+    log(
+      `WARNING: dropping unknown critique opportunity fields (count=${String(opportunityExtraCount)})`,
+    );
   }
 
-  const pv: JsonValue = expected ?? obj.plan_version ?? null;
-  const review = critiqueReviewWithMaterialIssueCount(
-    obj.review,
-    materialIssues.length,
-    legacyOpportunityIssues.length > 0,
-  );
   writeJsonInPlace(file, {
-    plan_version: pv,
-    summary: jqAlt(obj.summary, ''),
-    issues: materialIssues.map(sanitizedCritiqueIssue),
-    domain_assessments: Array.isArray(obj.domain_assessments) ? obj.domain_assessments : [],
-    boundary_challenges: Array.isArray(obj.boundary_challenges) ? obj.boundary_challenges : [],
-    opportunities: [
-      ...opportunityObjects.map(sanitizedCritiqueOpportunity),
-      ...legacyOpportunityIssues.map(legacyIssueOpportunity),
-    ],
-    ...(review !== undefined ? { review } : {}),
+    ...('plan_version' in obj ? { plan_version: obj.plan_version } : {}),
+    ...('summary' in obj ? { summary: obj.summary } : {}),
+    ...('issues' in obj
+      ? {
+          issues: Array.isArray(obj.issues) ? issueObjects.map(sanitizedCritiqueIssue) : obj.issues,
+        }
+      : {}),
+    ...('domain_assessments' in obj ? { domain_assessments: obj.domain_assessments } : {}),
+    ...('boundary_challenges' in obj ? { boundary_challenges: obj.boundary_challenges } : {}),
+    ...('opportunities' in obj
+      ? {
+          opportunities: Array.isArray(obj.opportunities)
+            ? opportunityObjects.map(sanitizedCritiqueOpportunity)
+            : obj.opportunities,
+        }
+      : {}),
+    ...('review' in obj ? { review: obj.review } : {}),
   });
 }
 
@@ -400,53 +321,56 @@ function sanitizedUpdateIssues(issues: JsonValue[]): JsonValue[] {
   return issues
     .map((issue) => (isJsonObject(issue) ? issue : {}))
     .map((issue) => ({
-      id: issue.id ?? null,
-      verdict: issue.verdict ?? null,
-      verdict_reason: jqAlt(issue.verdict_reason, ''),
-      final_severity: issue.final_severity ?? null,
-      duplicate_of: 'duplicate_of' in issue ? issue.duplicate_of : null,
+      ...('id' in issue ? { id: issue.id } : {}),
+      ...('verdict' in issue ? { verdict: issue.verdict } : {}),
+      ...('verdict_reason' in issue ? { verdict_reason: issue.verdict_reason } : {}),
+      ...('final_severity' in issue ? { final_severity: issue.final_severity } : {}),
+      ...('duplicate_of' in issue ? { duplicate_of: issue.duplicate_of } : {}),
     }));
 }
 
 function sanitizedRejectedAppend(entries: JsonValue): JsonValue {
-  const list = jqAlt(entries, []);
-  if (!Array.isArray(list)) {
-    return list;
+  if (!Array.isArray(entries)) {
+    return entries;
   }
-  return list
+  return entries
     .map((entry) => (isJsonObject(entry) ? entry : {}))
     .map((entry) => ({
-      id: entry.id ?? null,
-      claim: entry.claim ?? null,
-      reason: entry.reason ?? null,
+      ...('id' in entry ? { id: entry.id } : {}),
+      ...('claim' in entry ? { claim: entry.claim } : {}),
+      ...('reason' in entry ? { reason: entry.reason } : {}),
     }));
 }
 
 export function sanitizeUpdateJson(file: string, expectedVersion?: number | string): void {
-  const expected = checkExpectedVersion('sanitize_update_json', expectedVersion);
+  checkExpectedVersion('sanitize_update_json', expectedVersion);
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   const obj: JsonObject = isJsonObject(parsed) ? parsed : {};
 
-  const extras = sortedExtraKeys(obj, [
+  const extraCount = sortedExtraKeys(obj, [
     'plan_version',
     'plan_markdown',
     'issues',
     'applied',
     'rejected_append',
     'systemic_dispositions',
-  ]).join(',');
-  if (extras) {
-    log(`WARNING: dropping unknown top-level fields from update: ${extras}`);
+  ]).length;
+  if (extraCount > 0) {
+    log(`WARNING: dropping unknown top-level fields from update (count=${String(extraCount)})`);
   }
 
-  const pv: JsonValue = expected ?? obj.plan_version ?? null;
-  const issues = jqAlt(obj.issues, []);
   writeJsonInPlace(file, {
-    plan_version: pv,
-    plan_markdown: obj.plan_markdown ?? null,
-    issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
-    applied: jqAlt(obj.applied, []),
-    rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
+    ...('plan_version' in obj ? { plan_version: obj.plan_version } : {}),
+    ...('plan_markdown' in obj ? { plan_markdown: obj.plan_markdown } : {}),
+    ...('issues' in obj
+      ? {
+          issues: Array.isArray(obj.issues) ? sanitizedUpdateIssues(obj.issues) : obj.issues,
+        }
+      : {}),
+    ...('applied' in obj ? { applied: obj.applied } : {}),
+    ...('rejected_append' in obj
+      ? { rejected_append: sanitizedRejectedAppend(obj.rejected_append) }
+      : {}),
     ...('systemic_dispositions' in obj
       ? { systemic_dispositions: sanitizedSystemicDispositions(obj.systemic_dispositions) }
       : {}),
@@ -454,28 +378,34 @@ export function sanitizeUpdateJson(file: string, expectedVersion?: number | stri
 }
 
 export function sanitizeUpdateMetaJson(file: string, expectedVersion?: number | string): void {
-  const expected = checkExpectedVersion('sanitize_update_meta_json', expectedVersion);
+  checkExpectedVersion('sanitize_update_meta_json', expectedVersion);
   const parsed = JSON.parse(readFileSync(file, 'utf8')) as JsonValue;
   const obj: JsonObject = isJsonObject(parsed) ? parsed : {};
 
-  const extras = sortedExtraKeys(obj, [
+  const extraCount = sortedExtraKeys(obj, [
     'plan_version',
     'issues',
     'applied',
     'rejected_append',
     'systemic_dispositions',
-  ]).join(',');
-  if (extras) {
-    log(`WARNING: dropping unknown top-level fields from update metadata: ${extras}`);
+  ]).length;
+  if (extraCount > 0) {
+    log(
+      `WARNING: dropping unknown top-level fields from update metadata (count=${String(extraCount)})`,
+    );
   }
 
-  const pv: JsonValue = expected ?? obj.plan_version ?? null;
-  const issues = jqAlt(obj.issues, []);
   writeJsonInPlace(file, {
-    plan_version: pv,
-    issues: Array.isArray(issues) ? sanitizedUpdateIssues(issues) : issues,
-    applied: jqAlt(obj.applied, []),
-    rejected_append: sanitizedRejectedAppend(obj.rejected_append ?? null),
+    ...('plan_version' in obj ? { plan_version: obj.plan_version } : {}),
+    ...('issues' in obj
+      ? {
+          issues: Array.isArray(obj.issues) ? sanitizedUpdateIssues(obj.issues) : obj.issues,
+        }
+      : {}),
+    ...('applied' in obj ? { applied: obj.applied } : {}),
+    ...('rejected_append' in obj
+      ? { rejected_append: sanitizedRejectedAppend(obj.rejected_append) }
+      : {}),
     ...('systemic_dispositions' in obj
       ? { systemic_dispositions: sanitizedSystemicDispositions(obj.systemic_dispositions) }
       : {}),

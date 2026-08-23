@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readReadinessProofState } from '../../src/core/readiness-store.js';
 import { runPlanLoop } from '../../src/index.js';
 import {
   captureStderr,
@@ -66,6 +67,7 @@ function writeJudgeVerdict(file: string, ready: boolean): void {
       rationale: ready
         ? 'The exact final candidate is acceptable.'
         : 'The current candidate is not ready.',
+      revision_issue: null,
       coverage_complete: true,
       unresolved_occurrence_ids: [],
       invariant_assessments: [],
@@ -114,9 +116,9 @@ describe('delivered-plan readiness proof', () => {
 
     const result = await run({ FAKE_CODEX_OUTPUT: critique }, false);
 
-    expect(result.status).toBe('clean');
-    expect(result.convergence).toMatchObject({ decision: 'ready', satisfied: true });
-    expect(result.convergence?.reasonCodes).not.toContain('fresh-review-required');
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({ decision: 'ready', satisfied: true });
+    expect(result.final?.readiness.reasonCodes).not.toContain('fresh-review-required');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
   });
 
@@ -148,15 +150,15 @@ describe('delivered-plan readiness proof', () => {
       true,
     );
 
-    expect(result.status).toBe('clean');
-    expect(result.convergence).toMatchObject({ decision: 'ready', satisfied: true });
-    expect(result.convergence?.reasonCodes).not.toContain('fresh-review-required');
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({ decision: 'ready', satisfied: true });
+    expect(result.final?.readiness.reasonCodes).not.toContain('fresh-review-required');
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain(
       '`file-line:package.json:1`',
     );
   });
 
-  it('requires a fresh independent review after a substantive standard-risk fix pass', async () => {
+  it('uses exact admitted fix-reviewer proof for a retained standard-risk replacement', async () => {
     writeStructuredPlanFile(input, 'Pre-fix Input');
     writeFileSync(
       input,
@@ -181,22 +183,22 @@ describe('delivered-plan readiness proof', () => {
       true,
     );
 
-    expect(result.status).toBe('needs-review');
-    expect(result.structuralStatus).toBe('clean');
-    expect(result.convergence).toMatchObject({
-      decision: 'unable-to-decide',
-      satisfied: false,
+    expect(result.final?.status).toBe('clean');
+    expect(result.final?.structuralStatus).toBe('clean');
+    expect(result.final?.readiness).toMatchObject({
+      decision: 'ready',
+      satisfied: true,
     });
-    expect(result.convergence?.reasonCodes).toContain('fresh-review-required');
-    expect(result.convergence?.unresolvedCoverage).toContain(
-      'canonical-plan:fresh-review-required',
-    );
+    expect(result.final?.readiness.reasonCodes).not.toContain('fresh-review-required');
+    expect(
+      result.final?.readiness.occurrenceCoverage.sources.find(
+        (source) => source.source === 'fix-reviewer',
+      ),
+    ).toMatchObject({ required: true, available: true, current: true, conclusive: true });
     expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain(
       '# Post-fix Candidate',
     );
-    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain(
-      'status: needs-review',
-    );
+    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
   });
 
   it('feeds structural reference review into the convergence decision', async () => {
@@ -210,21 +212,31 @@ describe('delivered-plan readiness proof', () => {
 
     const result = await run({ FAKE_CODEX_OUTPUT: critique }, false);
 
-    expect(result.status).toBe('needs-review');
-    expect(result.structuralStatus).toBe('needs-review');
-    expect(result.convergence).toMatchObject({
+    expect(result.final?.status).toBe('needs-review');
+    expect(result.final?.structuralStatus).toBe('needs-review');
+    expect(result.final?.readiness).toMatchObject({
       decision: 'unable-to-decide',
       satisfied: false,
     });
-    expect(result.convergence?.reasonCodes).toContain('final-artifact-needs-review');
-    expect(result.convergence?.reasonCodes).not.toContain('fresh-review-required');
-    expect(result.convergence?.unresolvedCoverage).toContain('final-artifact:needs-review');
-    expect(readFileSync(path.join(work, 'convergence.final.json'), 'utf8')).toContain(
-      '"satisfied": false',
+    expect(result.final?.readiness.reasonCodes).toContain('final-artifact-needs-review');
+    expect(result.final?.readiness.reasonCodes).toContain('fresh-review-required');
+    expect(result.final?.readiness.unresolvedProofIds).toContain('final-artifact:needs-review');
+    expect(result.final?.readiness.unresolvedProofIds).toContain(
+      'canonical-plan:fresh-review-required',
+    );
+    const persisted = readReadinessProofState(path.join(work, 'convergence.final.json'));
+    expect(persisted.schemaVersion).toBe(3);
+    expect(persisted.reduction).toEqual(
+      expect.objectContaining({
+        decision: result.final?.readiness.decision,
+        reasonCodes: result.final?.readiness.reasonCodes,
+        satisfied: result.final?.readiness.satisfied,
+        unresolvedProofIds: result.final?.readiness.unresolvedProofIds,
+      }),
     );
   });
 
-  it('does not let a final Judge replace fresh critic review after a high-risk fix', async () => {
+  it('requires exact fix-reviewer and final Judge proof for a retained high-risk replacement', async () => {
     writeReadinessAssessment(assessment, true);
     writeStructuredPlanFile(input, 'High-risk Pre-fix Input');
     writeFileSync(
@@ -232,7 +244,7 @@ describe('delivered-plan readiness proof', () => {
       `${readFileSync(input, 'utf8')}\n- Broken reference: \`missing-file.ts:99999\`\n`,
     );
     const critique = path.join(tmp, 'high-clean.json');
-    emptyCritique(critique);
+    emptyCritique(critique, 0, true);
     const fixed = path.join(tmp, 'high-fixed.md');
     writeStructuredPlanFile(fixed, 'High-risk Post-fix Candidate');
     const review = path.join(tmp, 'high-review.json');
@@ -256,16 +268,31 @@ describe('delivered-plan readiness proof', () => {
       true,
     );
 
-    expect(result.readiness).toMatchObject({ evaluated: true, ready: true });
-    expect(result).toMatchObject({
-      status: 'needs-review',
-      convergence: {
-        decision: 'unable-to-decide',
-        satisfied: false,
-        reasonCodes: ['fresh-review-required'],
+    expect(result.final?.judge).toMatchObject({
+      required: true,
+      evaluated: true,
+      available: true,
+      verdict: true,
+    });
+    expect(result.final).toMatchObject({
+      status: 'clean',
+      readiness: {
+        decision: 'ready',
+        satisfied: true,
+        reasonCodes: [],
       },
     });
-    expect(result.convergence?.unresolvedCoverage).toContain(
+    expect(
+      result.final?.readiness.occurrenceCoverage.sources.find(
+        (source) => source.source === 'fix-reviewer',
+      ),
+    ).toMatchObject({ required: true, available: true, current: true, conclusive: true });
+    expect(
+      result.final?.readiness.occurrenceCoverage.sources.find(
+        (source) => source.source === 'final-judge',
+      ),
+    ).toMatchObject({ required: true, available: true, current: true, conclusive: true });
+    expect(result.final?.readiness.unresolvedProofIds).not.toContain(
       'canonical-plan:fresh-review-required',
     );
   });

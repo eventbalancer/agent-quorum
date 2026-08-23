@@ -88,11 +88,26 @@ the non-fatal final localization pass and write `plan.final.<tag>.md`; `en`
 keeps the final plan English-only. Unknown flags print `unknown flag:` plus
 usage and exit 1. One positional input only.
 
+The readiness artifact, role-output, public API, and run-record schemas described
+below are a breaking current-version boundary. They do not change these flags,
+operator configuration keys, exit codes, package bin, or selector semantics.
+
 Before creating `plan.v0.md`, every run performs a read-only readiness
-assessment and freezes `readiness-contract.json`. Material questions reuse the
-Telegram clarification transport. With clarification disabled, the run still
-produces a plan, but unresolved material questions make the decision
-`unable-to-decide`.
+assessment and freezes schema-2 `readiness-contract.json`, including the trusted
+proof-catalog identity. Material questions reuse the Telegram clarification
+transport. With clarification disabled, the run still produces a plan, but
+unresolved material questions make the decision `unable-to-decide`.
+
+Readiness-bearing critic, creator-update, fix-reviewer, and Judge output must
+pass both structural schema validation and closed-world semantic admission.
+Admission verifies exact plan/candidate identity, source lineage, catalog
+membership, the fixed risk domains, material issue identities, retained
+context, invariant occurrences, and evidence grounding before proof changes.
+Each required evidence source reports every retained occurrence as
+`satisfied`, `not-applicable`, `violated`, or `unresolved`; grounded
+`not-applicable` resolves the occurrence, while an ungrounded use rejects the
+artifact. Violations remain negative, unresolved evidence remains inconclusive,
+and required-source disagreement cannot produce `clean`.
 
 `--quality` is an assurance appetite rather than an unconditional Judge switch.
 `quick` supports standard-risk assurance without Judge; `balanced` permits
@@ -102,31 +117,36 @@ whose appetite cannot supply a required gate reports `limits-exhausted` with
 reason code `assurance-appetite`. A Judge `ready: true` cannot override
 unresolved invariant, system, scan, boundary, or limit evidence.
 
+The fix pass records an exact reviewer source only when independently reviewed
+replacement bytes are retained. Disabled, skipped, rejected, restored, and
+no-replacement paths record an explicit exemption, so proof for discarded bytes
+cannot become current.
+
 After the fix pass and before the single `FINAL:` status, a deterministic split
 policy (`AGENT_QUORUM_SPLIT`, `AGENT_QUORUM_SPLIT_MIN_PHASES`, sized by
 `AGENT_QUORUM_MAX_PLAN_LINES` — see [configuration.md](configuration.md)) records
 `plan.split.json` and, when it fires, emits and validates a `plan.package/`.
 `summary.md` adds a `split_decision` line and, when a package is present,
-`package_dir`, `package_documents`, and `package_validation` lines. Structural
-status is reported independently from the four-way readiness decision. A broken
-plan/package blocks the run (exit 6) before final Judge; otherwise `ready` maps
-to frontmatter/status `clean`, while `revision-required`, `unable-to-decide`,
-and `limits-exhausted` map to `needs-review` with exit 0.
-`judge.final.meta.json` binds the reported result to the SHA-256 of the exact
-canonical plan, while `judge.final.json` exists only for a schema-valid verdict.
-The summary records `structural_status` and optional `structural_reason`; a
-Judge-enabled run also records the metadata-only `final_judge` classification
-and `final_judge_metadata` path. The Judge rationale remains available in the
-structured readiness artifact and public result, but is not copied into normal
-logs or the summary.
+`package_dir`, `package_documents`, and `package_validation` lines.
 
-The compatibility promises remain `best-effort`, `cumulative`, and `exhaustive`
-for `quick`, `balanced`, and `thorough`. New code should use `decision` and
-`reasonCodes`: `satisfied` is exactly `decision === 'ready'`. Missing required
-external evidence is an `unable-to-decide` reason, not a limit. Issue-budget,
-iteration-cap, and insufficient assurance appetite are limits. Input byte
-estimates and configured token limits remain telemetry and do not currently
-block provider calls.
+Finalization settles one exact canonical candidate. The schema-3
+`convergence.final.json`, deterministic system check, conditionally required fix
+review, and applicable schema-2 `judge.final.meta.json` must bind compatible
+exact bytes. A late content mutation invalidates current evidence, and a
+downgrade is not promoted again during the same finalization pass. Structural
+status is independent from the four-way readiness decision: a broken
+plan/package blocks the run (exit 6) before final Judge; otherwise exact
+compatible `ready` proof maps to frontmatter/status `clean`, while incomplete,
+negative, unavailable, stale, mismatched, or inconsistent proof maps to
+`needs-review` with exit 0. Judge exemption is explicit and distinct from an
+unavailable required verdict.
+
+The completeness promises are `best-effort`, `cumulative`, and `exhaustive` for
+`quick`, `balanced`, and `thorough`. The projected `satisfied` flag is exactly
+`decision === 'ready'`. Missing required external evidence is an
+`unable-to-decide` reason, not a limit. Issue-budget, iteration-cap, and
+insufficient assurance appetite are limits. Input byte estimates and configured
+token limits remain telemetry and do not currently block provider calls.
 
 With a positional existing plan, the original request is explicitly unavailable
 and the creator assessment freezes the plan-derived boundary. The applicable
@@ -143,8 +163,9 @@ subcommand, timeout) only warns and never blocks the run.
 
 When Telegram credentials are configured, the core run sends one best-effort
 completion notification after success or failure. Exit code 0 is reported as
-success, including negative or unknown-readiness `needs-review`; Judge-enabled
-notifications include structural status, readiness, and rationale. Non-zero
+success, including negative or unknown-readiness `needs-review`. Notifications
+render the same privacy-safe final status, structural status, decision, reasons,
+and applicable Judge state as the public/durable final projection. Non-zero
 exits report failure with the exit code and a compact reason. Notification
 delivery failures are logged as a warning and do not change the run exit code.
 `status`, `intervene`, and launch-parent failures do not send completion
@@ -179,6 +200,12 @@ outlives the terminal or Claude Code session that started it. Usage errors exit
 detach without this command, see the fallback in
 [`run-lifecycle.md`](run-lifecycle.md).
 
+`--resume` accepts only a stable `plan.vN.md` paired with a matching current
+schema-3 `convergence.vN.json` and schema-2 frozen contract. Missing, corrupt,
+or unsupported readiness state exits through the existing resume-failure path
+before stale finalization artifacts are archived; there is no state-free or
+cross-schema readiness bootstrap.
+
 ## Selector grammar
 
 `show`, `logs`, and `intervene` (and `status --watch`) resolve a run through one
@@ -203,17 +230,21 @@ process tree, artifact counts, an iteration table computed from the `$WORK`
 artifacts, interventions, the last log event, and follow/stop hints. Each
 completed iteration includes lineage and grounding classes, plan and retained
 context sizes, invariant and relationship coverage, optional omissions, and its
-continuation/stop reason. Status also shows the decision, reason codes, and
-opportunity count. A final artifact is labelled ready only when
-`convergence.final.json` has `decision: ready`, its candidate digest matches the
-current `plan.final.md`, and that plan declares `status: clean`; artifact
-presence alone is never treated as readiness.
+continuation/stop reason. Active-run telemetry reads only strict current
+schema-3 proof artifacts. Finished status renders the stored `RunRecord.final`
+as a concise overall status, readiness decision, and final-reason line; a clean
+result uses the corresponding exact-plan-bound success line. It does not
+re-derive a terminal decision from file presence or frontmatter. Full identity,
+occurrence coverage, and Judge facts remain available in the record projection.
 
 With no arguments in a TTY, it lists live-first then recent-finished runs and
 lets you pick one (a sole candidate auto-selects); a non-TTY prints the same
 scriptable listing (`name [state] <shortId> … workdir`) and never blocks.
-Finished Judge-enabled entries append their overall final status and final
-readiness; `show` prints the structural status and rationale as separate facts.
+Finished entries append their overall status and four-way decision; when Judge
+is required they also distinguish ready, not-ready, and unavailable evidence.
+`show` prints the same structural and readiness facts. Ledger records require
+run-record schema version 1; absent, unsupported, malformed, or pre-change
+records are skipped instead of projected as current proof.
 Discovery aggregates across all **known stores** — the ambient
 `AGENT_QUORUM_STATE_DIR`/`AGENT_QUORUM_PLANS_DIR`-derived store, the default
 `<home>/state`, and the project-local `<cwd>/.agents/plans/.runs` self-planning

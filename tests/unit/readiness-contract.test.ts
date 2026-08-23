@@ -5,12 +5,16 @@ import ajvModule from 'ajv/dist/2019.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   FrozenReadinessContractError,
+  READINESS_CONTRACT_SCHEMA_VERSION,
+  READINESS_PROOF_CATALOG_SEED_VERSION,
+  RETAINED_CONTEXT_CATEGORIES,
   RISK_DOMAINS,
   ReadinessContractValidationError,
   applicableRiskDomains,
   buildReadinessContract,
   computeBoundaryDigest,
   computeContractDigest,
+  computeReadinessProofCatalogSeedDigest,
   highRiskDomains,
   parseReadinessAssessment,
   parseReadinessContract,
@@ -24,6 +28,8 @@ import { REPO_ROOT } from '../helpers/harness.js';
 
 const Ajv2019 = ajvModule.default;
 const roots: string[] = [];
+const SOURCE_DIGEST = 'a'.repeat(64);
+const SYSTEM_DIGEST = 'b'.repeat(64);
 
 function assessment(): JsonObject {
   return {
@@ -57,8 +63,8 @@ function build(
 ): ReadinessContract {
   return buildReadinessContract({
     assessment: raw,
-    sourceDigest: 'source-digest',
-    systemDigest: 'system-digest',
+    sourceDigest: SOURCE_DIGEST,
+    systemDigest: SYSTEM_DIGEST,
     quality,
     iterationLimit: 8,
     issueBudget: 8,
@@ -153,6 +159,31 @@ describe('readiness assessment contract', () => {
       'options must contain at least 2 string entries',
     );
   });
+
+  it('rejects provider-controlled material-question identities without echoing them', () => {
+    const secret = 'MATERIAL_QUESTION_ID_SECRET_437ab9';
+    const invalidQuestion = cloneObject(assessment());
+    if (
+      !('material_questions' in invalidQuestion) ||
+      !Array.isArray(invalidQuestion.material_questions)
+    ) {
+      throw new Error('fixture material_questions must be an array');
+    }
+    const first = invalidQuestion.material_questions[0];
+    if (typeof first !== 'object' || first === null || Array.isArray(first)) {
+      throw new Error('fixture material question must be an object');
+    }
+    first.id = secret;
+
+    let message = '';
+    try {
+      parseReadinessAssessment(invalidQuestion);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('material questions[0].id must use the Q<number> format');
+    expect(message).not.toContain(secret);
+  });
 });
 
 describe('frozen readiness contract', () => {
@@ -160,6 +191,7 @@ describe('frozen readiness contract', () => {
     const quick = build(assessment(), 'quick');
     const thorough = build(assessment(), 'thorough');
 
+    expect(quick.schemaVersion).toBe(READINESS_CONTRACT_SCHEMA_VERSION);
     expect(quick.appetite).toEqual({
       quality: 'quick',
       iterationLimit: 8,
@@ -169,11 +201,26 @@ describe('frozen readiness contract', () => {
     });
     expect(thorough.appetite.judgeAllowed).toBe(true);
     expect(thorough.appetite.exhaustiveApplicableDomains).toBe(true);
+    const seedContent = {
+      seedVersion: READINESS_PROOF_CATALOG_SEED_VERSION,
+      riskDomains: [...RISK_DOMAINS],
+      retainedContextCategories: [...RETAINED_CONTEXT_CATEGORIES],
+    } as const;
+    expect(quick.proofCatalogSeed).toEqual({
+      ...seedContent,
+      seedDigest: computeReadinessProofCatalogSeedDigest(seedContent),
+    });
+    expect(quick.proofCatalogSeed.seedDigest).toBe(
+      '8ed637c3b8fd6203c825d66a4ff653295e4f4415fb57737f998c39a17052b7f9',
+    );
+    expect(quick.proofCatalogSeed).not.toHaveProperty('invariantIds');
+    expect(quick.proofCatalogSeed).not.toHaveProperty('occurrenceIds');
     expect(quick.boundaryDigest).toBe(computeBoundaryDigest(quick.boundary));
     const content = {
       schemaVersion: quick.schemaVersion,
       sourceDigest: quick.sourceDigest,
       systemDigest: quick.systemDigest,
+      proofCatalogSeed: quick.proofCatalogSeed,
       boundary: quick.boundary,
       appetite: quick.appetite,
       domainAssessments: quick.domainAssessments,
@@ -188,6 +235,47 @@ describe('frozen readiness contract', () => {
     expect(requiresReadinessJudge(quick)).toBe(true);
   });
 
+  it.each([
+    ['sourceDigest', 'A'.repeat(64), SYSTEM_DIGEST],
+    ['systemDigest', SOURCE_DIGEST, 'b'.repeat(63)],
+  ])('rejects malformed %s at direct construction', (label, sourceDigest, systemDigest) => {
+    expect(() =>
+      buildReadinessContract({
+        assessment: assessment(),
+        sourceDigest,
+        systemDigest,
+        quality: 'balanced',
+        iterationLimit: 8,
+        issueBudget: 8,
+        operatorDecisionIds: [],
+      }),
+    ).toThrow(`${label} must be a lowercase 64-character SHA-256 digest`);
+  });
+
+  it.each([
+    ['sourceDigest', (contract: JsonObject) => (contract.sourceDigest = 'A'.repeat(64))],
+    ['systemDigest', (contract: JsonObject) => (contract.systemDigest = 'b'.repeat(63))],
+    [
+      'proofCatalogSeed.seedDigest',
+      (contract: JsonObject) => {
+        const seed = contract.proofCatalogSeed;
+        if (!isJsonObject(seed)) {
+          throw new TypeError('proof catalog seed fixture must be an object');
+        }
+        seed.seedDigest = 'not-a-digest';
+      },
+    ],
+    ['boundaryDigest', (contract: JsonObject) => (contract.boundaryDigest = 'A'.repeat(64))],
+    ['contractDigest', (contract: JsonObject) => (contract.contractDigest = 'f'.repeat(63))],
+  ] as const)('rejects malformed persisted %s', (label, mutate) => {
+    const contract = cloneObject(build());
+    mutate(contract);
+
+    expect(() => parseReadinessContract(contract)).toThrow(
+      `${label} must be a lowercase 64-character SHA-256 digest`,
+    );
+  });
+
   it('produces the same digest for provider domain order and JSON property order changes', () => {
     const forward = assessment();
     const reversed = cloneObject(forward);
@@ -196,7 +284,34 @@ describe('frozen readiness contract', () => {
     }
     reversed.domain_assessments.reverse();
 
-    expect(build(forward).contractDigest).toBe(build(reversed).contractDigest);
+    const built = build(forward);
+    expect(built.contractDigest).toBe(build(reversed).contractDigest);
+    const reorderedProperties = Object.fromEntries(Object.entries(built).reverse());
+    expect(parseReadinessContract(JSON.stringify(reorderedProperties))).toEqual(built);
+  });
+
+  it('rejects changed or reordered frozen proof-catalog seed identities', () => {
+    const reordered = cloneObject(build());
+    if (
+      !('proofCatalogSeed' in reordered) ||
+      !isJsonObject(reordered.proofCatalogSeed) ||
+      !Array.isArray(reordered.proofCatalogSeed.riskDomains)
+    ) {
+      throw new Error('fixture proofCatalogSeed.riskDomains must be an array');
+    }
+    reordered.proofCatalogSeed.riskDomains.reverse();
+    expect(() => parseReadinessContract(reordered)).toThrow(
+      'proofCatalogSeed.riskDomains[0] must be correctness',
+    );
+
+    const tamperedDigest = cloneObject(build());
+    if (!('proofCatalogSeed' in tamperedDigest) || !isJsonObject(tamperedDigest.proofCatalogSeed)) {
+      throw new Error('fixture proofCatalogSeed must be an object');
+    }
+    tamperedDigest.proofCatalogSeed.seedDigest = 'f'.repeat(64);
+    expect(() => parseReadinessContract(tamperedDigest)).toThrow(
+      'proofCatalogSeed.seedDigest does not match the frozen seed',
+    );
   });
 
   it('rejects tampered content and quality-inconsistent appetite flags', () => {
@@ -253,13 +368,17 @@ describe('frozen readiness contract', () => {
     expect(readReadinessContract(file)).toEqual(original);
   });
 
-  it('throws a strict validation error when a persisted contract is malformed', () => {
+  it('strictly rejects a persisted schema-v1 contract before accepting current fields', () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'agent-quorum-readiness-invalid.'));
     roots.push(root);
     const file = path.join(root, 'readiness-contract.json');
-    writeFileSync(file, '{"schemaVersion":1}\n');
+    const legacy = cloneObject(build());
+    legacy.schemaVersion = 1;
+    delete legacy.proofCatalogSeed;
+    writeFileSync(file, `${JSON.stringify(legacy)}\n`);
 
     expect(() => readReadinessContract(file)).toThrow(ReadinessContractValidationError);
+    expect(() => readReadinessContract(file)).toThrow('readiness contract schemaVersion must be 2');
   });
 });
 
@@ -282,6 +401,24 @@ describe('readiness assessment provider schema', () => {
     }
     duplicate.domain_assessments[7] = duplicate.domain_assessments[0] ?? null;
     expect(validate(duplicate)).toBe(false);
+
+    const secretQuestion = cloneObject(valid);
+    if (
+      !('material_questions' in secretQuestion) ||
+      !Array.isArray(secretQuestion.material_questions)
+    ) {
+      throw new Error('fixture material_questions must be an array');
+    }
+    const firstQuestion = secretQuestion.material_questions[0];
+    if (
+      typeof firstQuestion !== 'object' ||
+      firstQuestion === null ||
+      Array.isArray(firstQuestion)
+    ) {
+      throw new Error('fixture material question must be an object');
+    }
+    firstQuestion.id = 'MATERIAL_QUESTION_ID_SECRET_437ab9';
+    expect(validate(secretQuestion)).toBe(false);
 
     const missing = cloneObject(valid);
     if (!('domain_assessments' in missing) || !Array.isArray(missing.domain_assessments)) {

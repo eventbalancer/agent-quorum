@@ -1,22 +1,49 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Scratch } from '../../src/runtime/scratch.js';
+import type { RunContext } from '../../src/core/run-context.js';
+import {
+  createReadinessProofCatalog,
+  createReadinessProofState,
+  type FindingRecord,
+  type ReadinessInvariantRecord,
+} from '../../src/core/readiness-proof.js';
 import { retainedRolePrompt } from '../../src/stages/plan/retained-context.js';
 import { makeTestRunContext } from '../helpers/test-context.js';
 import { writeStructuredPlanFile } from '../helpers/harness.js';
 
 const roots: string[] = [];
 const scratches: Scratch[] = [];
+
+function setProofVersion(
+  ctx: RunContext,
+  planVersion: number,
+  findings: readonly FindingRecord[] = [],
+  invariants: readonly ReadinessInvariantRecord[] = [],
+): void {
+  const catalog = createReadinessProofCatalog({
+    expectedPlanVersion: planVersion,
+    invariants: invariants.map((invariant) => ({
+      invariantId: invariant.id,
+      occurrenceIds: invariant.occurrences.map((occurrence) => occurrence.id),
+    })),
+    materialIssueIds: findings.map((finding) => finding.issueRef),
+  });
+  ctx.readinessProof = createReadinessProofState({
+    quality: ctx.settings.quality,
+    matrix: ctx.quality,
+    mode: ctx.mode,
+    sourceDigest: ctx.readinessProof.sourceDigest,
+    authoritativeDigest: ctx.systemContext.digest,
+    relationshipIds: ctx.systemContext.relationships.map((relationship) => relationship.id),
+    maxIters: ctx.settings.maxIters,
+    trustedCatalog: catalog,
+    findings,
+    invariants,
+  });
+}
 
 afterEach(() => {
   for (const scratch of scratches.splice(0)) {
@@ -51,7 +78,7 @@ describe('retained role context', () => {
       `${JSON.stringify({ id: 'op-clarify-scope', target: 'all', message: 'Keep the declared scope.' })}\n`,
     );
     const ctx = makeTestRunContext(tmp, work, scratch, { mode: 'plan', quality });
-    ctx.convergence.findings = [
+    const findings: FindingRecord[] = [
       {
         id: 'I-v0-C1',
         issueRef: 'v0.C1',
@@ -65,23 +92,21 @@ describe('retained role context', () => {
         },
       },
     ];
-    ctx.convergence.invariants = [
+    const invariants: ReadinessInvariantRecord[] = [
       {
         id: 'I-v0-C1',
         sourceFinding: 'I-v0-C1',
         statement: 'Every consumer uses the same contract.',
-        status: 'active',
         occurrences: [
           {
             id: `O-${'a'.repeat(64)}`,
             dimension: 'consumer',
             subject: 'api',
-            disposition: 'unresolved',
-            evidenceRefs: [],
           },
         ],
       },
     ];
+    setProofVersion(ctx, 0, findings, invariants);
     const roleSkills = {
       creator: ctx.skills.creatorSkill,
       critic: ctx.skills.criticSkill,
@@ -115,24 +140,22 @@ describe('retained role context', () => {
       expect(prompt).toContain(`quality_promise: ${promise}`);
       expect(prompt.split('Keep the declared scope.')).toHaveLength(2);
     }
-    const persisted = JSON.parse(readFileSync(path.join(work, 'convergence.v0.json'), 'utf8')) as {
-      contextDeliveries: {
-        role: string;
-        stage: string;
-        mandatoryBytes: number;
-        totalInputBytes: number;
-      }[];
-    };
-    expect(persisted.contextDeliveries.map(({ role, stage }) => ({ role, stage }))).toEqual(
+    expect(
+      ctx.readinessProof.contextDeliveries.map(({ role, stage }) => ({ role, stage })),
+    ).toEqual(
       ['creator', 'critic', 'fixer', 'reviewer', 'translator', 'judge'].map((role) => ({
         role,
         stage: 'fixture',
       })),
     );
-    expect(persisted.contextDeliveries.every((delivery) => delivery.mandatoryBytes > 0)).toBe(true);
-    expect(persisted.contextDeliveries.every((delivery) => delivery.totalInputBytes > 0)).toBe(
-      true,
-    );
+    expect(
+      ctx.readinessProof.contextDeliveries.every((delivery) => delivery.mandatoryBytes > 0),
+    ).toBe(true);
+    expect(
+      ctx.readinessProof.contextDeliveries.every((delivery) => delivery.totalInputBytes > 0),
+    ).toBe(true);
+    expect(ctx.readinessProof.operatorDecisionIds).toContain('op-clarify-scope');
+    expect(existsSync(path.join(work, 'convergence.v0.json'))).toBe(false);
   });
 
   it('compacts quick history while balanced and thorough retain full role metadata', () => {
@@ -179,6 +202,7 @@ describe('retained role context', () => {
     );
 
     const quick = makeTestRunContext(tmp, work, scratch, { quality: 'quick' });
+    setProofVersion(quick, 1);
     const quickPrompt = retainedRolePrompt({
       ctx: quick,
       role: 'critic',
@@ -197,12 +221,13 @@ describe('retained role context', () => {
     );
     expect(quickPrompt).not.toContain('"plan_markdown"');
     expect(quickPrompt).not.toContain('PREVIOUS PLAN BODY MUST NOT BE RETAINED');
-    expect(quick.convergence.contextDeliveries.at(-1)?.reductions).toMatchObject([
+    expect(quick.readinessProof.contextDeliveries.at(-1)?.reductions).toMatchObject([
       { category: 'resolved-minor-nit-and-rejected-detail' },
     ]);
 
     for (const quality of ['balanced', 'thorough'] as const) {
       const full = makeTestRunContext(tmp, work, scratch, { quality });
+      setProofVersion(full, 1);
       const prompt = retainedRolePrompt({
         ctx: full,
         role: 'critic',
@@ -240,15 +265,15 @@ describe('retained role context', () => {
     });
 
     expect(prompt).toContain('## Mandatory retained run context');
-    expect(ctx.convergence.exhaustedLimits).not.toContain('provider-context');
-    expect(existsSync(path.join(work, 'convergence.v0.json'))).toBe(true);
-    expect(ctx.convergence.contextDeliveries.at(-1)).toMatchObject({
+    expect(ctx.readinessProof.exhaustedLimits).toEqual([]);
+    expect(existsSync(path.join(work, 'convergence.v0.json'))).toBe(false);
+    expect(ctx.readinessProof.contextDeliveries.at(-1)).toMatchObject({
       role: 'critic',
       stage: 'review',
       inputTokenLimit: 10,
       inputLimitSource: 'operator',
     });
-    expect(ctx.convergence.contextDeliveries.at(-1)?.totalInputBytes).toBeGreaterThan(10);
+    expect(ctx.readinessProof.contextDeliveries.at(-1)?.totalInputBytes).toBeGreaterThan(10);
   });
 
   it('records an unknown provider bound without downgrading convergence', () => {
@@ -272,9 +297,11 @@ describe('retained role context', () => {
     });
 
     expect(prompt).toContain('## Mandatory retained run context');
-    expect(ctx.convergence.exhaustedLimits).not.toContain('unknown-provider-context');
-    expect(ctx.convergence.unresolvedCoverage).not.toContain('critic:review:unknown-context-bound');
-    expect(ctx.convergence.contextDeliveries.at(-1)).toMatchObject({
+    expect(ctx.readinessProof.exhaustedLimits).toEqual([]);
+    expect(ctx.readinessProof.reduction.unresolvedProofIds).not.toContain(
+      'critic:review:unknown-context-bound',
+    );
+    expect(ctx.readinessProof.contextDeliveries.at(-1)).toMatchObject({
       role: 'critic',
       stage: 'review',
       inputTokenLimit: null,

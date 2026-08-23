@@ -9,7 +9,6 @@ import {
 } from '../core/run-store.js';
 import { knownStateDirs, resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
-import { readinessLabel } from '../types.js';
 import { systemProbes } from './probes.js';
 
 export interface RunCandidate {
@@ -69,20 +68,17 @@ function timeField(candidate: RunCandidate): string {
 function formatLine(candidate: RunCandidate, index: number, color: boolean): string {
   const record = candidate.record;
   const meta = dim(`${shortRunId(record.runId)}  ${timeField(candidate)}`, color);
-  const readiness = record.finalReadiness;
-  const convergence = record.finalConvergence;
   const facts: string[] = [];
-  if (record.finalStatus !== undefined || readiness !== undefined || convergence !== undefined) {
-    facts.push(`final=${record.finalStatus ?? 'unknown'}`);
-  }
-  if (convergence !== undefined) {
-    facts.push(`decision=${convergence.decision}`);
-    facts.push(
-      `reasons=${convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'none'}`,
-    );
-  }
-  if (readiness !== undefined) {
-    facts.push(`readiness=${readinessLabel(readiness.ready)}`);
+  if (record.final !== undefined) {
+    const final = record.final;
+    facts.push(`final=${final.status}`);
+    facts.push(`decision=${final.readiness.decision}`);
+    facts.push(`reasons=${final.reasons.length > 0 ? final.reasons.join(',') : 'none'}`);
+    if (final.judge.required) {
+      facts.push(
+        `judge=${final.judge.available ? (final.judge.verdict === true ? 'ready' : 'not-ready') : 'unavailable'}`,
+      );
+    }
   }
   const finalFacts = facts.length > 0 ? `  ${facts.join(' ')}` : '';
   return `  ${index}) ${record.name}  [${candidate.state}]${finalFacts}  ${meta}  ${record.workDir}`;

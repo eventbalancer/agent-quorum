@@ -93,9 +93,6 @@ export interface ReferenceCounters {
   unresolved: number;
   staleLine: number;
   glob: number;
-  ambiguousSamples: string[];
-  unresolvedSamples: string[];
-  staleLineSamples: string[];
 }
 
 // The reference escapes only '.', '[' and '/' (sed 's|[.[/]|\\&|g'); other ERE
@@ -146,9 +143,6 @@ function resolvePlanReferences(
     unresolved: 0,
     staleLine: 0,
     glob: 0,
-    ambiguousSamples: [],
-    unresolvedSamples: [],
-    staleLineSamples: [],
   };
   const findings: Finding[] = [];
 
@@ -183,12 +177,10 @@ function resolvePlanReferences(
         }
       } else if (matches.length > 1) {
         counters.ambiguous += 1;
-        counters.ambiguousSamples.push(`${file}:${line} (${matches.length} candidates)`);
         findings.push({ category: 'ambiguous', file, line, candidates: matches.slice(0, 10) });
         continue;
       } else {
         counters.unresolved += 1;
-        counters.unresolvedSamples.push(`${file}:${line}`);
         findings.push({ category: 'unresolved', file, line });
         continue;
       }
@@ -197,7 +189,6 @@ function resolvePlanReferences(
     const totalLines = lineCountOf(path.join(projectRoot, resolved));
     if (totalLines !== undefined && (line < 1 || line > totalLines)) {
       counters.staleLine += 1;
-      counters.staleLineSamples.push(`${resolved}:${line} (has ${totalLines})`);
       findings.push({ category: 'stale_line', file: resolved, line, actual_lines: totalLines });
     }
   }
@@ -247,19 +238,13 @@ function reportReferenceFindings(counters: ReferenceCounters): void {
     log(`    glob (skipped):      ${counters.glob}`);
   }
   if (counters.ambiguous > 0) {
-    log(
-      `    ambiguous basename:  ${counters.ambiguous} (e.g. ${counters.ambiguousSamples[0] ?? ''})`,
-    );
+    log(`    ambiguous basename:  ${counters.ambiguous}`);
   }
   if (counters.unresolved > 0) {
-    log(
-      `    unresolved:          ${counters.unresolved} (likely future files; e.g. ${counters.unresolvedSamples[0] ?? ''})`,
-    );
+    log(`    unresolved:          ${counters.unresolved} (likely future files)`);
   }
   if (counters.staleLine > 0) {
-    for (const sample of counters.staleLineSamples) {
-      err(`stale line: ${sample}`);
-    }
+    err(`stale line references: ${counters.staleLine}`);
     log(`WARNING: ${counters.staleLine} line-out-of-bounds references in plan.final.md`);
   }
 }

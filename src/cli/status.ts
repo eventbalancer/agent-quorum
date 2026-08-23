@@ -10,9 +10,11 @@ import { resolveArtifactRoots } from '../runtime/paths.js';
 import { resolveConfigForHome } from '../core/config.js';
 import { commandOf, ppidOf, ps, psField } from '../runtime/proc.js';
 import { convergenceHealth, critiqueHealth } from '../core/metrics.js';
-import { fileSha256, readConvergenceState } from '../core/convergence.js';
+import { projectOccurrenceCoverage } from '../core/readiness-proof.js';
+import { readReadinessProofStateForTelemetry } from '../core/readiness-store.js';
 import { resolveRunState, type RunRecord } from '../core/run-store.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
+import type { FinalProjection } from '../types.js';
 import { listCandidates, pickInteractive, renderListing } from './picker.js';
 import { systemProbes } from './probes.js';
 import { parseSelector, resolveSelector, isRunRecord } from './select.js';
@@ -390,31 +392,32 @@ function printIterationProof(
   } catch {
     /* an interrupted critique remains observable without breaking status */
   }
-  const state = readConvergenceState(path.join(work, `convergence.v${iteration}.json`));
+  const state = readReadinessProofStateForTelemetry(
+    path.join(work, `convergence.v${iteration}.json`),
+  );
+  const occurrenceCoverage = state === undefined ? undefined : projectOccurrenceCoverage(state);
   const deliveries =
     state?.contextDeliveries.filter((delivery) => delivery.planVersion === iteration) ?? [];
   const mandatoryBytes = deliveries.reduce((sum, delivery) => sum + delivery.mandatoryBytes, 0);
   const optionalBytes = deliveries.reduce((sum, delivery) => sum + delivery.optionalBytes, 0);
   const omitted = [...new Set(deliveries.flatMap((delivery) => delivery.omittedCategories))];
-  const active = state?.invariants.filter((invariant) => invariant.status === 'active').length ?? 0;
+  const resolvedOccurrenceIds = new Set(occurrenceCoverage?.resolvedOccurrenceIds ?? []);
+  const active = occurrenceCoverage?.invariants.length ?? 0;
   const covered =
-    state?.invariants.filter((invariant) => invariant.status === 'resolved').length ?? 0;
-  const unresolved =
-    state?.invariants.reduce(
-      (count, invariant) =>
-        count +
-        invariant.occurrences.filter(
-          (occurrence) =>
-            occurrence.disposition === 'violated' || occurrence.disposition === 'unresolved',
-        ).length,
-      0,
-    ) ?? 0;
+    occurrenceCoverage?.invariants.filter((invariant) =>
+      invariant.occurrenceIds.every((id) => resolvedOccurrenceIds.has(id)),
+    ).length ?? 0;
+  const unresolved = new Set([
+    ...(occurrenceCoverage?.violatedOccurrenceIds ?? []),
+    ...(occurrenceCoverage?.unresolvedOccurrenceIds ?? []),
+    ...(occurrenceCoverage?.disagreementOccurrenceIds ?? []),
+  ]).size;
   const plan = path.join(work, `plan.v${iteration}.md`);
   const planLines = existsSync(plan) ? fileLineCount(plan) : 0;
   const planBytes = existsSync(plan) ? statSync(plan).size : 0;
-  const reason = state?.stopReason ?? 'unavailable';
+  const reason = state?.reduction.stopReason ?? 'unavailable';
   write(
-    `      ${pal.DIM}proof: lineage=${rich === undefined ? 'unavailable' : JSON.stringify(rich.lineage)} grounding=${rich === undefined ? 'unavailable' : JSON.stringify(rich.grounding)} evidence_kinds=${rich === undefined ? 'unavailable' : JSON.stringify(rich.evidenceKinds)} plan=${planLines}L/${planBytes}B retained=${mandatoryBytes}B+${optionalBytes}B invariants=${active}/${covered}/${unresolved} relationships=${relationshipCoverage(work, iteration)} opportunities=${state?.opportunities.length ?? 0} decision=${state?.decision ?? 'unavailable'} reason_codes=${state !== undefined && state.reasonCodes.length > 0 ? state.reasonCodes.join('|') : 'none'} omitted=${omitted.length > 0 ? omitted.join('|') : 'none'} reason=${reason}${pal.R}\n`,
+    `      ${pal.DIM}proof: lineage=${rich === undefined ? 'unavailable' : JSON.stringify(rich.lineage)} grounding=${rich === undefined ? 'unavailable' : JSON.stringify(rich.grounding)} evidence_kinds=${rich === undefined ? 'unavailable' : JSON.stringify(rich.evidenceKinds)} plan=${planLines}L/${planBytes}B retained=${mandatoryBytes}B+${optionalBytes}B invariants=${active}/${covered}/${unresolved} relationships=${relationshipCoverage(work, iteration)} opportunities=${state?.opportunities.length ?? 0} decision=${state?.reduction.decision ?? 'unavailable'} reason_codes=${state !== undefined && state.reduction.reasonCodes.length > 0 ? state.reduction.reasonCodes.join('|') : 'none'} omitted=${omitted.length > 0 ? omitted.join('|') : 'none'} reason=${reason}${pal.R}\n`,
   );
 }
 
@@ -499,42 +502,37 @@ function printIterTable(work: string, pal: Palette, write: (s: string) => void):
   }
 }
 
-function printFinalArtifactStatus(work: string, pal: Palette, write: (s: string) => void): void {
+function printFinalArtifactStatus(
+  work: string,
+  final: FinalProjection | undefined,
+  pal: Palette,
+  write: (s: string) => void,
+): void {
   const finalPlan = path.join(work, 'plan.final.md');
   if (!existsSync(finalPlan)) {
     return;
   }
-  const convergence = readConvergenceState(path.join(work, 'convergence.final.json'));
-  const lines = readFileSync(finalPlan, 'utf8').split('\n');
-  const closing =
-    lines[0]?.trim() === '---' ? lines.slice(1).findIndex((line) => line.trim() === '---') : -1;
-  const statusLine =
-    closing < 0 ? undefined : lines.slice(1, closing + 1).find((line) => /^status:\s+/.test(line));
-  const declaredStatus = /^(clean|needs-review|blocked)$/.exec(
-    statusLine?.split(':').slice(1).join(':').trim() ?? '',
-  )?.[1];
-  const exactCandidateProof = convergence?.canonicalPlanSha256 === fileSha256(finalPlan);
-  if (convergence?.decision === 'ready' && declaredStatus === 'clean' && exactCandidateProof) {
+  if (final === undefined) {
+    write(`  ${pal.YEL}final artifact present; final projection unavailable${pal.R}\n`);
+    return;
+  }
+  if (final.status === 'clean') {
     write(`  ${pal.GRN}✓ ready (final status clean; exact plan bound)${pal.R}\n`);
     return;
   }
-  if (declaredStatus === 'blocked') {
+  if (final.status === 'blocked') {
     write(
-      `  ${pal.YEL}final artifact present; status=blocked decision=${convergence?.decision ?? 'unavailable'} reasons=${convergence !== undefined && convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'unavailable'}${pal.R}\n`,
+      `  ${pal.YEL}final artifact present; status=blocked decision=${final.readiness.decision} reasons=${final.reasons.length > 0 ? final.reasons.join(',') : 'none'}${pal.R}\n`,
     );
     return;
   }
-  if (
-    declaredStatus === 'needs-review' ||
-    convergence?.satisfied === false ||
-    (convergence?.satisfied === true && !exactCandidateProof)
-  ) {
-    write(
-      `  ${pal.YEL}final artifact present; status=needs-review decision=${convergence?.decision ?? 'unavailable'} reasons=${convergence !== undefined && convergence.reasonCodes.length > 0 ? convergence.reasonCodes.join(',') : 'unavailable'}${pal.R}\n`,
-    );
-    return;
-  }
-  write(`  ${pal.YEL}final artifact present; convergence proof unavailable${pal.R}\n`);
+  write(
+    `  ${pal.YEL}final artifact present; status=needs-review decision=${final.readiness.decision} reasons=${final.reasons.length > 0 ? final.reasons.join(',') : 'none'}${pal.R}\n`,
+  );
+}
+
+function finalProjectionForPid(root: number): FinalProjection | undefined {
+  return listCandidates().find((candidate) => candidate.record.pid === root)?.record.final;
 }
 
 function countFiles(work: string, pattern: RegExp): number {
@@ -665,7 +663,7 @@ function printStatus(root: number, pal: Palette, write: (s: string) => void): vo
     write(`  ${pal.YEL}(a provider is retrying API calls, waiting not progressing)${pal.R}\n`);
   }
 
-  printFinalArtifactStatus(work, pal, write);
+  printFinalArtifactStatus(work, finalProjectionForPid(root), pal, write);
 
   write(`\n  follow: tail -F ${logPath}\n`);
   write(`  intervene: agent-quorum intervene --work ${work} --target all "message"\n`);

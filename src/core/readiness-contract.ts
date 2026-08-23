@@ -1,10 +1,12 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { canonicalJsonSha256 } from './digest.js';
 import { isJsonObject, type JsonObject, type JsonValue } from './json.js';
 import type { Quality, RiskApplicability, RiskDomain, RiskLevel } from '../types.js';
 
-export const READINESS_CONTRACT_SCHEMA_VERSION = 1;
+export const READINESS_CONTRACT_SCHEMA_VERSION = 2;
+export const READINESS_PROOF_CATALOG_SEED_VERSION = 1;
 export const RISK_DOMAINS = [
   'correctness',
   'public-compatibility',
@@ -15,6 +17,26 @@ export const RISK_DOMAINS = [
   'production-operability',
   'performance-cost',
 ] as const satisfies readonly RiskDomain[];
+export const RETAINED_CONTEXT_CATEGORIES = [
+  'original-scope',
+  'authoritative-system-facts',
+  'operator-decisions',
+  'material-findings',
+  'active-invariants',
+  'quality-and-limits',
+] as const;
+
+export type RetainedContextCategory = (typeof RETAINED_CONTEXT_CATEGORIES)[number];
+
+export interface ReadinessProofCatalogSeedContent {
+  readonly seedVersion: 1;
+  readonly riskDomains: readonly RiskDomain[];
+  readonly retainedContextCategories: readonly RetainedContextCategory[];
+}
+
+export interface ReadinessProofCatalogSeed extends ReadinessProofCatalogSeedContent {
+  readonly seedDigest: string;
+}
 
 export interface ReadinessBoundary {
   readonly goal: string;
@@ -53,9 +75,10 @@ export interface ReadinessAssessment {
 }
 
 export interface ReadinessContract {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly sourceDigest: string;
   readonly systemDigest: string;
+  readonly proofCatalogSeed: ReadinessProofCatalogSeed;
   readonly boundary: ReadinessBoundary;
   readonly appetite: ReadinessAppetite;
   readonly domainAssessments: readonly ReadinessDomainAssessment[];
@@ -89,6 +112,7 @@ const CONTRACT_KEYS = [
   'schemaVersion',
   'sourceDigest',
   'systemDigest',
+  'proofCatalogSeed',
   'boundary',
   'appetite',
   'domainAssessments',
@@ -140,6 +164,16 @@ function nonBlankString(value: JsonValue | undefined, label: string): string {
     return invalid(`${label} must be a non-blank string`);
   }
   return value;
+}
+
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+function sha256Digest(value: JsonValue | undefined, label: string): string {
+  const digest = nonBlankString(value, label);
+  if (!SHA256_PATTERN.test(digest)) {
+    return invalid(`${label} must be a lowercase 64-character SHA-256 digest`);
+  }
+  return digest;
 }
 
 function uniqueStrings(
@@ -261,8 +295,12 @@ function parseDomainAssessments(
 function parseMaterialQuestion(value: JsonValue, index: number): ReadinessMaterialQuestion {
   const label = `material questions[${index}]`;
   const object = exactObject(value, ['id', 'question', 'rationale', 'options'], label);
+  const id = nonBlankString(object.id, `${label}.id`);
+  if (!/^Q[0-9]{1,9}$/.test(id)) {
+    invalid(`${label}.id must use the Q<number> format`);
+  }
   return {
-    id: nonBlankString(object.id, `${label}.id`),
+    id,
     question: nonBlankString(object.question, `${label}.question`),
     rationale: nonBlankString(object.rationale, `${label}.rationale`),
     options: uniqueStrings(object.options, `${label}.options`, 2, 6),
@@ -334,42 +372,72 @@ function parseAppetite(value: JsonValue | undefined): ReadinessAppetite {
   };
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null) {
-    return 'null';
+function exactOrderedStrings<T extends string>(
+  value: JsonValue | undefined,
+  expected: readonly T[],
+  label: string,
+): T[] {
+  if (!Array.isArray(value) || value.length !== expected.length) {
+    return invalid(`${label} must contain the frozen ordered ${expected.length} entries`);
   }
-  if (typeof value === 'string' || typeof value === 'boolean') {
-    return JSON.stringify(value);
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(',')}]`;
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-      left.localeCompare(right),
-    );
-    return `{${entries
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(',')}}`;
-  }
-  return invalid('readiness contract contains a non-JSON value');
+  return value.map((entry, index) => {
+    const expectedEntry = expected[index];
+    if (entry !== expectedEntry) {
+      return invalid(`${label}[${index}] must be ${String(expectedEntry)}`);
+    }
+    return expectedEntry;
+  });
 }
 
-function sha256(value: unknown): string {
-  return createHash('sha256').update(canonicalJson(value)).digest('hex');
+export function computeReadinessProofCatalogSeedDigest(
+  seed: ReadinessProofCatalogSeedContent,
+): string {
+  return canonicalJsonSha256(seed);
+}
+
+function buildReadinessProofCatalogSeed(): ReadinessProofCatalogSeed {
+  const content: ReadinessProofCatalogSeedContent = {
+    seedVersion: READINESS_PROOF_CATALOG_SEED_VERSION,
+    riskDomains: [...RISK_DOMAINS],
+    retainedContextCategories: [...RETAINED_CONTEXT_CATEGORIES],
+  };
+  return { ...content, seedDigest: computeReadinessProofCatalogSeedDigest(content) };
+}
+
+function parseReadinessProofCatalogSeed(value: JsonValue | undefined): ReadinessProofCatalogSeed {
+  const label = 'proofCatalogSeed';
+  const object = exactObject(
+    value,
+    ['seedVersion', 'riskDomains', 'retainedContextCategories', 'seedDigest'],
+    label,
+  );
+  if (object.seedVersion !== READINESS_PROOF_CATALOG_SEED_VERSION) {
+    invalid(`${label}.seedVersion must be ${READINESS_PROOF_CATALOG_SEED_VERSION}`);
+  }
+  const content: ReadinessProofCatalogSeedContent = {
+    seedVersion: READINESS_PROOF_CATALOG_SEED_VERSION,
+    riskDomains: exactOrderedStrings(object.riskDomains, RISK_DOMAINS, `${label}.riskDomains`),
+    retainedContextCategories: exactOrderedStrings(
+      object.retainedContextCategories,
+      RETAINED_CONTEXT_CATEGORIES,
+      `${label}.retainedContextCategories`,
+    ),
+  };
+  const seedDigest = sha256Digest(object.seedDigest, `${label}.seedDigest`);
+  if (seedDigest !== computeReadinessProofCatalogSeedDigest(content)) {
+    invalid(`${label}.seedDigest does not match the frozen seed`);
+  }
+  return { ...content, seedDigest };
 }
 
 export function computeBoundaryDigest(boundary: ReadinessBoundary): string {
-  return sha256(boundary);
+  return canonicalJsonSha256(boundary);
 }
 
 type ReadinessContractContent = Omit<ReadinessContract, 'contractDigest'>;
 
 export function computeContractDigest(contract: ReadinessContractContent): string {
-  return sha256(contract);
+  return canonicalJsonSha256(contract);
 }
 
 function contractContent(contract: ReadinessContract): ReadinessContractContent {
@@ -377,6 +445,7 @@ function contractContent(contract: ReadinessContract): ReadinessContractContent 
     schemaVersion: contract.schemaVersion,
     sourceDigest: contract.sourceDigest,
     systemDigest: contract.systemDigest,
+    proofCatalogSeed: contract.proofCatalogSeed,
     boundary: contract.boundary,
     appetite: contract.appetite,
     domainAssessments: contract.domainAssessments,
@@ -389,11 +458,12 @@ function contractContent(contract: ReadinessContract): ReadinessContractContent 
 export function buildReadinessContract(input: BuildReadinessContractInput): ReadinessContract {
   const assessment = parseReadinessAssessment(input.assessment);
   const quality = parseQuality(input.quality, 'quality');
-  const sourceDigest = nonBlankString(input.sourceDigest, 'sourceDigest');
-  const systemDigest = nonBlankString(input.systemDigest, 'systemDigest');
+  const sourceDigest = sha256Digest(input.sourceDigest, 'sourceDigest');
+  const systemDigest = sha256Digest(input.systemDigest, 'systemDigest');
   const iterationLimit = integerAtLeast(input.iterationLimit, 1, 'iterationLimit');
   const issueBudget = integerAtLeast(input.issueBudget, 0, 'issueBudget');
   const operatorDecisionIds = uniqueStrings([...input.operatorDecisionIds], 'operatorDecisionIds');
+  const proofCatalogSeed = buildReadinessProofCatalogSeed();
   const appetite: ReadinessAppetite = {
     quality,
     iterationLimit,
@@ -406,6 +476,7 @@ export function buildReadinessContract(input: BuildReadinessContractInput): Read
     schemaVersion: READINESS_CONTRACT_SCHEMA_VERSION,
     sourceDigest,
     systemDigest,
+    proofCatalogSeed,
     boundary: assessment.boundary,
     appetite,
     domainAssessments: assessment.domainAssessments,
@@ -417,18 +488,19 @@ export function buildReadinessContract(input: BuildReadinessContractInput): Read
 }
 
 export function parseReadinessContract(value: string | JsonValue): ReadinessContract {
-  const root = exactObject(
-    parseJson(value, 'readiness contract'),
-    CONTRACT_KEYS,
-    'readiness contract',
-  );
-  if (root.schemaVersion !== READINESS_CONTRACT_SCHEMA_VERSION) {
+  const parsed = parseJson(value, 'readiness contract');
+  if (!isJsonObject(parsed)) {
+    invalid('readiness contract must be an object');
+  }
+  if (parsed.schemaVersion !== READINESS_CONTRACT_SCHEMA_VERSION) {
     invalid(`readiness contract schemaVersion must be ${READINESS_CONTRACT_SCHEMA_VERSION}`);
   }
+  const root = exactObject(parsed, CONTRACT_KEYS, 'readiness contract');
   const contract: ReadinessContract = {
     schemaVersion: READINESS_CONTRACT_SCHEMA_VERSION,
-    sourceDigest: nonBlankString(root.sourceDigest, 'sourceDigest'),
-    systemDigest: nonBlankString(root.systemDigest, 'systemDigest'),
+    sourceDigest: sha256Digest(root.sourceDigest, 'sourceDigest'),
+    systemDigest: sha256Digest(root.systemDigest, 'systemDigest'),
+    proofCatalogSeed: parseReadinessProofCatalogSeed(root.proofCatalogSeed),
     boundary: parseBoundary(root.boundary, false),
     appetite: parseAppetite(root.appetite),
     domainAssessments: parseDomainAssessments(root.domainAssessments, 'domainAssessments', false),
@@ -437,8 +509,8 @@ export function parseReadinessContract(value: string | JsonValue): ReadinessCont
       'unresolvedMaterialQuestions',
     ),
     operatorDecisionIds: uniqueStrings(root.operatorDecisionIds, 'operatorDecisionIds'),
-    boundaryDigest: nonBlankString(root.boundaryDigest, 'boundaryDigest'),
-    contractDigest: nonBlankString(root.contractDigest, 'contractDigest'),
+    boundaryDigest: sha256Digest(root.boundaryDigest, 'boundaryDigest'),
+    contractDigest: sha256Digest(root.contractDigest, 'contractDigest'),
   };
   if (contract.boundaryDigest !== computeBoundaryDigest(contract.boundary)) {
     invalid('boundaryDigest does not match boundary');

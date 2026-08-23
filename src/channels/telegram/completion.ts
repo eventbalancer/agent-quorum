@@ -1,32 +1,34 @@
 import path from 'node:path';
 import { log } from '../../runtime/log.js';
-import { readinessLabel, type FinalReadiness, type RunFinalStatus } from '../../types.js';
+import type { FinalProjection } from '../../types.js';
 import { telegramConfigured, type TelegramRuntime } from './config.js';
 import { telegramSend } from './send.js';
 
-const COMPLETION_REASON_MAX_LENGTH = 180;
+const FAILURE_REASON = 'run-failed';
+const PUBLIC_JUDGE_RATIONALES = new Set([
+  'standard-risk-judge-exempt',
+  'structural-blocked',
+  'assurance-appetite-judge-unavailable',
+  'final-judge-proof-unavailable',
+  'final-judge-ready',
+  'final-judge-not-ready',
+  'final-judge-candidate-mutated',
+  'final-candidate-mutated-during-system-check',
+  'final-candidate-mutated-during-localization',
+]);
 
 export interface TelegramCompletionNotification {
   readonly inputPath: string;
   readonly exitCode: number;
-  readonly status?: string;
   readonly reason?: string;
   readonly iterations?: number;
   readonly summaryPath?: string;
   readonly workDir?: string;
-  readonly structuralStatus?: RunFinalStatus;
-  readonly readiness?: FinalReadiness;
+  readonly final?: FinalProjection;
 }
 
-function compactCompletionReason(reason: string | undefined): string | undefined {
-  const compact = reason?.replace(/\s+/g, ' ').trim();
-  if (compact === undefined || compact === '') {
-    return undefined;
-  }
-  if (compact.length <= COMPLETION_REASON_MAX_LENGTH) {
-    return compact;
-  }
-  return `${compact.slice(0, COMPLETION_REASON_MAX_LENGTH - 3).trimEnd()}...`;
+function publicJudgeRationale(rationale: string): string {
+  return PUBLIC_JUDGE_RATIONALES.has(rationale) ? rationale : 'unavailable';
 }
 
 export function renderTelegramCompletionNotification(
@@ -38,24 +40,25 @@ export function renderTelegramCompletionNotification(
     `input: ${path.basename(notification.inputPath)}`,
   ];
 
-  if (notification.status !== undefined && notification.status !== '') {
-    lines.push(`status: ${notification.status}`);
-  }
-  if (notification.readiness !== undefined) {
-    if (notification.structuralStatus !== undefined) {
-      lines.push(`structural: ${notification.structuralStatus}`);
+  if (notification.final !== undefined) {
+    const final = notification.final;
+    lines.push(`status: ${final.status}`);
+    lines.push(`structural: ${final.structuralStatus}`);
+    lines.push(`decision: ${final.readiness.decision}`);
+    lines.push(`reasons: ${final.reasons.length > 0 ? final.reasons.join(',') : 'none'}`);
+    if (final.judge.required) {
+      lines.push(
+        `judge: ${final.judge.available ? (final.judge.verdict === true ? 'ready' : 'not-ready') : 'unavailable'}`,
+      );
+      lines.push(`judge rationale: ${publicJudgeRationale(final.judge.rationale)}`);
     }
-    const readiness = notification.readiness;
-    lines.push(`readiness: ${readinessLabel(readiness.ready)}`);
-    lines.push(`readiness rationale: ${readiness.rationale}`);
   }
   if (isSuccess && notification.iterations !== undefined) {
     lines.push(`iterations: ${notification.iterations}`);
   }
 
-  const reason = compactCompletionReason(notification.reason);
-  if ((!isSuccess || notification.status === 'needs-review') && reason !== undefined) {
-    lines.push(`reason: ${reason}`);
+  if (!isSuccess && notification.reason !== undefined && notification.reason !== '') {
+    lines.push(`reason: ${FAILURE_REASON}`);
   }
 
   if (notification.summaryPath !== undefined && notification.summaryPath !== '') {

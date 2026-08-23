@@ -32,7 +32,7 @@ spells `agent-quorum <command>`.
 ## CLI walkthrough
 
 ```sh
-# 1. Plan from a task prompt (creates plan.v0, then loops to convergence).
+# 1. Plan from a task prompt (creates plan.v0, then runs the readiness loop).
 pnpm run run:cli -- plan --prompt examples/task.example.md --quality balanced --iters 3
 
 # 1b. Or refine an existing plan file instead of a prompt.
@@ -50,11 +50,13 @@ pnpm run run:cli -- logs --last -f    # follow a detached run's log until it end
 pnpm run run:cli -- intervene --last "prefer an additive migration"
 ```
 
-When the loop converges it writes, under the run's workdir:
+When the loop finishes it writes, under the run's workdir:
 
-- `plan.final.md` — the converged plan; always the entry point.
+- `plan.final.md` — the settled canonical plan; always the entry point.
 - `summary.md` — one-page run summary (iterations, health, structural status,
-  final readiness, and artifact paths).
+  final readiness, occurrence coverage, and artifact paths).
+- `convergence.final.json` — the schema-3 readiness proof for the exact bytes of
+  `plan.final.md`.
 - `plan.package/` — present only when the split policy fires.
 
 ## API walkthrough
@@ -67,8 +69,9 @@ pnpm run build   # the example imports the published "agent-quorum" name
 AGENT_QUORUM_PLANS_DIR=.agents/plans pnpm exec tsx examples/api.ts examples/task.example.md
 ```
 
-It calls `runPlanLoop`, prints the convergence health, then reads the run back
-out of the durable ledger with `listRuns` and `getRunStatus` — the API
-counterparts of `agent-quorum status`. See [`../docs/api.md`](../docs/api.md) for
-the full surface, including `launchPlanLoop`, `addIntervention`, and
-`pruneRuns`.
+It calls `runPlanLoop`, prints the shared `RunResult.final` projection and loop
+health, then reads the run back out of the durable ledger with `listRuns` and
+`getRunStatus` — the API counterparts of `agent-quorum status`. The same final
+projection is stored as `RunRecord.final`; readiness-bearing records from older
+schemas are not adapted. See [`../docs/api.md`](../docs/api.md) for the full
+surface, including `launchPlanLoop`, `addIntervention`, and `pruneRuns`.

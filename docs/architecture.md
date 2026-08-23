@@ -39,6 +39,28 @@ returned payload before canonical validation and deletes the temporary schema.
 Neither compatibility projection changes Cursor prompts, Markdown-mode payloads,
 the canonical role contracts, or local validation.
 
+Structural validation is only the first boundary for readiness-bearing role
+output. Closed-world semantic admission then verifies the exact plan version,
+candidate digest, source lineage, trusted catalog, eight fixed risk domains,
+material issue identities, retained context, invariant occurrences, and evidence
+grounding. A role artifact that omits, duplicates, invents, crosses, or binds any
+of those identities incorrectly is rejected before it can transition proof
+state. Equivalent normalized output from every provider enters this same
+admission path.
+
+### Readiness responsibility ownership
+
+| Responsibility               | Production and focused test scope                                                                                                                         | Input → output                                                                                                                                       | Invariant and handoff                                                                                                                                                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision reduction           | `src/core/readiness-decision.ts`; `tests/unit/readiness-decision.test.ts`                                                                                 | Normalized `ReadinessFacts` → one `ReadinessReduction`                                                                                               | Pure and provider-neutral; owns four-way priority and stable reasons, but never parses role output or mutates proof. The proof lifecycle supplies its facts.                                                                                  |
+| Evidence and state lifecycle | `src/core/readiness-{admission,proof,store}.ts`; `tests/unit/readiness-{admission,proof,store}.test.ts`                                                   | Structurally valid role values plus trusted candidate/catalog context → admitted facts, immutable schema-3 state, and canonical persistence          | Closed-world admission precedes every transition; source snapshots replace atomically and aggregates are recomputed. Loop, fix-review, Judge, resume, and finalization use only named transitions/readers.                                    |
+| Resume invalidation          | `src/stages/plan/resume.ts`; `tests/unit/resume.test.ts`                                                                                                  | Frozen contract, selected versioned plan, current system facts, and strict stored proof → restored current proof or a resume failure                 | Validates before mutating or archiving, rejects unsupported state, and invalidates stale evidence through lifecycle transitions. The restored state is the only proof handed back to the loop.                                                |
+| Finalization and projection  | `src/stages/plan/finalize.ts`; `tests/integration/{readiness-interactions,occurrence-coverage-reconciliation,finalization-proof,final-readiness}.test.ts` | Post-loop proof, structural/package facts, exact fix outcome, and canonical candidate bytes → internal finalization facts plus one `FinalProjection` | Settles exact bytes monotonically, requires applicable deterministic/reviewer/Judge proof, and exposes only `result.projection` to API, durable, summary, CLI, and notification consumers. Renderers may omit detail but never reclassify it. |
+
+The interaction tests named above cover the handoffs that can change decision,
+freshness, candidate identity, or public status; responsibility-local tests can
+run without provider-backed end-to-end execution.
+
 The supported runner set is declared once in `src/providers/registry.ts`
 (`RUNNER_META`), from which `Runner`, the config allow-list, dispatch, preflight,
 and watchdog knobs all derive. See
@@ -74,28 +96,45 @@ Before `plan.v0.md`, a read-only creator assessment identifies the immutable
 goal, `inScope`, `outOfScope`, constraints, and the applicability and risk of
 eight fixed domains. Material questions use the existing clarification
 transport; the creator reassesses after answers, then the orchestrator freezes
-`readiness-contract.json` with source/system digests, assurance appetite, and
-operator-decision IDs. Disabled clarification does not prevent a useful plan,
+schema-2 `readiness-contract.json` with source/system digests, assurance
+appetite, operator-decision IDs, and the trusted proof-catalog identity.
+Disabled clarification does not prevent a useful plan,
 but an unresolved material question prevents `ready`. A later scope expansion,
 out-of-scope removal, appetite increase, or contract/digest mismatch is a
 boundary challenge and terminates the run as `unable-to-decide`; the frozen
 contract is never rewritten in place.
 
-Per iteration: critic → sanitize → schema-validate (exit 3) → lineage,
-grounding, invariant, and deterministic-system checks → optional intermediate
-Judge → creator update. Critic `issues` contain only in-boundary blocker/major
-concerns. Legacy minor/nit findings are sanitized into `opportunities.json`
-before reduction and never cause a creator update. Zero issues, Judge approval,
-accepted severity, and a `diff` below `diffThreshold` are telemetry or gate
-inputs; none is an independent stop condition.
+Per iteration: critic → normalize → schema-validate (exit 3) → semantic admission
+→ immutable proof transition → optional intermediate Judge admission → creator
+update. Critic `issues` contain only in-boundary blocker/major concerns;
+non-blocking improvements belong in `opportunities.json` and never cause a
+creator update. Zero issues, Judge approval, accepted severity, and a `diff`
+below `diffThreshold` are telemetry or gate inputs; none is an independent stop
+condition.
 
 One deterministic reducer has four outcomes, in order: a material boundary fork
 or unavailable required evidence is `unable-to-decide`; exhausted appetite with
 material work is `limits-exhausted`; in-boundary blocker/major work is
 `revision-required`; all applicable gates complete is `ready`. Only
 `revision-required` continues to creator revision. Every other outcome retains
-the latest usable version and terminates the loop. `satisfied` remains the
-compatibility projection `decision === 'ready'`.
+the latest usable version and terminates the loop. The projected `satisfied`
+flag is derived exactly as `decision === 'ready'`.
+
+Every required critic, conditionally required fix-reviewer, and applicable Judge
+source accounts for each catalog occurrence exactly once with one disposition:
+
+| Disposition      | Admission and normalized outcome                                                               | Readiness effect                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `satisfied`      | Exact identity and grounded evidence; normalizes to `resolved`                                 | Adds no occurrence impediment.                                                         |
+| `not-applicable` | Exact identity and evidence grounded against the exact candidate; normalizes to `resolved`     | Adds no occurrence impediment; ungrounded use rejects the role artifact.               |
+| `violated`       | Exact identity and grounded evidence; remains `violated`                                       | Makes proof negative; only a separately admitted material issue creates revision work. |
+| `unresolved`     | Exact identity is accounted for, but no grounded conclusion is available; remains `unresolved` | Makes proof inconclusive.                                                              |
+
+The occurrence ledger is recomputed from atomic current source snapshots. It
+keeps catalog exactness, source currency, conclusiveness, consistency, and proof
+satisfaction separate; source disagreement remains explicit. A newer snapshot
+replaces its source atomically, so a stale aggregate unresolved ID cannot survive
+when every required current source now resolves that occurrence.
 
 Quality is appetite, not a universal proof checklist. `quick` runs the creator
 one-shot and supports standard-risk assurance without Judge. `balanced` uses
@@ -157,40 +196,46 @@ spans, resolves them against an in-process workspace snapshot, and writes
 the current repository are normalized deterministically before independent
 review; the validator also bounds direct absolute resolution to that repository.
 References outside the repository remain unresolved. The fix pass proposes →
-reviews → applies (every failure path
-keeps the pre-fix canonical plan). A deterministic split policy then evaluates the
-post-fix `plan.final.md` and records `plan.split.json` on every run; when the
-policy fires (size signal exceeded or a structural threshold met), the
-orchestrator emits a self-contained `plan.package/` derived from the post-fix
-plan and validates it into `package-findings.json`. Shape, reference, and package
-health first resolve an independent structural status. The orchestration then
-projects `ready` to frontmatter `clean` and every other non-structural decision
-to `needs-review`, runs applicable deterministic checks, obtains any required
-final high-risk Judge verdict, and binds the exact plan bytes. A structurally
-blocked run exits 6 without final Judge evaluation. A negative or unavailable
-required verdict preserves the plan and resolves the overall status to
-`needs-review` with exit 0. Standard-risk work remains Judge-exempt regardless
-of quality. Metadata-only `STRUCTURAL`, `FINAL JUDGE`, and translation progress
-are logged without role bodies. When a locale is
-requested, the non-fatal translate pass renders `plan.final.<locale>.md`; the
-orchestrator then rechecks the canonical plan digest before emitting the single
-overall `FINAL:` line and closing the run with `summary.md`. A clean result
-requires the canonical plan, deterministic system check, and applicable final
-Judge verdict to carry the same SHA-256; an intervening same-version mutation
-is retained as a usable `needs-review` result instead of being silently rebound.
-Exact-version comparison ignores only the orchestration-owned frontmatter status
-and deterministic normalization of an absolute in-repository `file-line:` prefix
-to its repository-relative form. All other post-critique changes still require a
-fresh critic review.
-If the first final Judge result induces a status-only `needs-review` projection,
-the recheck must ignore that orchestration field; an inconsistent semantic
-verdict produces `unable-to-decide`.
+reviews → applies, with every failure path keeping the pre-fix candidate. If
+reviewed replacement bytes are retained, their exact proposal or applied
+candidate binding becomes a required `fix-reviewer` source in the canonical
+occurrence ledger. Disabled, skipped, rejected, restored, and no-replacement
+paths record an explicit source exemption; evidence for discarded bytes cannot
+be promoted to current proof.
+
+A deterministic split policy then evaluates the post-fix candidate and records
+`plan.split.json` on every run; when the policy fires (size signal exceeded or a
+structural threshold met), the orchestrator emits a self-contained
+`plan.package/` and validates it into `package-findings.json`. Shape, reference,
+and package health first resolve an independent structural status.
+
+Finalization owns one exact-candidate state machine. It settles the canonical
+bytes, projects the frontmatter status, binds the schema-3 readiness proof, runs
+the deterministic system check, obtains any required schema-2 final Judge
+metadata, and verifies that every required source still targets the same
+candidate. A structurally blocked run exits 6 without final Judge evaluation. A
+negative or unavailable required verdict preserves the plan and resolves the
+overall status to `needs-review` with exit 0. Standard-risk work remains
+Judge-exempt regardless of quality. A clean result requires the canonical plan,
+deterministic system check, any required fix-review snapshot, and applicable
+final Judge verdict to carry compatible exact bindings. A downgrade is monotonic
+within the finalization pass, and any late non-status content mutation invalidates
+current proof rather than being silently rebound.
+
+Metadata-only `STRUCTURAL`, `FINAL JUDGE`, and translation progress are logged
+without role bodies. Package and localized outputs derive from the settled
+canonical candidate. When a locale is requested, the non-fatal translate pass
+renders `plan.final.<locale>.md`; the orchestrator rechecks the canonical digest
+before emitting the single overall `FINAL:` line and closing the run with
+`summary.md`.
 
 Live verification is split by purpose. The merge smoke uses two provider-backed
-sentinels: a quick standard prompt that must reach `ready` without Judge, and a
-balanced high-risk direct plan with a seeded material defect that must exercise
-critic finding, creator revision, fresh exact-version review, targeted Judge,
-and final digest binding. Deterministic tests own reducer branch coverage. The
+sentinels: a quick standard prompt that must reach `ready` with explicit Judge
+and fix-review exemptions, and a balanced high-risk direct plan with a seeded
+material defect that must exercise
+critic finding, creator revision, fresh exact-version review, conditionally
+required fix review, targeted Judge, occurrence reconciliation, and final digest
+binding. Deterministic tests own reducer branch coverage. The
 ten-task corpus and blind human comparison remain the broader release
 calibration for model, prompt, schema, and risk-policy changes rather than an
 every-merge gate.
@@ -229,8 +274,9 @@ version-matched `convergence.vN.json` and
 `plan.final.before-fix.md`, `fix-proposal.md`, `fix-review.json`,
 `fix-applied.md`, `fix-applied-review.json`, intermediate `judge.vN.json`, final `judge.final.raw`,
 schema-valid `judge.final.json`, and `judge.final.meta.json` (canonical plan,
-byte-level SHA-256 binding, evaluation state, verdict, rationale, and verdict
-artifact), optional `plan.final.<locale>.md`, `findings.json`,
+byte-level SHA-256 binding, contract/catalog identity, admitted occurrence
+coverage, evaluation state, verdict, rationale, and verdict artifact), optional
+`plan.final.<locale>.md`, `findings.json`,
 `plan.split.json` (split decision + rationale + signals, every run),
 `package-findings.json` (package `file:line` findings, only when split;
 never overwrites `findings.json`), the `plan.package/` directory (only when the
@@ -247,20 +293,26 @@ split, findings, and package artifacts). A registry copy of
 `clarify.offset` stores the run's cursor into the shared Telegram clarification
 journal, not a raw Telegram bot offset.
 
-`convergence.vN.json` and `convergence.final.json` use schema version 2. A v1
-reader migrates conservatively, preserves compatibility fields, and requires a
-fresh review before `ready`; legacy resumes without a frozen contract receive a
-legacy-derived contract and cannot be proven automatically.
+`readiness-contract.json` uses schema version 2;
+`convergence.vN.json` and `convergence.final.json` keep their filenames and use
+readiness-proof schema version 3; `judge.final.meta.json` uses schema version 2.
+The proof artifacts persist source requirements or exemptions, exact source
+bindings and dispositions, normalized occurrence outcomes, aggregate IDs, and
+review lineage. Earlier readiness, contract, and Judge-metadata schema versions
+are unsupported and are not migrated.
 
 Each iteration line in `summary.md` reports lineage and grounding class counts,
 evidence-kind counts, plan lines and bytes, mandatory and optional retained
 bytes, issue-budget use, active/resolved invariant coverage, unresolved
 occurrences, deterministic relationship coverage, optional omissions, and the
-continuation or stop reason. The final convergence lines record the decision,
-stable reason codes, applicable/high-risk domains, opportunity count, selected
-compatibility promise, whether it was satisfied, exhausted limits, unresolved
-coverage IDs, and the canonical convergence artifact. These fields are metadata only; prompt,
-plan, source, provider, and tool-argument bodies remain excluded.
+continuation or stop reason. The final readiness lines render the supplied
+`FinalProjection`: overall and structural status, decision, stable reason codes,
+exact plan version/hash, applicable/high-risk domains, opportunities, limits,
+aggregate occurrence counts and source-proof booleans, Judge state, and the
+canonical proof artifact. Detailed per-source requirements and per-occurrence
+outcomes remain in the machine-readable projection. The summary does not
+reclassify proof. These fields are metadata only; prompt, plan, source, provider,
+raw evidence-reference bodies, and tool-argument bodies remain excluded.
 
 Lineage counts distinguish `new`, `refinement` of the immediately relevant
 parent, `recurring` older lineage, `reopened` rejected or resolved material,
@@ -274,8 +326,12 @@ sortable, non-digit-leading `runId` and a disambiguated `name`, uses a
 run-keyed workdir (`<home>/runs/loop-<name>`), guarantees a followable
 `run.log`, and writes `<home>/state/runs/<runId>.json` at start (state
 `running` with the real workdir/log paths and pid/pgid/start-token) finalized
-to a terminal state at exit. Discovery and the `id`/`name`/`--last`/`pid`
-selectors resolve against this ledger; `pid` only ever resolves a live run.
+to a terminal state at exit. Run records require `schemaVersion: 1` and carry
+one optional `final: FinalProjection`; the public `RunResult.final` and durable
+`RunRecord.final` are the same privacy-safe readiness shape. Discovery skips
+records with absent, unsupported, malformed, or extra readiness-bearing fields
+instead of normalizing them. The `id`/`name`/`--last`/`pid` selectors resolve
+against the accepted ledger; `pid` only ever resolves a live run.
 
 ## Watchdog and process hygiene
 
@@ -288,18 +344,22 @@ the runner exits 143 on signal.
 
 ## Resume and interventions
 
-`AGENT_QUORUM_RESUME=1` finds the last stable plan. New-format revisions require
-their matching valid convergence state, which is committed only after that
-revision's rejected-disposition ledger entries; legacy revisions retain
-update-schema selection and bootstrap a conservative unproved state. Before
-mutating durable run artifacts, resume rejects a changed source or frozen
-appetite contract and verifies the readiness-contract digest. It restores the
-iteration, boundary, appetite, critique, finding/invariant, opportunities,
-context, and limit ledgers; rewinds rejected and intervention-migration views;
-and archives
-stale final, localized-final, convergence, system-check, Judge, findings, and
-package artifacts. Convergence and deterministic check artifacts carry SHA-256
-bindings to the exact versioned or canonical plan bytes. A same-version plan
-mutation or changed authoritative digest invalidates prior proof and requires a
-fresh current-plan review. Clarification answers remain durable operator
+`AGENT_QUORUM_RESUME=1` finds the last stable current-contract plan. Every
+candidate revision must have a matching, valid schema-3 `convergence.vN.json`
+whose catalog, plan version, content digest, source requirements, source
+snapshots, and reduction validate against the schema-2 frozen contract. A
+state-free revision or an unsupported/corrupt contract or proof halts with the
+resume failure contract; resume does not bootstrap or migrate readiness.
+
+Before mutating durable run artifacts, resume verifies the selected plan hash,
+frozen source/appetite/catalog identity, readiness-contract digest,
+authoritative context, and each current source binding. It restores the
+iteration, boundary, appetite, critique, finding/invariant, opportunity,
+context, occurrence-source, and limit ledgers; rewinds rejected and
+intervention-migration views; and only then archives stale final,
+localized-final, proof, system-check, Judge, findings, fix-review, and package
+artifacts. A same-version plan mutation, changed authoritative digest, changed
+catalog, or stale source lineage invalidates the affected evidence and requires
+fresh current-candidate review. Finalization-only fix-review evidence is never
+promoted to versioned loop proof. Clarification answers remain durable operator
 decisions after their intervention bodies migrate into a plan.

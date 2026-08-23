@@ -228,10 +228,6 @@ describe('runPlanLoop (in-process)', () => {
     );
     const fixed = path.join(tmp, 'fixed.md');
     writeStructuredPlanFile(fixed, 'API Fixed');
-    writeFileSync(
-      fixed,
-      readFileSync(fixed, 'utf8').replace('status: clean', 'status: needs-review'),
-    );
     const review = path.join(tmp, 'review.json');
     writeFileSync(
       review,
@@ -270,11 +266,13 @@ describe('runPlanLoop (in-process)', () => {
       readFileSync(fixed, 'utf8'),
     );
     expect(result).toMatchObject({
-      status: 'needs-review',
-      convergence: {
-        decision: 'unable-to-decide',
-        satisfied: false,
-        reasonCodes: ['fresh-review-required'],
+      final: {
+        status: 'clean',
+        readiness: {
+          decision: 'ready',
+          satisfied: true,
+          reasonCodes: [],
+        },
       },
     });
     expect(existsSync(path.join(work, 'plan.final.before-fix.md'))).toBe(true);
@@ -291,12 +289,16 @@ describe('runPlanLoop (in-process)', () => {
     expect(finalState.contextDeliveries.some(({ role }) => role === 'translator')).toBe(true);
   });
 
-  it('selects the highest stable legacy plan before initializing convergence state', async () => {
+  it('rejects a state-free legacy resume without mutating prior artifacts', async () => {
     writeFileSync(path.join(work, 'plan.v0.md'), readFileSync(path.join(tmp, 'input.md')));
     writeStructuredPlanFile(path.join(work, 'plan.v1.md'), 'Legacy V1');
     writeUpdate(path.join(work, 'update.v0.json'), 1);
     writeFileSync(path.join(work, 'plan.final.md'), '# Stale final\n');
     writeFileSync(path.join(work, 'rejected-log.jsonl'), '');
+    const protectedFiles = ['plan.v0.md', 'plan.v1.md', 'update.v0.json', 'plan.final.md'].map(
+      (name) => path.join(work, name),
+    );
+    const before = protectedFiles.map((file) => readFileSync(file));
 
     const result = await withEnvAsync(
       baseEnv({ FAKE_CODEX_OUTPUT: path.join(tmp, 'empty.json'), AGENT_QUORUM_RESUME: '1' }),
@@ -310,13 +312,11 @@ describe('runPlanLoop (in-process)', () => {
         }),
     );
 
-    expect(result.exitCode).toBe(ExitCode.Ok);
-    expect(capture.text()).toContain('resume archived 1 stale artifact(s)');
-    expect(capture.text()).toContain('resuming from v1');
-    expect(readFileSync(path.join(work, 'summary.md'), 'utf8')).toContain('- resume_start: 1');
-    expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('# Legacy V1');
+    expect(result.exitCode).not.toBe(ExitCode.Ok);
+    expect(protectedFiles.map((file) => readFileSync(file))).toEqual(before);
+    expect(readdirSync(work).some((name) => name.startsWith('stale.'))).toBe(false);
     expect(existsSync(path.join(work, 'convergence.v0.json'))).toBe(false);
-    expect(existsSync(path.join(work, 'convergence.v1.json'))).toBe(true);
+    expect(existsSync(path.join(work, 'convergence.v1.json'))).toBe(false);
   });
 
   it('rejects a changed legacy resume without overwriting prior run artifacts', async () => {
@@ -400,8 +400,8 @@ describe('runPlanLoop (in-process)', () => {
       );
 
       expect(result.exitCode).toBe(ExitCode.Ok);
-      expect(result.status).toBe('clean');
-      expect(result.structuralStatus).toBe('clean');
+      expect(result.final?.status).toBe('clean');
+      expect(result.final?.structuralStatus).toBe('clean');
       expect(readFileSync(path.join(work, 'plan.final.md'), 'utf8')).toContain('status: clean');
       expect(readFileSync(path.join(work, 'run.log'), 'utf8')).toContain('FINAL: clean');
     },

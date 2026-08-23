@@ -36,22 +36,22 @@ const spawnedChildren: ChildProcess[] = [];
 
 interface SanitizedCritiqueIssue {
   id: string;
-  claim: null;
+  claim?: unknown;
 }
 
 interface SanitizedCritique {
-  summary: string;
+  summary: unknown;
   issues: SanitizedCritiqueIssue[];
 }
 
 interface SanitizedMetaIssue {
-  verdict_reason: string;
-  verdict: null;
+  verdict_reason: unknown;
+  verdict?: unknown;
 }
 
 interface SanitizedMeta {
   issues: SanitizedMetaIssue[];
-  applied: unknown[];
+  applied?: unknown[];
 }
 
 beforeEach(() => {
@@ -146,16 +146,18 @@ describe('stream-log rendering variants', () => {
 });
 
 describe('sanitizer warning branches', () => {
-  it('warns about unknown critique fields and version prefixes', () => {
+  it('reports unknown critique-field counts without logging provider-controlled names', () => {
     const file = path.join(tmp, 'critique.json');
+    const topLevelSecret = 'CRITIQUE_TOP_LEVEL_KEY_SECRET_55a3c7';
+    const issueSecret = 'CRITIQUE_ISSUE_KEY_SECRET_328cd0';
     writeFileSync(
       file,
       `${JSON.stringify({
         plan_version: 0,
         summary: false,
-        extra_top: 1,
+        [topLevelSecret]: 1,
         issues: [
-          { id: 'v0.C1', bogus: true, severity: 'major' },
+          { id: 'v0.C1', [issueSecret]: true, severity: 'major' },
           { id: 'C2', another: 1 },
         ],
       })}\n`,
@@ -163,36 +165,44 @@ describe('sanitizer warning branches', () => {
     const capture = captureStderr();
     try {
       sanitizeCritiqueJson(file, 0);
-      expect(capture.text()).toContain(
-        'dropping unknown top-level fields from critique: extra_top',
-      );
-      expect(capture.text()).toContain('dropping unknown critique issue fields: another;bogus');
-      expect(capture.text()).toContain('normalizing 1 critique issue id(s)');
+      expect(capture.text()).toContain('dropping unknown top-level fields from critique (count=1)');
+      expect(capture.text()).toContain('dropping unknown critique issue fields (count=2)');
+      expect(capture.text()).not.toContain(topLevelSecret);
+      expect(capture.text()).not.toContain(issueSecret);
     } finally {
       capture.restore();
     }
     const result = JSON.parse(readFileSync(file, 'utf8')) as SanitizedCritique;
-    expect(result.summary).toBe('');
-    expect(result.issues[0]?.id).toBe('C1');
-    expect(result.issues[0]?.claim).toBeNull();
+    expect(result.summary).toBe(false);
+    expect(result.issues[0]?.id).toBe('v0.C1');
+    expect(result.issues[0]).not.toHaveProperty('claim');
   });
 
-  it('meta sanitizer fills jq alternatives and combine copies missing keys as null', () => {
+  it('meta sanitizer preserves invalid values and missing fields before schema validation', () => {
     const meta = path.join(tmp, 'meta.json');
+    const unknownFieldSecret = 'UPDATE_META_UNKNOWN_KEY_SECRET_d5c9ab';
     writeFileSync(
       meta,
-      `${JSON.stringify({ plan_version: 2, issues: [{ id: 'C1', verdict_reason: false }], unknown: 1 })}\n`,
+      `${JSON.stringify({
+        plan_version: 2,
+        issues: [{ id: 'C1', verdict_reason: false }],
+        [unknownFieldSecret]: 1,
+      })}\n`,
     );
     const capture = captureStderr();
     try {
       sanitizeUpdateMetaJson(meta);
+      expect(capture.text()).toContain(
+        'dropping unknown top-level fields from update metadata (count=1)',
+      );
+      expect(capture.text()).not.toContain(unknownFieldSecret);
     } finally {
       capture.restore();
     }
     const sanitized = JSON.parse(readFileSync(meta, 'utf8')) as SanitizedMeta;
-    expect(sanitized.issues[0]?.verdict_reason).toBe('');
-    expect(sanitized.issues[0]?.verdict).toBeNull();
-    expect(sanitized.applied).toEqual([]);
+    expect(sanitized.issues[0]?.verdict_reason).toBe(false);
+    expect(sanitized.issues[0]).not.toHaveProperty('verdict');
+    expect(sanitized).not.toHaveProperty('applied');
 
     const markdown = path.join(tmp, 'rev.md');
     writeFileSync(markdown, '# R\n');

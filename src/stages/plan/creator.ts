@@ -49,7 +49,7 @@ const SPLIT_META_OUTPUT_MODE =
   'The revised plan has already been written as markdown. Your job here is only bookkeeping:\n' +
   '- give each original critique issue a verdict;\n' +
   '- mark accepted or downgraded issues as applied only when the revised plan actually addresses them;\n' +
-  '- put only self-rejected minor/nit accepted items in rejected_append;\n' +
+  '- return rejected_append as an empty array; current critiques contain only material issues;\n' +
   '- do not include plan_markdown or any other markdown content in this JSON.';
 
 const READ_ONLY_ASSESSMENT_TOOLS = 'Read,Grep,Glob';

@@ -246,22 +246,71 @@ function writeJsonFixture(file: string, value: JsonValue): void {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-export function writeCritique(file: string, issues: JsonValue[]): void {
+export function writeCritique(
+  file: string,
+  issues: JsonValue[],
+  planVersion = 0,
+  highRisk = false,
+): void {
+  const materialIssues: JsonValue[] = [];
+  const opportunities: JsonValue[] = [];
+  for (const value of issues) {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      (value.severity === 'minor' || value.severity === 'nit') &&
+      typeof value.claim === 'string' &&
+      typeof value.evidence === 'string' &&
+      typeof value.suggested_fix === 'string'
+    ) {
+      opportunities.push({
+        fingerprint: `fixture-opportunity:${typeof value.id === 'string' ? value.id : 'unknown'}`,
+        claim: value.claim,
+        evidence: value.evidence,
+        suggested_improvement: value.suggested_fix,
+        evidence_refs:
+          Array.isArray(value.evidence_refs) && value.evidence_refs.length > 0
+            ? value.evidence_refs
+            : [{ kind: 'plan-section', section: 'Work Plan' }],
+      });
+      continue;
+    }
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      (value.severity === 'blocker' || value.severity === 'major') &&
+      typeof value.claim === 'string' &&
+      typeof value.evidence === 'string' &&
+      typeof value.suggested_fix === 'string'
+    ) {
+      materialIssues.push({
+        ...value,
+        evidence_refs:
+          'evidence_refs' in value
+            ? value.evidence_refs
+            : [{ kind: 'plan-section', section: 'Work Plan' }],
+      });
+      continue;
+    }
+    materialIssues.push(value);
+  }
   writeJsonFixture(file, {
-    plan_version: 0,
+    plan_version: planVersion,
     summary: 'fixture critique',
-    issues,
+    issues: materialIssues,
     domain_assessments: FIXTURE_RISK_DOMAINS.map((domain) => ({
       domain,
       applicability: domain === 'correctness' ? 'applicable' : 'not-applicable',
-      risk: 'standard',
+      risk: highRisk && domain === 'correctness' ? 'high' : 'standard',
       complete: true,
       rationale: `Fixture review for ${domain}.`,
       unavailable_evidence: [],
-      evidence_refs: [],
+      evidence_refs: [{ kind: 'plan-section', section: 'Context' }],
     })),
     boundary_challenges: [],
-    opportunities: [],
+    opportunities,
     review: {
       considered_context: [
         'original-scope',
@@ -272,16 +321,20 @@ export function writeCritique(file: string, issues: JsonValue[]): void {
         'quality-and-limits',
       ],
       invariant_assessments: [],
-      scope_coverage: ['declared-scope', 'direct-plan-scope'],
-      issue_budget: { limit: 8, used: issues.length, exhausted: issues.length >= 8 },
-      scan_complete: issues.length < 8,
+      scope_coverage: ['original-scope', 'declared-scope', 'direct-plan-scope'],
+      issue_budget: {
+        limit: 8,
+        used: materialIssues.length,
+        exhausted: materialIssues.length >= 8,
+      },
+      scan_complete: materialIssues.length < 8,
       unresolved_coverage: [],
     },
   });
 }
 
-export function emptyCritique(file: string): void {
-  writeCritique(file, []);
+export function emptyCritique(file: string, planVersion = 0, highRisk = false): void {
+  writeCritique(file, [], planVersion, highRisk);
 }
 
 export function writeUpdate(file: string, version: number, markdown = '# Next plan'): void {
@@ -290,12 +343,19 @@ export function writeUpdate(file: string, version: number, markdown = '# Next pl
     plan_markdown: markdown,
     issues: [],
     applied: [],
+    systemic_dispositions: [],
     rejected_append: [],
   });
 }
 
 export function writeUpdateMeta(file: string, version: number): void {
-  writeJsonFixture(file, { plan_version: version, issues: [], applied: [], rejected_append: [] });
+  writeJsonFixture(file, {
+    plan_version: version,
+    issues: [],
+    applied: [],
+    systemic_dispositions: [],
+    rejected_append: [],
+  });
 }
 
 export function writeAcceptUpdate(
