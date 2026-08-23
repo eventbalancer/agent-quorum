@@ -79,9 +79,10 @@ Out of scope:
 
 1. Keep `finalizeRunRecord`'s target resolution, `readFileSync`/`JSON.parse`
    guard, and `{ ...current, ...patch }` merge unchanged.
-2. Implement `replaceRunRecord` by using `serializeRecord(record)` and write the
-   complete payload directly to the final record path with writeFileSync before
-   returning; do not introduce a second writer owner.
+2. Implement `replaceRunRecord` by using `serializeRecord(record)`, writing the
+   complete payload to the existing same-directory temporary path, and calling
+   `renameSync` over the final record path; do not introduce a second writer
+   owner.
 3. Call the helper exactly once with the merged record. Do not route
    `writeRunRecord` or read-only consumers through it.
 4. Run `pnpm exec vitest run tests/unit/run-store.test.ts` before adding new
@@ -99,11 +100,11 @@ existing focused suite passes.
    values with identity fields unchanged and patch fields updated.
 2. Add a malformed-target case that records the original bytes, calls
    `finalizeRunRecord`, and proves the target remains byte-identical.
-3. Add a focused replacement-order test using a hoisted `node:fs` Vitest mock in
-   a separate unit-test module. Delegate to the real filesystem while recording
-   `writeFileSync` and `renameSync`; assert the write target is the current
-   same-directory temporary path, rename is later, and rename targets the
-   reserved `.json` record. Keep the helper private.
+3. Add a focused filesystem-call test using a hoisted `node:fs` Vitest mock in a
+   separate unit-test module. Delegate to the real filesystem while recording
+   `writeFileSync` and `renameSync`; assert only that both functions were called,
+   without checking their target paths or relative order. Keep the helper
+   private.
 4. Make failure propagation unconditional and observable. Create an accepted
    test record whose enumerable nested `final` projection contains a
    self-reference through a narrowly scoped test-only cast; native
@@ -117,24 +118,24 @@ existing focused suite passes.
    module, followed by `pnpm run check` and `pnpm run test`.
 
 Acceptance gate: tests prove complete old/new JSON, byte-preserving malformed
-no-op behavior, temporary-write-before-rename ordering, unconditional
-serializer/write/rename error propagation without final-path publication, the
-unchanged round trip, and a green repository verification floor.
+no-op behavior, filesystem-call coverage, unconditional serializer/write/rename
+error propagation without final-path publication, the unchanged round trip, and
+a green repository verification floor.
 
 ## Files and Interfaces
 
-| Surface                               | Planned change                                                                                                      | Preserved contract                                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `src/core/run-store.ts`               | Add one private replacement helper and one call from `finalizeRunRecord`.                                           | Exported signatures, parse/merge behavior, temporary path, error propagation, and atomic rename stay unchanged. |
-| `tests/unit/run-store.test.ts`        | Strengthen round-trip and malformed-target assertions.                                                              | Existing fixtures and public calls remain valid.                                                                |
-| `tests/unit/run-store-atomic.test.ts` | Observe filesystem call order and deterministic serializer/write/rename failures through a delegating hoisted mock. | No runtime test seam or public export is added, and current residue behavior remains unchanged.                 |
+| Surface                               | Planned change                                                                                                 | Preserved contract                                                                                              |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/core/run-store.ts`               | Add one private replacement helper and one call from `finalizeRunRecord`.                                      | Exported signatures, parse/merge behavior, temporary path, error propagation, and atomic rename stay unchanged. |
+| `tests/unit/run-store.test.ts`        | Strengthen round-trip and malformed-target assertions.                                                         | Existing fixtures and public calls remain valid.                                                                |
+| `tests/unit/run-store-atomic.test.ts` | Observe filesystem calls and deterministic serializer/write/rename failures through a delegating hoisted mock. | No runtime test seam or public export is added, and current residue behavior remains unchanged.                 |
 
 ## Verification
 
 - Focused run-store tests prove the existing create/finalize/read contract.
 - The malformed fixture proves an unreadable reserved record is never replaced.
-- The delegating filesystem mock proves serialization is written away from the
-  final `.json` path and rename publishes only after that write succeeds.
+- The delegating filesystem mock proves the write and rename calls occur without
+  asserting their targets or relative order.
 - The cyclic nested-value case proves serialization failure occurs before any
   write, while sentinel write/rename errors prove unchanged propagation and
   final-path bytes for both filesystem failure boundaries.
@@ -160,5 +161,5 @@ flowchart TD
   D -->|"complete bytes only"| E["readRunRecords and status consumers"]
   B -.->|"native serializer or filesystem error"| H["unchanged caller-visible failure"]
   F["run-store focused tests"] -.->|"round trip + malformed no-op"| A
-  G["delegating fs mock test"] -.->|"ordering + deterministic failures"| B
+  G["delegating fs mock test"] -.->|"calls + deterministic failures"| B
 ```

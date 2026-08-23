@@ -47,8 +47,7 @@ export const SMOKE_RESULTS_FILE = 'smoke-results.json';
 
 const EXPECTED_STANDARD_ID = 'standard-create-ready';
 const EXPECTED_HIGH_ID = 'high-revise-judge-ready';
-const SEEDED_HIGH_RISK_FAULT =
-  'complete payload directly to the final record path with writeFileSync';
+const SEEDED_HIGH_RISK_FAULT = 'without checking their target paths or relative order';
 const Ajv2020 = ajvModule.default;
 
 interface LoadedPlanningSmoke {
