@@ -279,6 +279,64 @@ describe('fix pass', () => {
     expect(capture.text()).toContain('fix-pass: done (backup at plan.final.before-fix.md)');
   });
 
+  it('retries a schema-valid fix review with ungrounded candidate evidence', async () => {
+    const finalPlan = seedConvergedPlan();
+    writeFindings(1);
+    const proposal = path.join(tmp, 'proposal.md');
+    writeStructuredPlanFile(proposal, 'Fix Review Retry');
+    const validReview = path.join(tmp, 'valid-review.json');
+    writeInvariantReview(validReview, 'accept', [], 'satisfied');
+    const invalidReview = path.join(tmp, 'invalid-review.json');
+    const invalidValue = JSON.parse(readFileSync(validReview, 'utf8')) as {
+      invariant_assessments: { occurrences: { evidence_refs: unknown[] }[] }[];
+    };
+    const occurrence = invalidValue.invariant_assessments[0]?.occurrences[0];
+    if (occurrence === undefined) {
+      throw new TypeError('missing fix-review occurrence fixture');
+    }
+    occurrence.evidence_refs = [{ kind: 'plan-section', section: 'Invented Section' }];
+    writeFileSync(invalidReview, `${JSON.stringify(invalidValue, null, 2)}\n`);
+    const calls = path.join(tmp, 'review.calls');
+    const prompt = path.join(tmp, 'review.prompt');
+    const matrix = fixtureMatrix();
+    matrix.reviewer = {
+      runner: 'claude',
+      model: 'claude-opus-4-8',
+      reasoning: 'xhigh',
+    };
+    const ctx = makeContext({ matrix });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+    ctx.passes.fixPass = {
+      ...ctx.passes.fixPass,
+      retryCount: 1,
+    };
+    const proof = proofState(ctx, ACTIVE_INVARIANTS);
+
+    const outcome = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CLAUDE_MARKDOWN_RESULT: proposal,
+        FAKE_CLAUDE_JSON_RESULT: validReview,
+        FAKE_CLAUDE_JSON_CALLS: calls,
+        FAKE_CLAUDE_JSON_RESULT_1: invalidReview,
+        FAKE_CLAUDE_JSON_RESULT_2: validReview,
+        FAKE_CLAUDE_PROMPT: prompt,
+      },
+      () => runTestFixPass(ctx, finalPlan, proof),
+    );
+
+    expect(outcome.retainedReplacement).toBe(true);
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic semantic-admission repair');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic candidate evidence anchors');
+    expect(capture.text()).toContain(
+      'fix-reviewer output failed semantic admission (code=ungrounded-evidence',
+    );
+  });
+
   it('admits a separate exact applied review before retaining changed bytes', async () => {
     const finalPlan = seedConvergedPlan();
     writeFindings(1);

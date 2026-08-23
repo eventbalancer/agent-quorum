@@ -172,6 +172,43 @@ describe('runPlanLoop (in-process)', () => {
     expect(readFileSync(runLog, 'utf8')).toContain('[agent-quorum]');
   });
 
+  it('returns a stable failed result when critic semantic admission is exhausted', async () => {
+    const invalid = path.join(tmp, 'semantic-invalid.json');
+    writeCritique(invalid, [
+      {
+        id: 'C1',
+        addresses: null,
+        severity: 'major',
+        category: 'correctness',
+        claim: 'fixture issue',
+        evidence: 'fixture evidence',
+        suggested_fix: 'repair the fixture',
+        confidence: 1,
+        duplicate_of: 'legacy-duplicate',
+      },
+    ]);
+
+    const result = await withEnvAsync(baseEnv({ FAKE_CODEX_OUTPUT: invalid }), () =>
+      runPlanLoop({
+        input: path.join(tmp, 'input.md'),
+        iters: 1,
+        quality: 'quick',
+        fix: false,
+        translate: false,
+      }),
+    );
+
+    expect(result).toEqual({ exitCode: 3 });
+    const records = readRunRecords(path.join(tmp, 'state'));
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ state: 'failed', exitCode: 3 });
+    expect(records[0]?.final).toBeUndefined();
+    expect(capture.text()).toContain(
+      'critic output failed semantic admission (code=invalid-value path=issues[0].duplicate_of)',
+    );
+    expect(capture.text()).not.toContain('material issues cannot be duplicates');
+  });
+
   it('keeps two same-input runs in distinct workdirs, each addressable by its runId', async () => {
     const defaultWorkEnv = baseEnv({
       AGENT_QUORUM_WORK_DIR: undefined,

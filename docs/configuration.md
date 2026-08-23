@@ -94,7 +94,7 @@ default is the built-in fallback.
 | `settings.translate`         | `AGENT_QUORUM_TRANSLATE`             | `false`    | localized companion plan pass                                        |
 | `settings.locale`            | `AGENT_QUORUM_LOCALE`                | `en`       | interaction/companion locale (non-`en` enables translate unless off) |
 | `settings.diffThreshold`     | `AGENT_QUORUM_DIFF_THRESHOLD`        | `5`        | stable-diff telemetry threshold; never a proof gate                  |
-| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | provider retry attempts                                              |
+| `settings.retryCount`        | `AGENT_QUORUM_RETRY_COUNT`           | `3`        | retries for provider failures or rejected structured role output     |
 | `settings.retryDelaySeconds` | `AGENT_QUORUM_RETRY_DELAY_SECONDS`   | `10`       | delay between retries                                                |
 
 ### Role matrix (`roles.<role>`)
@@ -114,6 +114,12 @@ skill, schema, and rendered prompt plus a fixed conservative wrapper allowance
 as telemetry. The byte estimate does not block provider calls, reduce retained
 context, or downgrade readiness. `inputTokenLimit` remains configuration and
 telemetry; it is not semantic-admission evidence or a readiness limit.
+
+For readiness-bearing structured roles, the same retry policy also covers a
+successful transport whose output fails schema validation or closed-world
+semantic admission. A repair attempt receives a trusted validation code/path
+and the exact candidate anchor catalog, never rejected provider prose. Proof
+state changes only after admission succeeds; exhaustion remains fail-closed.
 
 Quality is the frozen assurance appetite for a run. `quick` uses compact
 context, the creator one-shot path, and standard-risk assurance without Judge;

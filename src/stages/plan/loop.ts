@@ -15,8 +15,6 @@ import { err, log } from '../../runtime/log.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import { convergenceHealth, critiqueHealth } from '../../core/metrics.js';
 import {
-  admitCreatorUpdate,
-  admitCritique,
   type AdmittedJudgeRevisionIssue,
   type ExpectedCreatorIssue,
 } from '../../core/readiness-admission.js';
@@ -34,11 +32,11 @@ import {
 } from '../../core/readiness-proof.js';
 import { writeReadinessProofState } from '../../core/readiness-store.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
-import { runCritic } from './critic.js';
+import { runAdmittedCritic } from './critic.js';
 import { runCreatorUpdate } from './creator.js';
 import { runJudge } from './judge.js';
 import { synchronizeRetainedInterventions } from './retained-context.js';
-import { sanitizeCritiqueJson, validateSchema } from '../../core/schema.js';
+import { validateSchema } from '../../core/schema.js';
 import type { RunContext } from '../../core/run-context.js';
 import { validateSystemCoverage, writeSystemCheck } from '../../core/system-context.js';
 
@@ -335,31 +333,32 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
       `iter=${iter} — critic (${matrix.critic.runner} ${matrix.critic.model} reasoning=${matrix.critic.reasoning})`,
     );
     const bindings = bindPlanForReview(ctx, plan, iter);
-    await runCritic(ctx, iter, plan, critique, bindings.critic.lineage.lineageDigest);
-    sanitizeCritiqueJson(critique, iter);
-    if (!validateSchema(critique, ctx.skills.criticSchema)) {
-      throw new HaltError('critique failed schema validation', 3, true);
-    }
+    const admittedCritique = await runAdmittedCritic(
+      ctx,
+      iter,
+      plan,
+      critique,
+      bindings.critic.lineage.lineageDigest,
+      {
+        catalog: ctx.readinessProof.catalog,
+        binding: bindings.critic,
+        evidenceContext: {
+          work: ctx.work,
+          projectRoot: ctx.provider.projectRoot,
+          planVersion: iter,
+          candidateContent: readFileSync(plan, 'utf8'),
+          candidatePath: plan,
+        },
+        expectedScopeToken: ctx.mode === 'prompt' ? 'original-scope' : 'direct-plan-scope',
+        issueBudgetLimit: ctx.readinessProof.issueBudget.limit,
+        currentRiskDomains: ctx.readinessProof.riskDomains,
+        admittedPriorIssueRefs: ctx.readinessProof.admittedCriticIssueRefs.filter(
+          (issueRef) => !issueRef.startsWith(`v${iter}.`),
+        ),
+      },
+    );
     ctx.lastCritiqueIter = iter;
     const critiqueJson = readJson(critique);
-    const admittedCritique = admitCritique({
-      value: critiqueJson,
-      catalog: ctx.readinessProof.catalog,
-      binding: bindings.critic,
-      evidenceContext: {
-        work: ctx.work,
-        projectRoot: ctx.provider.projectRoot,
-        planVersion: iter,
-        candidateContent: readFileSync(plan, 'utf8'),
-        candidatePath: plan,
-      },
-      expectedScopeToken: ctx.mode === 'prompt' ? 'original-scope' : 'direct-plan-scope',
-      issueBudgetLimit: ctx.readinessProof.issueBudget.limit,
-      currentRiskDomains: ctx.readinessProof.riskDomains,
-      admittedPriorIssueRefs: ctx.readinessProof.admittedCriticIssueRefs.filter(
-        (issueRef) => !issueRef.startsWith(`v${iter}.`),
-      ),
-    });
     ctx.readinessProof = recordAdmittedCritique(ctx.readinessProof, admittedCritique);
     const expectedIssues: ExpectedCreatorIssue[] = admittedCritique.materialIssues.map((issue) => ({
       id: issue.id,
@@ -444,7 +443,17 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     ctx.readinessProof = synchronizeRetainedInterventions(ctx);
     persistReadinessProof(ctx);
     log(`iter=${iter} — creator update (${matrix.creator.runner} ${matrix.creator.model})`);
-    await runCreatorUpdate(ctx, iter, plan, critique, update, next);
+    const admittedUpdate = await runCreatorUpdate(ctx, iter, plan, critique, update, next, {
+      currentCatalog: ctx.readinessProof.catalog,
+      fromPlanVersion: iter,
+      expectedPlanVersion: iter + 1,
+      expectedIssues,
+      retainedFindings: ctx.readinessProof.findings,
+      retainedInvariants: ctx.readinessProof.invariants,
+      operatorInterventionIds: ctx.readinessProof.interventionIds,
+      admittedCriticIssueRefs: ctx.readinessProof.admittedCriticIssueRefs,
+      admittedJudgeRevisionIssueIds: ctx.readinessProof.intermediateJudgeMaterialIssueIds,
+    });
     markOperatorInterventionsMigrated(ctx.work, 'creator', `plan.v${iter + 1}.md`);
 
     if (!existsSync(next) || statSync(next).size === 0) {
@@ -453,25 +462,9 @@ export async function runIterationLoop(ctx: RunContext, startIter: number): Prom
     }
 
     const updateJson = readJson(update);
-    const admittedUpdate = admitCreatorUpdate({
-      value: updateJson,
-      currentCatalog: ctx.readinessProof.catalog,
-      fromPlanVersion: iter,
-      expectedPlanVersion: iter + 1,
-      expectedIssues,
-      retainedFindings: ctx.readinessProof.findings,
-      retainedInvariants: ctx.readinessProof.invariants,
-      evidenceContext: {
-        work: ctx.work,
-        projectRoot: ctx.provider.projectRoot,
-        planVersion: iter + 1,
-        candidateContent: readFileSync(next, 'utf8'),
-        candidatePath: next,
-      },
-      operatorInterventionIds: ctx.readinessProof.interventionIds,
-      admittedCriticIssueRefs: ctx.readinessProof.admittedCriticIssueRefs,
-      admittedJudgeRevisionIssueIds: ctx.readinessProof.intermediateJudgeMaterialIssueIds,
-    });
+    if (admittedUpdate === undefined) {
+      throw new HaltError('creator update bypassed deterministic admission', 3, true);
+    }
     ctx.readinessProof = recordAdmittedCreatorUpdate(ctx.readinessProof, admittedUpdate);
     const blockers = issueCount(
       updateJson,

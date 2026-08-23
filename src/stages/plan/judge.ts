@@ -1,6 +1,10 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { admitJudge, type AdmittedJudge } from '../../core/readiness-admission.js';
+import {
+  admitJudge,
+  ReadinessAdmissionError,
+  type AdmittedJudge,
+} from '../../core/readiness-admission.js';
 import { sha256 } from '../../core/digest.js';
 import type { JsonValue } from '../../core/json.js';
 import {
@@ -13,6 +17,12 @@ import { validateSchema } from '../../core/schema.js';
 import { providerRun } from '../../providers/provider.js';
 import { log } from '../../runtime/log.js';
 import { retainedRolePrompt, synchronizeRetainedInterventions } from './retained-context.js';
+import {
+  admissionFailureLogLabel,
+  candidateEvidenceAnchorPrompt,
+  readinessAdmissionRepairPrompt,
+  structuredOutputRepairPrompt,
+} from './evidence-anchors.js';
 
 const FINAL_PLAN_ARTIFACT = 'plan.final.md';
 const FINAL_JUDGE_RAW = 'judge.final.raw';
@@ -196,6 +206,7 @@ export function judgePrompt(
       : readStripped(critiqueFile);
   return [
     buildJudgeEvaluationSection(options),
+    candidateEvidenceAnchorPrompt(planFile, plan),
     `## Plan\n${plan}`,
     `## Critique Context\n${critiqueContext}`,
     'Return ONLY JSON conforming to the schema. No prose, no markdown fences.',
@@ -234,15 +245,21 @@ async function requestJudge<Stage extends JudgeStage>(
   input: RequestJudgeInput<Stage>,
 ): Promise<AdmittedJudge | undefined> {
   let admitted: AdmittedJudge | undefined;
-  const validateOutput = (outputFile: string): boolean => {
+  const validateOutput = (outputFile: string) => {
     if (!validateSchema(outputFile, input.ctx.skills.judgeSchema)) {
       log(`WARNING: ${input.stage} Judge output failed schema validation`);
-      return false;
+      return {
+        valid: false,
+        retryPrompt: structuredOutputRepairPrompt(`${input.stage} Judge`),
+      };
     }
     const value = parseJsonFile(outputFile);
     if (value === undefined) {
       log(`WARNING: ${input.stage} Judge output is not valid JSON`);
-      return false;
+      return {
+        valid: false,
+        retryPrompt: structuredOutputRepairPrompt(`${input.stage} Judge`),
+      };
     }
     try {
       admitted = admitJudge({
@@ -259,10 +276,17 @@ async function requestJudge<Stage extends JudgeStage>(
         },
       });
       return true;
-    } catch {
+    } catch (error) {
       admitted = undefined;
+      if (error instanceof ReadinessAdmissionError) {
+        log(`WARNING: ${admissionFailureLogLabel(`${input.stage} Judge`, error)}`);
+        return { valid: false, retryPrompt: readinessAdmissionRepairPrompt(error) };
+      }
       log(`WARNING: ${input.stage} Judge output failed semantic admission`);
-      return false;
+      return {
+        valid: false,
+        retryPrompt: structuredOutputRepairPrompt(`${input.stage} Judge`),
+      };
     }
   };
   const status = await providerRun(
@@ -284,7 +308,8 @@ async function requestJudge<Stage extends JudgeStage>(
   if (admitted !== undefined) {
     return admitted;
   }
-  return validateOutput(input.outputFile) ? admitted : undefined;
+  const validation = validateOutput(input.outputFile);
+  return validation === true ? admitted : undefined;
 }
 
 function unavailableResult<Stage extends JudgeStage>(

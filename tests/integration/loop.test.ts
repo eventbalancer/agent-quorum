@@ -413,6 +413,141 @@ describe('iteration loop', () => {
     );
   });
 
+  it('retries a schema-valid critique rejected by deterministic semantic admission', async () => {
+    seedWork();
+    const invalid = path.join(tmp, 'invalid-grounding.json');
+    emptyCritique(invalid);
+    const invalidValue = JSON.parse(readFileSync(invalid, 'utf8')) as {
+      domain_assessments: { domain: string; evidence_refs: unknown[] }[];
+    };
+    const migration = invalidValue.domain_assessments.find(
+      (assessment) => assessment.domain === 'data-migrations',
+    );
+    if (migration === undefined) {
+      throw new TypeError('missing data-migrations fixture assessment');
+    }
+    migration.evidence_refs = [{ kind: 'plan-section', section: 'Invented Section' }];
+    writeFileSync(invalid, `${JSON.stringify(invalidValue, null, 2)}\n`);
+    const valid = path.join(tmp, 'valid-grounding.json');
+    emptyCritique(valid);
+    const calls = path.join(tmp, 'critic.calls');
+    const prompt = path.join(tmp, 'critic.prompt');
+    const ctx = makeContext({ maxIters: 1 });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: valid,
+        FAKE_CODEX_OUTPUT_CALLS: calls,
+        FAKE_CODEX_OUTPUT_1: invalid,
+        FAKE_CODEX_OUTPUT_2: valid,
+        FAKE_CODEX_PROMPT: prompt,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(readFileSync(calls, 'utf8')).toBe('2');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic semantic-admission repair');
+    expect(readFileSync(prompt, 'utf8')).toContain('## Deterministic candidate evidence anchors');
+    expect(capture.text()).toContain(
+      'critic output failed semantic admission (code=ungrounded-evidence path=domain_assessments.data-migrations.evidence_refs)',
+    );
+    expect(ctx.readinessProof.admittedCriticIssueRefs).toEqual([]);
+  });
+
+  it('retries creator metadata admission without regenerating the revised plan', async () => {
+    seedWork();
+    const critique = path.join(tmp, 'critique.json');
+    writeCritique(critique, SINGLE_ISSUE);
+    const empty = path.join(tmp, 'empty.json');
+    emptyCritique(empty, 1);
+    const revision = path.join(tmp, 'revision.md');
+    writeStructuredPlanFile(revision, 'Semantic Retry Revision');
+    const validMeta = {
+      plan_version: 1,
+      issues: [
+        {
+          id: 'C1',
+          verdict: 'accept',
+          verdict_reason: 'The revised Work Plan addresses the grounded issue.',
+          final_severity: 'major',
+          duplicate_of: null,
+        },
+      ],
+      applied: ['C1'],
+      systemic_dispositions: [
+        {
+          issue_id: 'C1',
+          scope: 'local',
+          rationale: 'The correction is confined to the revised Work Plan.',
+          evidence_refs: [{ kind: 'plan-section', section: 'Work Plan' }],
+          invariant: null,
+        },
+      ],
+      rejected_append: [],
+    };
+    const invalidMetaFile = path.join(tmp, 'invalid-meta.json');
+    writeFileSync(
+      invalidMetaFile,
+      `${JSON.stringify(
+        {
+          ...validMeta,
+          systemic_dispositions: [
+            {
+              ...validMeta.systemic_dispositions[0],
+              evidence_refs: [{ kind: 'plan-section', section: 'Invented Section' }],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const validMetaFile = path.join(tmp, 'valid-meta.json');
+    writeFileSync(validMetaFile, `${JSON.stringify(validMeta, null, 2)}\n`);
+    const metadataCalls = path.join(tmp, 'metadata.calls');
+    const markdownCalls = path.join(tmp, 'markdown.calls');
+    const creatorPrompt = path.join(tmp, 'creator.prompt');
+    const ctx = makeContext({ quality: 'balanced', maxIters: 2 });
+    ctx.provider = {
+      ...ctx.provider,
+      retry: { retryCount: 1, retryDelaySeconds: 0 },
+    };
+
+    await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: empty,
+        FAKE_CODEX_OUTPUT_CALLS: path.join(tmp, 'codex.calls'),
+        FAKE_CODEX_OUTPUT_1: critique,
+        FAKE_CODEX_OUTPUT_2: empty,
+        FAKE_CODEX_PROMPT: path.join(tmp, 'codex.prompt'),
+        FAKE_CLAUDE_MARKDOWN_RESULT: revision,
+        FAKE_CLAUDE_MARKDOWN_CALLS: markdownCalls,
+        FAKE_CLAUDE_JSON_RESULT: validMetaFile,
+        FAKE_CLAUDE_JSON_CALLS: metadataCalls,
+        FAKE_CLAUDE_JSON_RESULT_1: invalidMetaFile,
+        FAKE_CLAUDE_JSON_RESULT_2: validMetaFile,
+        FAKE_CLAUDE_PROMPT: creatorPrompt,
+      },
+      () => runIterationLoop(ctx, 0),
+    );
+
+    expect(readFileSync(markdownCalls, 'utf8')).toBe('1');
+    expect(readFileSync(metadataCalls, 'utf8')).toBe('2');
+    expect(readFileSync(creatorPrompt, 'utf8')).toContain(
+      '## Deterministic semantic-admission repair',
+    );
+    expect(readFileSync(path.join(work, 'plan.v1.md'), 'utf8')).toBe(
+      readFileSync(revision, 'utf8'),
+    );
+    expect(ctx.readinessProof.findings).toHaveLength(1);
+  });
+
   it('an invalid one-shot update falls back to the split flow', async () => {
     seedWork();
     const critique = path.join(tmp, 'critique.json');
@@ -594,7 +729,9 @@ describe('iteration loop', () => {
         },
         () => runIterationLoop(ctx, 0),
       ),
-    ).rejects.toThrow(/material issues cannot be duplicates/);
+    ).rejects.toThrow(
+      /critic output failed deterministic admission \(code=invalid-value path=issues\[0\]\.duplicate_of\)/,
+    );
 
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
   });
@@ -621,7 +758,9 @@ describe('iteration loop', () => {
         },
         () => runIterationLoop(ctx, 0),
       ),
-    ).rejects.toThrow(/material issues cannot be duplicates/);
+    ).rejects.toThrow(
+      /critic output failed deterministic admission \(code=invalid-value path=issues\[0\]\.duplicate_of\)/,
+    );
 
     expect(existsSync(path.join(work, 'plan.v1.md'))).toBe(false);
   });

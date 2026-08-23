@@ -1,6 +1,10 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { admitFixReviewer, type AdmittedFixReviewer } from '../../core/readiness-admission.js';
+import {
+  admitFixReviewer,
+  ReadinessAdmissionError,
+  type AdmittedFixReviewer,
+} from '../../core/readiness-admission.js';
 import { sha256 } from '../../core/digest.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../../core/json.js';
 import {
@@ -25,6 +29,12 @@ import {
 import { readStripped, type RunContext } from '../../core/run-context.js';
 import { retainedRolePrompt, synchronizeRetainedInterventions } from './retained-context.js';
 import { validateFinalPlan, type FindingsCounts } from './validate-plan.js';
+import {
+  admissionFailureLogLabel,
+  candidateEvidenceAnchorPrompt,
+  readinessAdmissionRepairPrompt,
+  structuredOutputRepairPrompt,
+} from './evidence-anchors.js';
 
 const FIX_REVIEW_REQUIRED_REASON = 'fix-pass-replacement-retained';
 
@@ -137,6 +147,7 @@ async function reviewCandidate(
     candidateKind: input.candidateKind,
     contentDigest,
   });
+  const evidenceAnchors = candidateEvidenceAnchorPrompt(input.candidateFile, candidateContent);
   const prompt = retainedRolePrompt({
     ctx: input.ctx,
     role: 'reviewer',
@@ -148,10 +159,12 @@ async function reviewCandidate(
       `## Trusted review binding\n` +
       `candidate_kind: ${input.candidateKind}\n` +
       `candidate_content_digest: ${contentDigest}\n\n` +
+      `${evidenceAnchors}\n\n` +
       input.basePrompt,
     lineageDigest: binding.lineage.lineageDigest,
     persistVersionedState: false,
   });
+  let admitted: AdmittedFixReviewer | undefined;
   const status = await providerRun(
     input.runtime,
     'reviewer',
@@ -162,36 +175,52 @@ async function reviewCandidate(
     input.ctx.permissions.reviewer.tools,
     input.ctx.permissions.reviewer.disallowedTools,
     prompt,
+    {
+      validateOutput: (outputFile) => {
+        if (
+          !nonEmptyFile(outputFile) ||
+          !validateSchema(outputFile, input.ctx.skills.reviewerSchema)
+        ) {
+          admitted = undefined;
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('fix-reviewer'),
+          };
+        }
+        try {
+          const parsed = JSON.parse(readFileSync(outputFile, 'utf8')) as JsonValue;
+          admitted = admitFixReviewer({
+            value: parsed,
+            catalog: readinessProof.catalog,
+            binding,
+            evidenceContext: {
+              work: input.ctx.work,
+              projectRoot: input.ctx.provider.projectRoot,
+              planVersion: readinessProof.planVersion,
+              candidateContent,
+              candidatePath: input.candidateFile,
+            },
+            requirementReason: FIX_REVIEW_REQUIRED_REASON,
+          });
+          return true;
+        } catch (error) {
+          admitted = undefined;
+          if (error instanceof ReadinessAdmissionError) {
+            log(`WARNING: ${admissionFailureLogLabel('fix-reviewer', error)}`);
+            return { valid: false, retryPrompt: readinessAdmissionRepairPrompt(error) };
+          }
+          return {
+            valid: false,
+            retryPrompt: structuredOutputRepairPrompt('fix-reviewer'),
+          };
+        }
+      },
+    },
   );
-  if (status !== 0 || !nonEmptyFile(input.outputFile)) {
+  if (status !== 0 || admitted === undefined) {
     return undefined;
   }
-  if (!validateSchema(input.outputFile, input.ctx.skills.reviewerSchema)) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(input.outputFile, 'utf8')) as JsonValue;
-    return {
-      binding,
-      contentDigest,
-      review: admitFixReviewer({
-        value: parsed,
-        catalog: readinessProof.catalog,
-        binding,
-        evidenceContext: {
-          work: input.ctx.work,
-          projectRoot: input.ctx.provider.projectRoot,
-          planVersion: readinessProof.planVersion,
-          candidateContent,
-          candidatePath: input.candidateFile,
-        },
-        requirementReason: FIX_REVIEW_REQUIRED_REASON,
-      }),
-    };
-  } catch {
-    err(`fix-pass: ${binding.lineage.evaluationStage} semantic admission failed`);
-    return undefined;
-  }
+  return { binding, contentDigest, review: admitted };
 }
 
 function reviewApprovesCandidate(review: AdmittedFixReviewer): boolean {

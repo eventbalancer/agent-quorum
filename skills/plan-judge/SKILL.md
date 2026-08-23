@@ -86,6 +86,8 @@ count as represented. Derive `unresolved_occurrence_ids` as the exact set of IDs
 carrying the `unresolved` disposition, with no omissions or additions. These
 summary fields report the detailed matrix and are not consensus signals.
 
+The prompt supplies a `## Deterministic candidate evidence anchors` catalog for the exact candidate. Every conclusive occurrence disposition and every non-null `revision_issue` must include at least one current-candidate reference copied exactly from that catalog. Copy section names without a Markdown `#` prefix and use only the supplied candidate basename and line range. If the catalog cannot support a conclusive occurrence disposition, use `unresolved`; do not invent a nearby section, phase, gate, path, or line.
+
 ## What to assess
 
 Return `ready: true` **only** when all of the following hold:

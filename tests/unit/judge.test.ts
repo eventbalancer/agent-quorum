@@ -305,6 +305,37 @@ describe('runJudge', () => {
     expect(capture.text()).toContain('proof unavailable');
   });
 
+  it('returns trusted repair feedback for schema-valid ungrounded Judge evidence', async () => {
+    const invalid = JSON.parse(JSON.stringify(judgeOutput())) as {
+      invariant_assessments: { occurrences: { evidence_refs: unknown[] }[] }[];
+    };
+    invalid.invariant_assessments[0]?.occurrences.forEach((occurrence) => {
+      occurrence.evidence_refs = [{ kind: 'plan-section', section: 'Invented Section' }];
+    });
+    let validation: unknown;
+    mockProviderRun.mockImplementation(
+      (_provider, _role, _mode, file, _skill, _schema, _tools, _disallowed, _prompt, options) => {
+        writeFileSync(file, JSON.stringify(invalid));
+        const validateOutput = (
+          options as { readonly validateOutput?: (outputFile: string) => unknown } | undefined
+        )?.validateOutput;
+        validation = validateOutput?.(file);
+        return Promise.resolve(1);
+      },
+    );
+    const state = proofState();
+
+    const result = await runJudge(makeContext(state), state, 0, planFile, critiqueFile, outFile);
+
+    expect(result.available).toBe(false);
+    const repair = validation as { readonly valid?: unknown; readonly retryPrompt?: unknown };
+    expect(repair.valid).toBe(false);
+    expect(repair.retryPrompt).toContain('## Deterministic semantic-admission repair');
+    const prompt = mockProviderRun.mock.calls[0]?.[8] ?? '';
+    expect(prompt).toContain('## Deterministic candidate evidence anchors');
+    expect(prompt).toContain('- Plan');
+  });
+
   it('rejects an explicit proof state that is not the current run-context state', async () => {
     const state = proofState();
     const ctx = makeContext(proofState());

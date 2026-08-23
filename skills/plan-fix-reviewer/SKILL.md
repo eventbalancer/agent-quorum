@@ -64,6 +64,8 @@ No fields beyond the schema. No markdown fences. JSON only.
 
 Assess every active invariant in mandatory retained context exactly once against the exact proposed or applied candidate supplied in this call, and emit every retained occurrence exactly once. Use `satisfied` only with evidence grounded in the current candidate, `not-applicable` only with candidate-specific evidence that the occurrence does not apply, `violated` only with grounded conclusive negative evidence, and `unresolved` when no grounded conclusion is available. Never use `not-applicable` as an omission or default.
 
+The prompt supplies a `## Deterministic candidate evidence anchors` catalog for that exact candidate. Every conclusive occurrence disposition must include at least one current-candidate reference copied exactly from the catalog. Copy section names without a Markdown `#` prefix and use only the supplied candidate basename and line range. If no catalog entry supports a conclusive disposition, use `unresolved`; do not invent a section, phase, gate, path, or line.
+
 Derive `coverage_complete` from exact invariant and occurrence accounting: explicit unresolved occurrences still count as represented. Derive `unresolved_occurrence_ids` as the exact set of occurrence IDs carrying the `unresolved` disposition, with no omissions or additions. A disposition does not invent concern severity; report a separate grounded concern when the candidate has a review concern, and derive `approval` exactly from `concerns` under the table below. A proposal review does not approve a later apply result; when the input says `## Applied fix`, review that exact candidate independently. Prior role conclusions are disputable evidence, not consensus.
 
 ## What to check

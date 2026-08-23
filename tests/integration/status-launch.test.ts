@@ -212,14 +212,17 @@ describe('launch + status', () => {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (existsSync(log)) {
         content = readFileSync(log, 'utf8');
-        if (content.includes('code=unexpected-error')) {
+        if (content.includes('critic output failed semantic admission')) {
           break;
         }
       }
       await sleep(100);
     }
 
-    expect(content).toContain('agent-quorum: failed (code=unexpected-error)');
+    expect(content).toContain(
+      'critic output failed semantic admission (code=unknown-identity path=invariant_assessments[0].invariant_id)',
+    );
+    expect(content).not.toContain('code=unexpected-error');
     expect(content).not.toContain(secret);
   }, 30_000);
 

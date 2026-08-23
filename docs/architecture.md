@@ -46,7 +46,12 @@ material issue identities, retained context, invariant occurrences, and evidence
 grounding. A role artifact that omits, duplicates, invents, crosses, or binds any
 of those identities incorrectly is rejected before it can transition proof
 state. Equivalent normalized output from every provider enters this same
-admission path.
+admission path. Critic, creator-update metadata, fix-reviewer, and Judge calls
+perform structural and semantic validation inside the bounded provider retry
+boundary. A rejected attempt receives only a trusted code/path repair instruction
+plus the deterministic current-candidate anchor catalog; rejected content never
+mutates readiness state or enters normal logs. Exhaustion fails closed with a
+stable halt instead of exposing a raw admission exception.
 
 ### Readiness responsibility ownership
 
@@ -104,9 +109,10 @@ out-of-scope removal, appetite increase, or contract/digest mismatch is a
 boundary challenge and terminates the run as `unable-to-decide`; the frozen
 contract is never rewritten in place.
 
-Per iteration: critic → normalize → schema-validate (exit 3) → semantic admission
-→ immutable proof transition → optional intermediate Judge admission → creator
-update. Critic `issues` contain only in-boundary blocker/major concerns;
+Per iteration: critic → normalize → schema and semantic validation with bounded
+repair → immutable proof transition → optional intermediate Judge admission →
+creator update and admitted metadata. Critic `issues` contain only in-boundary
+blocker/major concerns;
 non-blocking improvements belong in `opportunities.json` and never cause a
 creator update. Zero issues, Judge approval, accepted severity, and a `diff`
 below `diffThreshold` are telemetry or gate inputs; none is an independent stop

@@ -1107,6 +1107,52 @@ describe('codex argv and retries', () => {
     expect(schemaValidQuiet(out, CRITIC_SCHEMA)).toBe(true);
   });
 
+  it('adds trusted validation feedback only to the retry prompt', async () => {
+    const critique = path.join(tmp, 'critique.json');
+    emptyCritique(critique);
+    const promptFile = path.join(tmp, 'codex.prompt');
+    const providerRuntime = makeRuntime({ retry: { retryCount: 1, retryDelaySeconds: 0 } });
+    let validationCalls = 0;
+
+    const status = await withEnvAsync(
+      {
+        PATH: fakePath(),
+        FAKE_CODEX_OUTPUT: critique,
+        FAKE_CODEX_PROMPT: promptFile,
+      },
+      () =>
+        providerRun(
+          providerRuntime,
+          'critic',
+          'json',
+          path.join(tmp, 'out.json'),
+          CRITIC_SKILL,
+          CRITIC_SCHEMA,
+          '',
+          '',
+          'BASE-PROMPT\n',
+          {
+            validateOutput: () => {
+              validationCalls += 1;
+              return validationCalls === 1
+                ? { valid: false, retryPrompt: 'TRUSTED-REPAIR-INSTRUCTION' }
+                : true;
+            },
+          },
+        ),
+    );
+
+    expect(status).toBe(0);
+    expect(validationCalls).toBe(2);
+    const retryPrompt = readFileSync(promptFile, 'utf8');
+    expect(retryPrompt).toContain('BASE-PROMPT');
+    expect(retryPrompt).toContain('TRUSTED-REPAIR-INSTRUCTION');
+    expect(retryPrompt.indexOf('BASE-PROMPT')).toBeLessThan(
+      retryPrompt.indexOf('TRUSTED-REPAIR-INSTRUCTION'),
+    );
+    expect(capture.text()).not.toContain('TRUSTED-REPAIR-INSTRUCTION');
+  });
+
   it('returns failure when output validation exhausts the retry policy', async () => {
     const invalid = path.join(tmp, 'invalid.json');
     writeFileSync(invalid, '{"unexpected":true}\n');
