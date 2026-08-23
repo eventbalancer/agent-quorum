@@ -124,6 +124,14 @@ describe('Codex structured-output schema projection', () => {
       maxItems: 0,
       items: { type: 'string' },
     });
+    const canonicalSystemicDispositions = (canonical.properties as JsonObject)
+      .systemic_dispositions as JsonObject;
+    const projectedSystemicDispositions = (projected.schema.properties as JsonObject)
+      .systemic_dispositions as JsonObject;
+    expect(canonicalSystemicDispositions.description).toEqual(expect.any(String));
+    expect(projectedSystemicDispositions).toEqual({
+      $ref: '#/$defs/systemicDispositions',
+    });
     expect(projected.changed).toBe(true);
   });
 

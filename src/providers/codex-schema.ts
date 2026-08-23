@@ -33,6 +33,13 @@ export function projectCodexJsonSchema(schema: JsonObject): CodexSchemaProjectio
       return value;
     }
 
+    if (typeof value.$ref === 'string') {
+      if (Object.keys(value).length > 1) {
+        changed = true;
+      }
+      return { $ref: value.$ref };
+    }
+
     const projected: JsonObject = {};
     for (const [key, child] of Object.entries(value)) {
       if (CODEX_UNSUPPORTED_SCHEMA_KEYWORDS.has(key)) {

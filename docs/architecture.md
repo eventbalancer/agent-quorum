@@ -36,9 +36,11 @@ Codex JSON-mode adapter creates a temporary Structured Outputs projection in
 which every object property is required and canonical optional properties are
 nullable. Canonically zero-length arrays receive a provider-only item schema
 because Codex requires `items` even when `maxItems` is zero; an unconstrained
-array without `items` is rejected instead of guessed. The adapter removes null
-placeholders for optional properties from the returned payload before canonical
-validation and deletes the temporary schema.
+array without `items` is rejected instead of guessed. `$ref` nodes shed sibling
+annotations and constraints in the provider projection because Codex requires a
+pure reference; the canonical validator retains and enforces those siblings. The
+adapter removes null placeholders for optional properties from the returned
+payload before canonical validation and deletes the temporary schema.
 Neither compatibility projection changes Cursor prompts, Markdown-mode payloads,
 the canonical role contracts, or local validation.
 

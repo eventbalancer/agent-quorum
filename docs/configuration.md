@@ -207,11 +207,13 @@ agent-quorum writes a temporary strict projection of the canonical role schema:
 canonical optional properties become required and nullable, and an array that
 is canonically constrained to `maxItems: 0` receives a provider-only `items`
 schema. An array without `items` and without that zero-length constraint is
-rejected. After a successful call, null placeholders for optional properties are
-removed, the temporary schema is deleted, and the payload is validated against
-the canonical draft 2019-09 contract. Readiness-bearing payloads then pass the
-same closed-world semantic admission as every other provider; pre-change
-payloads are unsupported rather than backfilled.
+rejected. A `$ref` is projected without sibling annotations or constraints,
+which remain present in the canonical schema. After a successful call, null
+placeholders for optional properties are removed, the temporary schema is
+deleted, and the payload is validated against the canonical draft 2019-09
+contract. Readiness-bearing payloads then pass the same closed-world semantic
+admission as every other provider; pre-change payloads are unsupported rather
+than backfilled.
 
 Claude Code `2.1.205` is the verified structured-output baseline. The canonical
 role contracts stay on JSON Schema draft 2019-09 for local validation; immediately
