@@ -6,6 +6,7 @@ export interface CodexSchemaProjection {
 }
 
 const CODEX_UNSUPPORTED_SCHEMA_KEYWORDS = new Set(['uniqueItems']);
+const CODEX_EMPTY_ARRAY_ITEMS: JsonObject = { type: 'string' };
 
 function nullableSchema(schema: JsonValue): JsonValue {
   if (!isJsonObject(schema)) {
@@ -39,6 +40,14 @@ export function projectCodexJsonSchema(schema: JsonObject): CodexSchemaProjectio
         continue;
       }
       projected[key] = project(child);
+    }
+
+    if (value.type === 'array' && value.items === undefined) {
+      if (value.maxItems !== 0) {
+        throw new TypeError('Codex array schemas without items must be constrained to maxItems 0');
+      }
+      projected.items = CODEX_EMPTY_ARRAY_ITEMS;
+      changed = true;
     }
 
     const properties = value.properties;

@@ -12,6 +12,7 @@ import { SKILLS_DIR } from '../helpers/harness.js';
 const Ajv2019 = ajvModule.default;
 const CRITIC_SCHEMA = path.join(SKILLS_DIR, 'plan-critic', 'critique.schema.json');
 const JUDGE_SCHEMA = path.join(SKILLS_DIR, 'plan-judge', 'readiness.schema.json');
+const CREATOR_META_SCHEMA = path.join(SKILLS_DIR, 'plan-creator', 'update-meta.schema.json');
 const CRITIC_RISK_DOMAINS = [
   'correctness',
   'public-compatibility',
@@ -106,6 +107,35 @@ describe('Codex structured-output schema projection', () => {
     ).toBeUndefined();
     expect((projectedReviewProperties.scope_coverage as JsonObject).uniqueItems).toBeUndefined();
     expect(projected.changed).toBe(true);
+  });
+
+  it('projects canonically empty arrays with the item schema Codex requires', () => {
+    const canonical = readSchema(CREATOR_META_SCHEMA);
+    const projected = projectCodexJsonSchema(canonical);
+    const canonicalRejectedAppend = (canonical.properties as JsonObject)
+      .rejected_append as JsonObject;
+    const projectedRejectedAppend = (projected.schema.properties as JsonObject)
+      .rejected_append as JsonObject;
+
+    expect(canonicalRejectedAppend).toMatchObject({ type: 'array', maxItems: 0 });
+    expect(canonicalRejectedAppend.items).toBeUndefined();
+    expect(projectedRejectedAppend).toMatchObject({
+      type: 'array',
+      maxItems: 0,
+      items: { type: 'string' },
+    });
+    expect(projected.changed).toBe(true);
+  });
+
+  it('fails closed for an unconstrained array schema without items', () => {
+    expect(() =>
+      projectCodexJsonSchema({
+        type: 'object',
+        additionalProperties: false,
+        required: ['values'],
+        properties: { values: { type: 'array' } },
+      }),
+    ).toThrow('Codex array schemas without items must be constrained to maxItems 0');
   });
 
   it('removes projected null placeholders before canonical validation', () => {

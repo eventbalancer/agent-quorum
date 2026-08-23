@@ -34,8 +34,11 @@ adapter serializes an in-memory copy whose sole contract change is `$schema` =
 `http://json-schema.org/draft-07/schema#` and passes it to `--json-schema`. The
 Codex JSON-mode adapter creates a temporary Structured Outputs projection in
 which every object property is required and canonical optional properties are
-nullable. It removes null placeholders for those optional properties from the
-returned payload before canonical validation and deletes the temporary schema.
+nullable. Canonically zero-length arrays receive a provider-only item schema
+because Codex requires `items` even when `maxItems` is zero; an unconstrained
+array without `items` is rejected instead of guessed. The adapter removes null
+placeholders for optional properties from the returned payload before canonical
+validation and deletes the temporary schema.
 Neither compatibility projection changes Cursor prompts, Markdown-mode payloads,
 the canonical role contracts, or local validation.
 
