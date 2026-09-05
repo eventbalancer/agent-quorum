@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approved",
+    "findings",
+    "acceptanceEvidence",
+    "adjacentFindings",
+    "liveReuseApproved",
+    "interveningDiffDigest"
+  ],
+  "properties": {
+    "approved": {
+      "type": "boolean"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "material",
+          "description",
+          "evidence",
+          "resolution",
+          "resolutionEvidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "material": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "resolution": {
+            "enum": [
+              "open",
+              "corrected",
+              "dismissed"
+            ]
+          },
+          "resolutionEvidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "acceptanceEvidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "outcome",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "adjacentFindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "title",
+          "problem",
+          "evidence",
+          "outcome",
+          "uncertainty",
+          "relatedIssue"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "necessary",
+              "adjacent",
+              "prerequisite",
+              "observation"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uncertainty": {
+            "type": "string"
+          },
+          "relatedIssue": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "liveReuseApproved": {
+      "type": "boolean"
+    },
+    "interveningDiffDigest": {
+      "type": "string"
+    }
+  }
+}

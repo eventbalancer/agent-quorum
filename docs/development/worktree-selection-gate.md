@@ -15,7 +15,7 @@ behavior only: no public API, CLI bin, configuration, or schema contract changes
 
 ## Scope
 
-Gated skills (FR-1): `tidy`, `ship`, `execute`, `sync-main`, and any future
+Gated skills (FR-1): `refactor`, `tidy`, `ship`, `execute`, `sync-main`, and any future
 skill that reads or mutates a checkout's working tree. Each resolves its target
 worktree before any working-tree action.
 
@@ -39,6 +39,17 @@ multi-worktree runtime path activates only once concurrent sessions run in their
 own worktrees.
 
 ## Candidate discovery
+
+For a validated autonomous assignment, use the exact worktree in the controller's
+durable issue ownership record. Verify its repository, branch, path, and live
+owner before acting. Do not apply interactive menus or unambiguous-skip rules to
+select a different tree. A foreign or ambiguous owner is a blocker; marker expiry
+alone never permits takeover. Recovery reconciles the recorded process identity,
+files, and GitHub state before reusing owned work. The controller retains
+worktrees and artifacts after deferral or verified completion unless a separate
+authorized cleanup handles them.
+
+The discovery and confirmation rules below apply to interactive selection.
 
 Enumerate candidate worktrees with their branches and paths:
 
@@ -207,4 +218,4 @@ byte-identical `## Worktree selection gate` section that references this file,
 plus a skill-specific wire-in clause at its existing checkout-resolution step.
 Skill-specific nuances, such as the `execute` plan-path anchoring above, live in
 this document and in the per-skill wire-in clause, not in the shared section, so
-the shared section stays identical across `tidy`, `ship`, and `execute`.
+the shared section stays identical across `refactor`, `tidy`, `ship`, and `execute`.

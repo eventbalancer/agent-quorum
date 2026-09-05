@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action",
+    "acceptance",
+    "decisions",
+    "dependencies",
+    "findings",
+    "requiresPlan",
+    "rationale",
+    "relatedIssue",
+    "edits",
+    "targetedTests",
+    "uncertainty",
+    "packageOperations"
+  ],
+  "properties": {
+    "action": {
+      "enum": [
+        "refined",
+        "edit",
+        "ready",
+        "blocked",
+        "resolved",
+        "duplicate",
+        "decomposed"
+      ]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "outcome",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "title",
+          "problem",
+          "evidence",
+          "outcome",
+          "uncertainty",
+          "relatedIssue"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "necessary",
+              "adjacent",
+              "prerequisite",
+              "observation"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "problem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uncertainty": {
+            "type": "string"
+          },
+          "relatedIssue": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "requiresPlan": {
+      "type": "boolean"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relatedIssue": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "path",
+          "baseSha256",
+          "mode",
+          "hunks",
+          "content"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "patch",
+              "create",
+              "delete"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseSha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mode": {
+            "enum": [
+              420,
+              493
+            ]
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "before",
+                "after"
+              ],
+              "properties": {
+                "before": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "after": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "targetedTests": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uncertainty": {
+      "type": "string"
+    },
+    "packageOperations": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "refresh-lockfile"
+        ]
+      },
+      "maxItems": 1
+    }
+  }
+}

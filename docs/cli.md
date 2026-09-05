@@ -1,5 +1,11 @@
 # CLI
 
+Autonomous development of this repository uses the separate local
+`pnpm run delivery -- <command>` entry point described in
+[Autonomous delivery](autonomous-delivery.md). It does not add public lifecycle
+stages to the `agent-quorum` bin. Preparation and inspection do not activate
+delivery, and release operations remain manual.
+
 `agent-quorum` is one bin with an umbrella dispatcher. The first argument selects
 an entry point: a reserved run-lifecycle command (`launch`, `status`, `show`,
 `logs`, `prune`, `intervene`), a configuration command (`setup`, `config`), or a

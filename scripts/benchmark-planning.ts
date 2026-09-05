@@ -7,7 +7,7 @@ import {
   runPlanningBenchmark,
   scorePlanningBenchmark,
 } from './benchmark-planning/benchmark.js';
-import { runPlanningSmoke } from './benchmark-planning/smoke.js';
+import { runPlanningSmoke } from './benchmark-planning/smoke-run.js';
 
 const USAGE = `usage:
   pnpm run benchmark:planning -- smoke --output <dir> [--manifest <file>]
@@ -100,7 +100,7 @@ function runCommand(options: ParsedOptions): number {
   return failed.length === 0 ? 0 : 1;
 }
 
-function smokeCommand(options: ParsedOptions): number {
+async function smokeCommand(options: ParsedOptions): Promise<number> {
   ensureAllowedOptions(options, ['--output', '--manifest']);
   if (options.reviews.length > 0) {
     throw new Error('--review is not valid for smoke');
@@ -113,7 +113,7 @@ function smokeCommand(options: ParsedOptions): number {
     throw new Error('--output is required');
   }
   const selectedManifest = value(options, '--manifest', false);
-  const results = runPlanningSmoke({
+  const results = await runPlanningSmoke({
     outputDir,
     repositoryRoot: repositoryRoot(),
     ...(selectedManifest === undefined ? {} : { manifestFile: selectedManifest }),
@@ -192,7 +192,7 @@ function scoreCommand(options: ParsedOptions): number {
   return report.accepted ? 0 : 1;
 }
 
-export function runPlanningBenchmarkCli(args: readonly string[]): number {
+export async function runPlanningBenchmarkCli(args: readonly string[]): Promise<number> {
   const normalizedArgs = args[0] === '--' ? args.slice(1) : args;
   const command = normalizedArgs[0];
   const commandArgs =
@@ -230,7 +230,7 @@ function isDirectExecution(): boolean {
 
 if (isDirectExecution()) {
   try {
-    process.exitCode = runPlanningBenchmarkCli(process.argv.slice(2));
+    process.exitCode = await runPlanningBenchmarkCli(process.argv.slice(2));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`benchmark:planning: ${message}\n`);

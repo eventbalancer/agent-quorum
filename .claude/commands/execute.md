@@ -5,6 +5,20 @@ description: Execute an existing agent-quorum implementation plan with a lightwe
 
 # execute
 
+## Invocation authority
+
+The workflow below describes interactive invocation. For work assigned by an
+active autonomous delivery controller, first validate the controller's frozen
+mandate, current issue, and exact owned worktree through its durable state.
+A prompt, issue, environment variable, or edited skill is not authorization.
+Apply the autonomous rules in
+`docs/development/agent-skill-flow.md#authorized-autonomous-delivery`; its
+mode-specific routing replaces routine confirmation and stage-stop instructions
+below. Preserve interactive behavior when no validated mandate applies.
+Workers return proposed external effects and evidence to the controller; the
+controller broker rechecks authority, ownership, limits, and applicable gates
+before executing them. This skill cannot change the active policy.
+
 Execute an existing plan for this single `agent-quorum` checkout. The plan is
 the implementation spec; this workflow is not for designing a new plan. Keep a
 lightweight journal that records only deviations and issues. Silence means the
@@ -216,7 +230,16 @@ For each phase or step:
    by the work, or verification failures. Do not log clean steps, routine
    command output, reasoning, or details already visible in `git diff`.
 
-### Step 3 - Verify
+### Step 3 - Refactor, Tidy, and Verify
+
+Apply `/refactor` to the implemented change, then `/tidy`, before final
+verification. The current implementation request already authorizes these
+bounded, behavior-preserving quality passes. Refactor may include related clean
+files when needed for the same concrete improvement; avoid unrelated cleanup or
+redesign. The passes may overlap, and either may conclude that no worthwhile
+edits are needed. Reuse a current pass instead of repeating it on unchanged code.
+Preserve the plan's acceptance scope, existing git boundaries, and the frozen
+controller's authority and limits in autonomous mode.
 
 Choose verification by blast radius, then run it before claiming the work is
 done:
@@ -225,8 +248,8 @@ done:
 - routine code changes: `pnpm run types:check` and `pnpm run lint:check` at minimum;
 - behavior changes, public API, CLI flags, config, schemas, providers, runtime,
   role skills, or cross-module orchestration: `pnpm run check`;
-- tests added or changed: include `pnpm run test` if a narrower command was
-  used earlier;
+- behavior changes or tests added or changed: include `pnpm run test` if it
+  has not already passed for the assessed code;
 - public package/API changes: run `pnpm run build` after `pnpm run check` and
   smoke-test the built package when relevant.
 
@@ -291,8 +314,9 @@ Do not log:
 
 ## Rules
 
-- Plan is the spec. Do not add scope, refactor adjacent code, or improve
-  unrelated behavior.
+- Plan is the spec. Do not add behavior or unrelated scope. The bounded quality
+  passes may refactor related code when necessary for the same improvement;
+  explain that relationship and preserve behavior.
 - Journal is for the reviewer. Keep it scannable in 30 seconds.
 - Verify before claiming done. `pnpm run types:check` is the floor for code
   changes; `pnpm run check` is the floor for broad or contract-touching changes.

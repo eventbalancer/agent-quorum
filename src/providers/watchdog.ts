@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { killTree } from '../runtime/exec.js';
+import { killTree, terminateOwned } from '../runtime/exec.js';
 import { isJsonObject, type JsonObject, type JsonValue } from '../core/json.js';
 
 export interface StreamKnobs {
@@ -34,7 +34,7 @@ async function sleepWatchingExit(child: ChildProcess, seconds: number): Promise<
 }
 
 // Byte-idle, semantic-idle, and wall-clock guards over a provider stream. On
-// trigger: SIGINT to the provider group, grace, then SIGTERM; resolves with the
+// trigger: SIGINT to the provider group, grace, then bounded termination; resolves with the
 // stall reason. Resolves undefined when the child exits on its own.
 export async function watchStream(
   child: ChildProcess,
@@ -90,7 +90,7 @@ export async function watchStream(
     killTree(child, 'SIGINT');
     await sleepWatchingExit(child, knobs.graceSeconds);
     if (!exited(child)) {
-      killTree(child, 'SIGTERM');
+      await terminateOwned(child);
     }
     return reason;
   }

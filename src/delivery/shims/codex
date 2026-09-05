@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node /aq-harness/dist/delivery/codex-shim.js "$@"

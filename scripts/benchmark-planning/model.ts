@@ -117,6 +117,7 @@ export interface PlanningSmokeSentinelResult {
   readonly failures: readonly string[];
   readonly finalPlan?: string;
   readonly finalPlanSha256?: string;
+  readonly artifactBundleSha256?: string;
 }
 
 export interface PlanningSmokeResults {

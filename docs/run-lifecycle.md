@@ -80,6 +80,15 @@ reconciled occurrence coverage, and explicit Judge requirement/availability.
 Launch results do not have a final projection because detachment happens before
 completion.
 
+### Workdir ownership
+
+Foreground and detached starts acquire exclusive ownership of the resolved
+workdir before rotating logs or writing planning artifacts. A second start using
+the same directory, including a symlink alias, fails while its owner is active
+or cannot be verified. Ownership transfers from the launcher to its child and
+is released on normal teardown. A later start can recover a provably dead local
+owner; elapsed time alone does not release ownership.
+
 ### Resume boundary
 
 `agent-quorum launch --resume …` and `AGENT_QUORUM_RESUME=1` accept only a

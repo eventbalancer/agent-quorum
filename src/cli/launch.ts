@@ -23,6 +23,7 @@ import {
   runNameFromWorkdir,
 } from '../core/run-store.js';
 import { LAUNCH_USAGE } from './help.js';
+import { acquireWorkdirLock } from '../runtime/workdir-lock.js';
 import type { RunOverrides } from '../types.js';
 
 // The detached runner entry resolves from this module's own location (not
@@ -211,91 +212,98 @@ export async function runLaunchCli(
     mintedRunId = generateRunId();
     work = path.join(plansDir, `loop-${name}`);
   }
-  mkdirSync(work, { recursive: true });
-  const logPath = path.join(work, 'run.log');
-
-  if (existsSync(logPath) && statSync(logPath).size > 0) {
-    renameSync(logPath, path.join(work, `run.${rotationStamp()}.log`));
-  }
-
-  const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
-  if (resume) {
-    env.AGENT_QUORUM_RESUME = '1';
-  }
-  env.AGENT_QUORUM_WORK_DIR = work;
-  env.AGENT_QUORUM_HOME = home;
-  env.AGENT_QUORUM_STDIO_IS_RUNLOG = '1';
-  if (mintedRunId !== undefined) {
-    env.AGENT_QUORUM_RUN_ID = mintedRunId;
-    env.AGENT_QUORUM_RUN_NAME = name;
-  }
-
-  sweepHandoffDir(home);
-
-  // No bot token ever enters the child env: it goes to an owner-only 0600 handoff
-  // file and only its path is forwarded, and the ambient token is stripped so
-  // `{ ...process.env }` cannot leak it to the detached child or a grandchild.
-  if (overrides.config !== undefined) {
-    env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON = JSON.stringify(overrides.config);
-  }
-  const effectiveToken =
-    overrides.secrets?.telegramBotToken ?? process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
-  let handoffFile: string | undefined;
-  if (effectiveToken !== undefined && effectiveToken !== '') {
-    const dir = ensureHandoffDir(home);
-    handoffFile = path.join(dir, `secrets-${rotationStamp()}-${process.pid}.json`);
-    writeSecretFile(handoffFile, `${JSON.stringify({ telegramBotToken: effectiveToken })}\n`);
-    env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE = handoffFile;
-  }
-  delete env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
-
-  const runner = runnerCommand();
-  const logFd = openSync(logPath, 'w');
-  const child = spawn(runner.command, [...runner.baseArgs, 'plan', ...passArgs], {
-    cwd: projectRoot(),
-    env,
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-  });
-  closeSync(logFd);
-  const pid = child.pid ?? 0;
-  child.unref();
-
-  const verifyDelay = Number(process.env.AGENT_QUORUM_LAUNCH_VERIFY_DELAY ?? 1);
-  await sleep(verifyDelay * 1000);
-  let alive = true;
+  const workdirLock = acquireWorkdirLock(work);
   try {
-    process.kill(pid, 0);
-  } catch {
-    alive = false;
-  }
-  if (!alive) {
-    // The child unlinks the handoff once read; on a startup failure the parent removes it.
-    if (handoffFile !== undefined && existsSync(handoffFile)) {
-      try {
-        unlinkSync(handoffFile);
-      } catch {
-        /* best-effort: the file is owner-only under <home>/handoff/ */
-      }
-    }
-    fail(`launch failed: agent-quorum exited immediately; inspect log: ${logPath}`, 1);
-  }
+    mkdirSync(work, { recursive: true });
+    const logPath = path.join(work, 'run.log');
 
-  out(
-    `started: ${name}\n` +
-      (mintedRunId !== undefined ? `  run:   ${mintedRunId}\n` : '') +
-      `  pid:   ${pid}\n` +
-      `  log:   ${logPath}\n` +
-      `  work:  ${work}\n` +
-      '\n' +
-      `follow:  tail -F "${logPath}"\n` +
-      `stop:    kill -TERM -${pid}\n`,
-  );
-  return {
-    exitCode: 0,
-    workDir: work,
-    pid,
-    logPath,
-    ...(mintedRunId !== undefined ? { runId: mintedRunId, name } : {}),
-  };
+    if (existsSync(logPath) && statSync(logPath).size > 0) {
+      renameSync(logPath, path.join(work, `run.${rotationStamp()}.log`));
+    }
+
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: 'true' };
+    env.AGENT_QUORUM_WORK_LOCK_TOKEN = workdirLock.token;
+    if (resume) {
+      env.AGENT_QUORUM_RESUME = '1';
+    }
+    env.AGENT_QUORUM_WORK_DIR = work;
+    env.AGENT_QUORUM_HOME = home;
+    env.AGENT_QUORUM_STDIO_IS_RUNLOG = '1';
+    if (mintedRunId !== undefined) {
+      env.AGENT_QUORUM_RUN_ID = mintedRunId;
+      env.AGENT_QUORUM_RUN_NAME = name;
+    }
+
+    sweepHandoffDir(home);
+
+    // No bot token ever enters the child env: it goes to an owner-only 0600 handoff
+    // file and only its path is forwarded, and the ambient token is stripped so
+    // `{ ...process.env }` cannot leak it to the detached child or a grandchild.
+    if (overrides.config !== undefined) {
+      env.AGENT_QUORUM_CONFIG_OVERRIDE_JSON = JSON.stringify(overrides.config);
+    }
+    const effectiveToken =
+      overrides.secrets?.telegramBotToken ?? process.env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
+    let handoffFile: string | undefined;
+    if (effectiveToken !== undefined && effectiveToken !== '') {
+      const dir = ensureHandoffDir(home);
+      handoffFile = path.join(dir, `secrets-${rotationStamp()}-${process.pid}.json`);
+      writeSecretFile(handoffFile, `${JSON.stringify({ telegramBotToken: effectiveToken })}\n`);
+      env.AGENT_QUORUM_SECRETS_OVERRIDE_FILE = handoffFile;
+    }
+    delete env.AGENT_QUORUM_TELEGRAM_BOT_TOKEN;
+
+    const runner = runnerCommand();
+    const logFd = openSync(logPath, 'w');
+    const child = spawn(runner.command, [...runner.baseArgs, 'plan', ...passArgs], {
+      cwd: projectRoot(),
+      env,
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    });
+    closeSync(logFd);
+    const pid = child.pid ?? 0;
+    child.unref();
+
+    const verifyDelay = Number(process.env.AGENT_QUORUM_LAUNCH_VERIFY_DELAY ?? 1);
+    await sleep(verifyDelay * 1000);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    if (!alive) {
+      // The child unlinks the handoff once read; on a startup failure the parent removes it.
+      if (handoffFile !== undefined && existsSync(handoffFile)) {
+        try {
+          unlinkSync(handoffFile);
+        } catch {
+          /* best-effort: the file is owner-only under <home>/handoff/ */
+        }
+      }
+      fail(`launch failed: agent-quorum exited immediately; inspect log: ${logPath}`, 1);
+    }
+
+    out(
+      `started: ${name}\n` +
+        (mintedRunId !== undefined ? `  run:   ${mintedRunId}\n` : '') +
+        `  pid:   ${pid}\n` +
+        `  log:   ${logPath}\n` +
+        `  work:  ${work}\n` +
+        '\n' +
+        `follow:  tail -F "${logPath}"\n` +
+        `stop:    kill -TERM -${pid}\n`,
+    );
+    return {
+      exitCode: 0,
+      workDir: work,
+      pid,
+      logPath,
+      ...(mintedRunId !== undefined ? { runId: mintedRunId, name } : {}),
+    };
+  } catch (error) {
+    workdirLock.release();
+    throw error;
+  }
 }

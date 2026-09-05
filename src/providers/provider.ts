@@ -2,6 +2,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err, log } from '../runtime/log.js';
 import { runWithRetries } from '../runtime/retry.js';
+import type { ExecutionControl } from '../runtime/execution-control.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import type { Role } from '../types.js';
 import type { Runner } from './registry.js';
@@ -109,6 +110,25 @@ export interface ProviderRunOptions {
   readonly validateOutput?: (outFile: string) => ProviderOutputValidationResult;
 }
 
+export interface ProviderTaskRequest extends ProviderRunOptions {
+  readonly task: string;
+  readonly runner: Runner;
+  readonly model: string;
+  readonly reasoning: string;
+  readonly mode: ProviderMode;
+  readonly outFile: string;
+  readonly skillFile: string;
+  readonly schemaFile: string;
+  readonly promptText: string;
+  readonly cwd?: string;
+  readonly tools?: string;
+  readonly disallowedTools?: string;
+  readonly execution?: ExecutionControl;
+  readonly codexConfig?: readonly string[];
+  readonly isolatedUserConfig?: boolean;
+  readonly codexPermissionProfile?: string;
+}
+
 export type ProviderInvoke = (input: ProviderCallInput) => Promise<ProviderAttemptOutcome>;
 
 // Keyed by Runner via `satisfies`, so an omitted adapter is a compile error
@@ -180,10 +200,15 @@ async function providerRunOnce(
   tools: string,
   disallowedTools: string,
   promptText: string,
+  task?: ProviderTaskRequest,
 ): Promise<ProviderAttemptOutcome> {
-  const entry = providerRuntime.matrix[role];
-  const sessionFile = roleSessionFile(providerRuntime, role);
-  const traceContext: TraceContext = { role, provider: entry.runner, model: entry.model };
+  const entry = task ?? providerRuntime.matrix[role];
+  const sessionFile = task === undefined ? roleSessionFile(providerRuntime, role) : '';
+  const traceContext: TraceContext = {
+    role: task?.task ?? role,
+    provider: entry.runner,
+    model: entry.model,
+  };
   const diagnosticSink =
     providerRuntime.diagnosticsDir !== undefined
       ? createDiagnosticSink(providerRuntime.diagnosticsDir, traceContext)
@@ -209,7 +234,11 @@ async function providerRunOnce(
   }
 }
 
-export async function providerRun(
+export function providerRun(
+  providerRuntime: ProviderRuntime,
+  request: ProviderTaskRequest,
+): Promise<number>;
+export function providerRun(
   providerRuntime: ProviderRuntime,
   role: Role,
   mode: ProviderMode,
@@ -219,32 +248,87 @@ export async function providerRun(
   tools: string,
   disallowedTools: string,
   promptText: string,
-  options: ProviderRunOptions = {},
+  options?: ProviderRunOptions,
+): Promise<number>;
+export async function providerRun(
+  initialRuntime: ProviderRuntime,
+  roleOrTask: Role | ProviderTaskRequest,
+  initialMode?: ProviderMode,
+  initialOutFile?: string,
+  initialSkillFile?: string,
+  initialSchemaFile?: string,
+  initialTools?: string,
+  initialDisallowedTools?: string,
+  initialPromptText?: string,
+  initialOptions: ProviderRunOptions = {},
 ): Promise<number> {
-  const runner = providerRuntime.matrix[role].runner;
+  const task = typeof roleOrTask === 'string' ? undefined : roleOrTask;
+  const role = typeof roleOrTask === 'string' ? roleOrTask : 'creator';
+  const providerRuntime: ProviderRuntime =
+    task === undefined
+      ? initialRuntime
+      : {
+          ...initialRuntime,
+          projectRoot: task.cwd ?? initialRuntime.projectRoot,
+          ...(task.execution === undefined ? {} : { execution: task.execution }),
+          ...(task.codexConfig === undefined ? {} : { codexConfig: task.codexConfig }),
+          ...(task.isolatedUserConfig === undefined
+            ? {}
+            : { isolatedUserConfig: task.isolatedUserConfig }),
+          ...(task.codexPermissionProfile === undefined
+            ? {}
+            : { codexPermissionProfile: task.codexPermissionProfile }),
+        };
+  const mode = task?.mode ?? initialMode;
+  const outFile = task?.outFile ?? initialOutFile;
+  const skillFile = task?.skillFile ?? initialSkillFile;
+  const schemaFile = task?.schemaFile ?? initialSchemaFile;
+  const tools = task?.tools ?? initialTools ?? '';
+  const disallowedTools = task?.disallowedTools ?? initialDisallowedTools ?? '';
+  const promptText = task?.promptText ?? initialPromptText;
+  const options = task ?? initialOptions;
+  if (
+    mode === undefined ||
+    outFile === undefined ||
+    skillFile === undefined ||
+    schemaFile === undefined ||
+    promptText === undefined
+  ) {
+    throw new TypeError('provider request is incomplete');
+  }
+  if (task !== undefined && !/^[a-z][a-z0-9-]*$/.test(task.task)) {
+    throw new TypeError('provider task must be a lowercase task identifier');
+  }
+  const runner = task?.runner ?? providerRuntime.matrix[role].runner;
   let retryPrompt = '';
-  return runWithRetries(`${runner} call`, providerRuntime.retry, async () => {
-    const outcome = await providerRunOnce(
-      providerRuntime,
-      role,
-      mode,
-      outFile,
-      skillFile,
-      schemaFile,
-      tools,
-      disallowedTools,
-      retryPrompt === '' ? promptText : `${promptText}\n\n${retryPrompt}`,
-    );
-    const isClaudeSchemaRejection =
-      runner === 'claude' && mode === 'json' && outcome.failureReason === 'schema-incompatible';
-    if (outcome.status === 0 && options.validateOutput !== undefined) {
-      const validation = options.validateOutput(outFile);
-      const valid = typeof validation === 'boolean' ? validation : validation.valid;
-      if (!valid && typeof validation !== 'boolean' && validation.retryPrompt !== undefined) {
-        retryPrompt = validation.retryPrompt;
+  return runWithRetries(
+    `${runner} call`,
+    providerRuntime.retry,
+    async () => {
+      const outcome = await providerRunOnce(
+        providerRuntime,
+        role,
+        mode,
+        outFile,
+        skillFile,
+        schemaFile,
+        tools,
+        disallowedTools,
+        retryPrompt === '' ? promptText : `${promptText}\n\n${retryPrompt}`,
+        task,
+      );
+      const isClaudeSchemaRejection =
+        runner === 'claude' && mode === 'json' && outcome.failureReason === 'schema-incompatible';
+      if (outcome.status === 0 && options.validateOutput !== undefined) {
+        const validation = options.validateOutput(outFile);
+        const valid = typeof validation === 'boolean' ? validation : validation.valid;
+        if (!valid && typeof validation !== 'boolean' && validation.retryPrompt !== undefined) {
+          retryPrompt = validation.retryPrompt;
+        }
+        return { status: valid ? 0 : 1, retryable: true };
       }
-      return { status: valid ? 0 : 1, retryable: true };
-    }
-    return { status: outcome.status, retryable: !isClaudeSchemaRejection };
-  });
+      return { status: outcome.status, retryable: !isClaudeSchemaRejection };
+    },
+    providerRuntime.execution,
+  );
 }

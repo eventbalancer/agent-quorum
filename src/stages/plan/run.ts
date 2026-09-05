@@ -17,6 +17,9 @@ import { HaltError } from '../../runtime/halt.js';
 import { disableRunLogSink, enableRunLogSink, err, log } from '../../runtime/log.js';
 import { resolveArtifactRoots } from '../../runtime/paths.js';
 import { procStartToken } from '../../runtime/proc.js';
+import { acquireWorkdirLock } from '../../runtime/workdir-lock.js';
+import type { ExecutionControl } from '../../runtime/execution-control.js';
+import { readExecutionHandoff } from '../../runtime/execution-handoff.js';
 import { Scratch } from '../../runtime/scratch.js';
 import {
   cleanupRunRegistry,
@@ -54,6 +57,7 @@ import { exemptFixPass, runFixPass } from './fix-pass.js';
 import { markOperatorInterventionsMigrated } from './interventions.js';
 import { resolveWatchdogKnobs } from '../../core/knobs.js';
 import { resolveRunnerBinaries } from '../../providers/registry.js';
+import { supervisedCodexPolicy } from '../../providers/supervised-policy.js';
 import { runIterationLoop } from './loop.js';
 import { preflightRunners } from './preflight.js';
 import { normalizeRepositoryFileLineReferences } from './plan-shape.js';
@@ -440,7 +444,11 @@ function readSecretHandoff(filePath: string, home: string): Secrets {
 export async function runPlanLoopCli(
   args: readonly string[],
   overrides: RunOverrides = {},
+  execution?: ExecutionControl,
 ): Promise<RunOutcome> {
+  const handoffFile = process.env.AGENT_QUORUM_EXECUTION_CONTROL_FILE;
+  const effectiveExecution =
+    execution ?? (handoffFile === undefined ? undefined : readExecutionHandoff(handoffFile));
   const parsed = parseRunArgs(args);
 
   const { home, runsDir, stateDir } = resolveArtifactRoots(overrides);
@@ -487,356 +495,366 @@ export async function runPlanLoopCli(
     name = explicitName ?? deriveRunName(readRunRecords(runStateDir), base);
     work = path.join(plansDir, `loop-${name}`);
   }
-  mkdirSync(work, { recursive: true });
-  work = canonicalDir(work);
-
-  const logPath = path.join(work, 'run.log');
-  const runMetaFile = path.join(work, 'run.meta.tsv');
-  const runRegistryFile = path.join(runStateDir, `${process.pid}.tsv`);
-  const notifyCompletion = createCompletionNotifier(inputPath, work, resolved.telegram);
-
-  const pgid = ownPgid();
-  const startToken = procStartToken(process.pid) ?? '';
-  const forwardedRunId = process.env.AGENT_QUORUM_RUN_ID;
-  const startedAt = nowUtcStamp();
-  let runId = '';
-  const finalizeRun = (state: RunState, exitCode: number, final?: FinalProjection): void => {
-    if (runId === '') {
-      return;
-    }
-    finalizeRunRecord(runStateDir, runId, {
-      state,
-      exitCode,
-      endedAt: nowUtcStamp(),
-      ...(final === undefined ? {} : { final }),
-    });
-  };
-
+  const workdirLock = acquireWorkdirLock(work, process.env.AGENT_QUORUM_WORK_LOCK_TOKEN);
   try {
-    if (process.env.AGENT_QUORUM_STDIO_IS_RUNLOG !== '1') {
-      enableRunLogSink(logPath);
-    }
-    runId = writeRunRecord(
-      runStateDir,
-      {
-        name,
+    mkdirSync(work, { recursive: true });
+    work = canonicalDir(work);
+
+    const logPath = path.join(work, 'run.log');
+    const runMetaFile = path.join(work, 'run.meta.tsv');
+    const runRegistryFile = path.join(runStateDir, `${process.pid}.tsv`);
+    const notifyCompletion = createCompletionNotifier(inputPath, work, resolved.telegram);
+
+    const pgid = ownPgid();
+    const startToken = procStartToken(process.pid) ?? '';
+    const forwardedRunId = process.env.AGENT_QUORUM_RUN_ID;
+    const startedAt = nowUtcStamp();
+    let runId = '';
+    const finalizeRun = (state: RunState, exitCode: number, final?: FinalProjection): void => {
+      if (runId === '') {
+        return;
+      }
+      finalizeRunRecord(runStateDir, runId, {
+        state,
+        exitCode,
+        endedAt: nowUtcStamp(),
+        ...(final === undefined ? {} : { final }),
+      });
+    };
+
+    try {
+      if (process.env.AGENT_QUORUM_STDIO_IS_RUNLOG !== '1') {
+        enableRunLogSink(logPath);
+      }
+      runId = writeRunRecord(
+        runStateDir,
+        {
+          name,
+          pid: process.pid,
+          pgid,
+          procStartToken: startToken,
+          mode: parsed.mode,
+          inputPath,
+          workDir: work,
+          logPath,
+          plansDir,
+          startedAt,
+          quality: settings.quality,
+          state: 'running',
+        },
+        forwardedRunId !== undefined && forwardedRunId !== '' ? { fixedRunId: forwardedRunId } : {},
+      ).runId;
+      log(`run ${runId} (${name})`);
+      try {
+        pruneRuns(runStateDir, {}, resolved.retention);
+      } catch {
+        /* best-effort retention; never block a run on prune */
+      }
+
+      const matrix = resolveRoleConfig(resolved);
+      const permissions = resolveRolePermissions(resolved);
+
+      const metadata: RunMetadata = {
         pid: process.pid,
         pgid,
-        procStartToken: startToken,
         mode: parsed.mode,
         inputPath,
         workDir: work,
-        logPath,
         plansDir,
         startedAt,
         quality: settings.quality,
-        state: 'running',
-      },
-      forwardedRunId !== undefined && forwardedRunId !== '' ? { fixedRunId: forwardedRunId } : {},
-    ).runId;
-    log(`run ${runId} (${name})`);
-    try {
-      pruneRuns(runStateDir, {}, resolved.retention);
-    } catch {
-      /* best-effort retention; never block a run on prune */
-    }
+        sessionMode: String(qualityKnobs.sessionMode),
+        creatorOneShot: String(qualityKnobs.creatorOneShot),
+        previousCritiques: qualityKnobs.previousCritiques,
+        topology: qualityKnobs.topology,
+        completenessPromise: qualityKnobs.completenessPromise,
+        issueCap: READINESS_ISSUE_BUDGET,
+        inputLimits: resolved.inputLimits,
+        maxIters: settings.maxIters,
+        fixPass: String(settings.fixPass),
+        diffThreshold: settings.diffThreshold,
+        creator: {
+          runner: matrix.creator.runner,
+          model: matrix.creator.model,
+          reasoning: matrix.creator.reasoning,
+          createTools: permissions.creator.createTools,
+          createDisallowedTools: permissions.creator.createDisallowedTools,
+          updateTools: permissions.creator.updateTools,
+          updateDisallowedTools: permissions.creator.updateDisallowedTools,
+        },
+        critic: {
+          runner: matrix.critic.runner,
+          model: matrix.critic.model,
+          reasoning: matrix.critic.reasoning,
+          tools: permissions.critic.tools,
+          disallowedTools: permissions.critic.disallowedTools,
+        },
+        fixer: {
+          runner: matrix.fixer.runner,
+          model: matrix.fixer.model,
+          reasoning: matrix.fixer.reasoning,
+          tools: permissions.fixer.tools,
+          disallowedTools: permissions.fixer.disallowedTools,
+        },
+        reviewer: {
+          runner: matrix.reviewer.runner,
+          model: matrix.reviewer.model,
+          reasoning: matrix.reviewer.reasoning,
+          tools: permissions.reviewer.tools,
+          disallowedTools: permissions.reviewer.disallowedTools,
+        },
+        judge: {
+          runner: matrix.judge.runner,
+          model: matrix.judge.model,
+          reasoning: matrix.judge.reasoning,
+          tools: permissions.judge.tools,
+          disallowedTools: permissions.judge.disallowedTools,
+        },
+        runId,
+        name,
+      };
+      writeRunMetadata(runMetaFile, runRegistryFile, metadata);
 
-    const matrix = resolveRoleConfig(resolved);
-    const permissions = resolveRolePermissions(resolved);
-
-    const metadata: RunMetadata = {
-      pid: process.pid,
-      pgid,
-      mode: parsed.mode,
-      inputPath,
-      workDir: work,
-      plansDir,
-      startedAt,
-      quality: settings.quality,
-      sessionMode: String(qualityKnobs.sessionMode),
-      creatorOneShot: String(qualityKnobs.creatorOneShot),
-      previousCritiques: qualityKnobs.previousCritiques,
-      topology: qualityKnobs.topology,
-      completenessPromise: qualityKnobs.completenessPromise,
-      issueCap: READINESS_ISSUE_BUDGET,
-      inputLimits: resolved.inputLimits,
-      maxIters: settings.maxIters,
-      fixPass: String(settings.fixPass),
-      diffThreshold: settings.diffThreshold,
-      creator: {
-        runner: matrix.creator.runner,
-        model: matrix.creator.model,
-        reasoning: matrix.creator.reasoning,
-        createTools: permissions.creator.createTools,
-        createDisallowedTools: permissions.creator.createDisallowedTools,
-        updateTools: permissions.creator.updateTools,
-        updateDisallowedTools: permissions.creator.updateDisallowedTools,
-      },
-      critic: {
-        runner: matrix.critic.runner,
-        model: matrix.critic.model,
-        reasoning: matrix.critic.reasoning,
-        tools: permissions.critic.tools,
-        disallowedTools: permissions.critic.disallowedTools,
-      },
-      fixer: {
-        runner: matrix.fixer.runner,
-        model: matrix.fixer.model,
-        reasoning: matrix.fixer.reasoning,
-        tools: permissions.fixer.tools,
-        disallowedTools: permissions.fixer.disallowedTools,
-      },
-      reviewer: {
-        runner: matrix.reviewer.runner,
-        model: matrix.reviewer.model,
-        reasoning: matrix.reviewer.reasoning,
-        tools: permissions.reviewer.tools,
-        disallowedTools: permissions.reviewer.disallowedTools,
-      },
-      judge: {
-        runner: matrix.judge.runner,
-        model: matrix.judge.model,
-        reasoning: matrix.judge.reasoning,
-        tools: permissions.judge.tools,
-        disallowedTools: permissions.judge.disallowedTools,
-      },
-      runId,
-      name,
-    };
-    writeRunMetadata(runMetaFile, runRegistryFile, metadata);
-
-    const skills = skillPaths(packageRoot());
-    for (const skillFile of [
-      skills.creatorSkill,
-      skills.creatorSchema,
-      skills.creatorMetaSchema,
-      skills.readinessContractSchema,
-      skills.clarifySchema,
-      skills.criticSkill,
-      skills.criticSchema,
-      skills.fixerSkill,
-      skills.reviewerSkill,
-      skills.reviewerSchema,
-      skills.translatorSkill,
-      skills.markdownSchema,
-      skills.judgeSkill,
-      skills.judgeSchema,
-    ]) {
-      if (!existsSync(skillFile)) {
-        process.stderr.write(`missing: ${skillFile}\n`);
-        cleanupRunRegistry(runRegistryFile);
-        finalizeRun('failed', 1);
-        await notifyCompletion({ exitCode: 1, reason: `missing: ${skillFile}` });
-        return { exitCode: 1, report: { workDir: work, runId, name } };
-      }
-    }
-
-    const binaries = { ...resolveRunnerBinaries(), cursor: resolved.providers.cursorBin };
-    const required = runnersInUse(matrix, settings.fixPass, settings.translatePass, 0);
-    const preflightFailure = preflightRunners(required, binaries);
-    if (preflightFailure !== undefined) {
-      process.stderr.write(`${preflightFailure.message}\n`);
-      cleanupRunRegistry(runRegistryFile);
-      finalizeRun('failed', 1);
-      await notifyCompletion({ exitCode: 1, reason: preflightFailure.message });
-      return { exitCode: 1, report: { workDir: work, runId, name } };
-    }
-
-    const scratch = Scratch.create(base);
-    const creatorSessionFile = path.join(work, 'creator.session-id');
-
-    const systemContext = buildSystemContext({
-      projectRoot: projectRoot(),
-      mode: parsed.mode,
-      inputFile: inputPath,
-    });
-    const readinessProof = createReadinessProofState({
-      quality: settings.quality,
-      matrix: qualityKnobs,
-      mode: parsed.mode,
-      sourceDigest: fileSha256(inputPath),
-      authoritativeDigest: systemContext.digest,
-      relationshipIds: systemContext.crossRepository
-        ? systemContext.relationships.map((relationship) => relationship.id)
-        : [],
-      maxIters: settings.maxIters,
-    });
-    const resuming = process.env.AGENT_QUORUM_RESUME === '1';
-
-    const ctx: RunContext = {
-      work,
-      mode: parsed.mode,
-      inputPath,
-      plansDir,
-      config: resolved,
-      settings,
-      quality: qualityKnobs,
-      permissions,
-      skills,
-      provider: {
-        scratch,
-        projectRoot: projectRoot(),
-        retry: { retryCount: settings.retryCount, retryDelaySeconds: settings.retryDelaySeconds },
-        streamKnobs: knobs.stream,
-        matrix,
-        sessionMode: qualityKnobs.sessionMode,
-        creatorSessionFile,
-        markdownSchemaPath: skills.markdownSchema,
-        binaries,
-        claudePermissionMode: resolved.providers.claudePermissionMode,
-        livenessHeartbeatSeconds: resolved.providers.livenessHeartbeatSeconds,
-        claudeThinkingEvery: resolved.providers.claudeThinkingEvery,
-        ...(resolved.providers.providerDiagnostics
-          ? { diagnosticsDir: path.join(work, 'diagnostics') }
-          : {}),
-      },
-      passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
-      maxPlanLines: resolved.status.maxPlanLines,
-      split: {
-        mode: resolved.split.mode,
-        minPhases: resolved.split.minPhases,
-      },
-      lastCritiqueIter: -1,
-      resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
-      readinessProof,
-      systemContext,
-    };
-
-    const cleanup = () => {
-      cleanupRunRegistry(runRegistryFile);
-      scratch.sweep();
-    };
-    installSignalTeardown(cleanup);
-
-    try {
-      let startIter = 0;
-      if (resuming) {
-        startIter = prepareResume(ctx);
-      }
-      writeSystemContext(work, systemContext);
-      if (qualityKnobs.sessionMode === 1) {
-        rmSync(creatorSessionFile, { force: true });
-      }
-      const rejectedLog = path.join(work, 'rejected-log.jsonl');
-      if (!existsSync(rejectedLog)) {
-        writeFileSync(rejectedLog, '');
-      }
-      const readinessPreparation = await prepareReadinessContract(ctx, resuming);
-      if (!readinessPreparation.ok) {
-        finalizeRun('failed', readinessPreparation.exitCode);
-        await notifyCompletion({
-          exitCode: readinessPreparation.exitCode,
-          reason: readinessPreparation.reason,
-        });
-        return {
-          exitCode: readinessPreparation.exitCode,
-          report: { workDir: work, runId, name },
-        };
-      }
-      if (
-        ctx.readinessProof.judgeAllowed &&
-        ctx.readinessProof.sources.find((source) => source.source === 'intermediate-judge')
-          ?.requirement.required === true
-      ) {
-        const judgePreflightFailure = preflightRunners([matrix.judge.runner], binaries);
-        if (judgePreflightFailure !== undefined) {
-          process.stderr.write(`${judgePreflightFailure.message}\n`);
+      const skills = skillPaths(packageRoot());
+      for (const skillFile of [
+        skills.creatorSkill,
+        skills.creatorSchema,
+        skills.creatorMetaSchema,
+        skills.readinessContractSchema,
+        skills.clarifySchema,
+        skills.criticSkill,
+        skills.criticSchema,
+        skills.fixerSkill,
+        skills.reviewerSkill,
+        skills.reviewerSchema,
+        skills.translatorSkill,
+        skills.markdownSchema,
+        skills.judgeSkill,
+        skills.judgeSchema,
+      ]) {
+        if (!existsSync(skillFile)) {
+          process.stderr.write(`missing: ${skillFile}\n`);
+          cleanupRunRegistry(runRegistryFile);
           finalizeRun('failed', 1);
-          await notifyCompletion({ exitCode: 1, reason: judgePreflightFailure.message });
+          await notifyCompletion({ exitCode: 1, reason: `missing: ${skillFile}` });
           return { exitCode: 1, report: { workDir: work, runId, name } };
         }
       }
 
-      if (parsed.mode === 'prompt') {
-        const promptCopy = path.join(work, 'prompt.md');
-        if (!filesEqual(inputPath, promptCopy)) {
-          copyFileSync(inputPath, promptCopy);
-        }
-        const v0 = path.join(work, 'plan.v0.md');
-        if (!existsSync(v0) || statSync(v0).size === 0) {
-          log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
-          await runCreatorCreate(ctx, inputPath, v0);
-          markOperatorInterventionsMigrated(work, 'creator', 'plan.v0.md');
-          log(`  → plan.v0.md created (${fileLineCount(v0)} lines)`);
-        }
-      } else {
-        const v0 = path.join(work, 'plan.v0.md');
-        if (!existsSync(v0)) {
-          copyFileSync(inputPath, v0);
-        }
-        normalizeRepositoryFileLineReferences(v0, ctx.provider.projectRoot);
+      const binaries = { ...resolveRunnerBinaries(), cursor: resolved.providers.cursorBin };
+      const required = runnersInUse(matrix, settings.fixPass, settings.translatePass, 0);
+      const preflightFailure = preflightRunners(required, binaries);
+      if (preflightFailure !== undefined) {
+        process.stderr.write(`${preflightFailure.message}\n`);
+        cleanupRunRegistry(runRegistryFile);
+        finalizeRun('failed', 1);
+        await notifyCompletion({ exitCode: 1, reason: preflightFailure.message });
+        return { exitCode: 1, report: { workDir: work, runId, name } };
       }
 
-      if (startIter > 0) {
-        log(`resuming from v${startIter}`);
-      }
+      const scratch = Scratch.create(base);
+      const creatorSessionFile = path.join(work, 'creator.session-id');
 
-      const { iter } = await runIterationLoop(ctx, startIter);
-
-      const finalPlan = path.join(work, 'plan.final.md');
-      validateFinalPlan(ctx.provider.projectRoot, finalPlan);
-
-      const fixPassOutcome =
-        settings.fixPass === 1
-          ? await runFixPass(ctx, finalPlan, ctx.readinessProof)
-          : exemptFixPass('disabled');
-      if (settings.fixPass !== 1) {
-        log('fix-pass: disabled via --no-fix');
-      }
-      const finalization = await finalizePlan(ctx, finalPlan, fixPassOutcome);
-      const final = finalization.projection;
-
-      if (final.status === 'clean') {
-        log('FINAL: clean — canonical plan and readiness proof are current');
-      } else {
-        err(
-          `FINAL: ${final.status} — ${final.reasons.length > 0 ? final.reasons.join('; ') : final.readiness.reasonCodes.join(',') || final.structuralReason}`,
-        );
-      }
-
-      writeSummary(ctx, {
-        iter,
-        localizedFinalFile:
-          finalization.artifacts.localizedPlan ??
-          path.join(work, `plan.final.${settings.locale}.md`),
-        finalStale: finalization.structural.findings.stale,
-        finalAmbiguous: finalization.structural.findings.ambiguous,
-        finalUnresolved: finalization.structural.findings.unresolved,
-        final,
-        splitDecision: finalization.package.splitDecision.split ? 'split' : 'no-split',
-        splitRationale: finalization.package.splitDecision.rationale,
-        packagePhaseCount: finalization.package.phaseCount,
-        ...(finalization.package.directory === undefined
-          ? {}
-          : { packageDir: finalization.package.directory }),
-        ...(finalization.package.health === undefined
-          ? {}
-          : { packageHealth: finalization.package.health }),
+      const systemContext = buildSystemContext({
+        projectRoot: projectRoot(),
+        mode: parsed.mode,
+        inputFile: inputPath,
       });
+      const readinessProof = createReadinessProofState({
+        quality: settings.quality,
+        matrix: qualityKnobs,
+        mode: parsed.mode,
+        sourceDigest: fileSha256(inputPath),
+        authoritativeDigest: systemContext.digest,
+        relationshipIds: systemContext.crossRepository
+          ? systemContext.relationships.map((relationship) => relationship.id)
+          : [],
+        maxIters: settings.maxIters,
+      });
+      const resuming = process.env.AGENT_QUORUM_RESUME === '1';
 
-      log(`done. summary: ${path.join(work, 'summary.md')}`);
-      const report = {
-        ...buildRunReport(ctx, iter, final),
-        runId,
-        name,
+      const ctx: RunContext = {
+        work,
+        mode: parsed.mode,
+        inputPath,
+        plansDir,
+        config: resolved,
+        settings,
+        quality: qualityKnobs,
+        permissions,
+        skills,
+        provider: {
+          scratch,
+          ...(effectiveExecution === undefined ? {} : { execution: effectiveExecution }),
+          ...(effectiveExecution === undefined
+            ? {}
+            : supervisedCodexPolicy(projectRoot(), [], effectiveExecution.codexDeniedMcpServers)),
+          projectRoot: projectRoot(),
+          retry: { retryCount: settings.retryCount, retryDelaySeconds: settings.retryDelaySeconds },
+          streamKnobs: knobs.stream,
+          matrix,
+          sessionMode: qualityKnobs.sessionMode,
+          creatorSessionFile,
+          markdownSchemaPath: skills.markdownSchema,
+          binaries,
+          claudePermissionMode: resolved.providers.claudePermissionMode,
+          livenessHeartbeatSeconds: resolved.providers.livenessHeartbeatSeconds,
+          claudeThinkingEvery: resolved.providers.claudeThinkingEvery,
+          ...(resolved.providers.providerDiagnostics
+            ? { diagnosticsDir: path.join(work, 'diagnostics') }
+            : {}),
+        },
+        passes: { fixPass: knobs.fixPass, translatePass: knobs.translatePass },
+        maxPlanLines: resolved.status.maxPlanLines,
+        split: {
+          mode: resolved.split.mode,
+          minPhases: resolved.split.minPhases,
+        },
+        lastCritiqueIter: -1,
+        resume: { startIter: 0, archivedCount: 0, archiveDir: '' },
+        readinessProof,
+        systemContext,
       };
-      const exitCode = finalization.exitCode;
-      finalizeRun(final.status === 'blocked' ? 'blocked' : 'finished', exitCode, final);
-      await notifyCompletion({
-        final,
-        exitCode,
-        iterations: iter,
-        ...(report.summaryPath !== undefined ? { summaryPath: report.summaryPath } : {}),
-      });
-      return { exitCode, report };
+
+      const cleanup = () => {
+        cleanupRunRegistry(runRegistryFile);
+        scratch.sweep();
+        workdirLock.release();
+      };
+      installSignalTeardown(cleanup);
+
+      try {
+        let startIter = 0;
+        if (resuming) {
+          startIter = prepareResume(ctx);
+        }
+        writeSystemContext(work, systemContext);
+        if (qualityKnobs.sessionMode === 1) {
+          rmSync(creatorSessionFile, { force: true });
+        }
+        const rejectedLog = path.join(work, 'rejected-log.jsonl');
+        if (!existsSync(rejectedLog)) {
+          writeFileSync(rejectedLog, '');
+        }
+        const readinessPreparation = await prepareReadinessContract(ctx, resuming);
+        if (!readinessPreparation.ok) {
+          finalizeRun('failed', readinessPreparation.exitCode);
+          await notifyCompletion({
+            exitCode: readinessPreparation.exitCode,
+            reason: readinessPreparation.reason,
+          });
+          return {
+            exitCode: readinessPreparation.exitCode,
+            report: { workDir: work, runId, name },
+          };
+        }
+        if (
+          ctx.readinessProof.judgeAllowed &&
+          ctx.readinessProof.sources.find((source) => source.source === 'intermediate-judge')
+            ?.requirement.required === true
+        ) {
+          const judgePreflightFailure = preflightRunners([matrix.judge.runner], binaries);
+          if (judgePreflightFailure !== undefined) {
+            process.stderr.write(`${judgePreflightFailure.message}\n`);
+            finalizeRun('failed', 1);
+            await notifyCompletion({ exitCode: 1, reason: judgePreflightFailure.message });
+            return { exitCode: 1, report: { workDir: work, runId, name } };
+          }
+        }
+
+        if (parsed.mode === 'prompt') {
+          const promptCopy = path.join(work, 'prompt.md');
+          if (!filesEqual(inputPath, promptCopy)) {
+            copyFileSync(inputPath, promptCopy);
+          }
+          const v0 = path.join(work, 'plan.v0.md');
+          if (!existsSync(v0) || statSync(v0).size === 0) {
+            log(`creating plan v0 from prompt (${matrix.creator.runner} ${matrix.creator.model})`);
+            await runCreatorCreate(ctx, inputPath, v0);
+            markOperatorInterventionsMigrated(work, 'creator', 'plan.v0.md');
+            log(`  → plan.v0.md created (${fileLineCount(v0)} lines)`);
+          }
+        } else {
+          const v0 = path.join(work, 'plan.v0.md');
+          if (!existsSync(v0)) {
+            copyFileSync(inputPath, v0);
+          }
+          normalizeRepositoryFileLineReferences(v0, ctx.provider.projectRoot);
+        }
+
+        if (startIter > 0) {
+          log(`resuming from v${startIter}`);
+        }
+
+        const { iter } = await runIterationLoop(ctx, startIter);
+
+        const finalPlan = path.join(work, 'plan.final.md');
+        validateFinalPlan(ctx.provider.projectRoot, finalPlan);
+
+        const fixPassOutcome =
+          settings.fixPass === 1
+            ? await runFixPass(ctx, finalPlan, ctx.readinessProof)
+            : exemptFixPass('disabled');
+        if (settings.fixPass !== 1) {
+          log('fix-pass: disabled via --no-fix');
+        }
+        const finalization = await finalizePlan(ctx, finalPlan, fixPassOutcome);
+        const final = finalization.projection;
+
+        if (final.status === 'clean') {
+          log('FINAL: clean — canonical plan and readiness proof are current');
+        } else {
+          err(
+            `FINAL: ${final.status} — ${final.reasons.length > 0 ? final.reasons.join('; ') : final.readiness.reasonCodes.join(',') || final.structuralReason}`,
+          );
+        }
+
+        writeSummary(ctx, {
+          iter,
+          localizedFinalFile:
+            finalization.artifacts.localizedPlan ??
+            path.join(work, `plan.final.${settings.locale}.md`),
+          finalStale: finalization.structural.findings.stale,
+          finalAmbiguous: finalization.structural.findings.ambiguous,
+          finalUnresolved: finalization.structural.findings.unresolved,
+          final,
+          splitDecision: finalization.package.splitDecision.split ? 'split' : 'no-split',
+          splitRationale: finalization.package.splitDecision.rationale,
+          packagePhaseCount: finalization.package.phaseCount,
+          ...(finalization.package.directory === undefined
+            ? {}
+            : { packageDir: finalization.package.directory }),
+          ...(finalization.package.health === undefined
+            ? {}
+            : { packageHealth: finalization.package.health }),
+        });
+
+        log(`done. summary: ${path.join(work, 'summary.md')}`);
+        const report = {
+          ...buildRunReport(ctx, iter, final),
+          runId,
+          name,
+        };
+        const exitCode = finalization.exitCode;
+        finalizeRun(final.status === 'blocked' ? 'blocked' : 'finished', exitCode, final);
+        await notifyCompletion({
+          final,
+          exitCode,
+          iterations: iter,
+          ...(report.summaryPath !== undefined ? { summaryPath: report.summaryPath } : {}),
+        });
+        return { exitCode, report };
+      } finally {
+        cleanup();
+      }
+    } catch (error) {
+      finalizeRun('failed', errorExitCode(error));
+      await notifyCompletion({ exitCode: errorExitCode(error), reason: errorReason(error) });
+      throw error;
     } finally {
-      cleanup();
+      disableRunLogSink();
     }
-  } catch (error) {
-    finalizeRun('failed', errorExitCode(error));
-    await notifyCompletion({ exitCode: errorExitCode(error), reason: errorReason(error) });
-    throw error;
   } finally {
-    disableRunLogSink();
+    workdirLock.release();
   }
 }

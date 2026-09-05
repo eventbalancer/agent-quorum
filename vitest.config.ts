@@ -8,7 +8,7 @@ export default defineConfig({
     hookTimeout: 60_000,
     coverage: {
       provider: 'v8',
-      include: ['src/**'],
+      include: ['src/**/*.{ts,js,mjs,cjs}'],
       exclude: ['src/cli/main.ts'],
       // Branch coverage sits lower than lines/functions by design: the
       // remaining branches are defensive jq-`//` fallbacks, Linux/macOS
