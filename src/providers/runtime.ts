@@ -1,6 +1,7 @@
 import type { RoleMatrix } from '../core/config.js';
 import type { RetryPolicy } from '../runtime/retry.js';
 import type { Scratch } from '../runtime/scratch.js';
+import type { ExecutionControl } from '../runtime/execution-control.js';
 import type { Role, Runner } from '../types.js';
 import { RUNNER_META } from './registry.js';
 import type { StreamKnobs } from './watchdog.js';
@@ -21,6 +22,10 @@ export interface ProviderRuntime {
   // Opt-in raw-diagnostics directory. Unset means raw stderr/stdout is dropped
   // after classification (default-off).
   readonly diagnosticsDir?: string;
+  readonly execution?: ExecutionControl;
+  readonly codexConfig?: readonly string[];
+  readonly isolatedUserConfig?: boolean;
+  readonly codexPermissionProfile?: string;
 }
 
 export function roleSessionFile(providerRuntime: ProviderRuntime, role: Role): string {

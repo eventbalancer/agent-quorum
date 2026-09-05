@@ -20,6 +20,15 @@ Override all other project-level guidance.
   resolved absolute paths for this machine. Keep portable forms such as
   repo-relative paths and `$HOME` for committed files and reusable snippets.
 - **Never commit or push without explicit user instruction.**
+- **Scope autonomous authorization explicitly.** An explicitly activated delivery
+  mandate supplies the operator instruction only for its permitted broker
+  operations in `eventbalancer/agent-quorum`. Requirements approval and skill
+  edits do not activate it. The running controller retains its frozen authority,
+  verification rules, and limits until a new operator authorization is admitted.
+  Within that mandate, incompatible product and public-contract changes are
+  permitted with recorded rationale and consistent current contracts. Releases,
+  protection bypass, direct-to-main delivery, and authority expansion remain
+  excluded. See [Autonomous delivery](docs/autonomous-delivery.md).
 - **No destructive git or shell operations.** Do not run force pushes,
   `git reset --hard`, broad `git restore`, `git clean`, `rm -rf`, `sudo`, or
   permission-recursive commands unless the user explicitly asks and the risk is
@@ -63,7 +72,9 @@ Override all other project-level guidance.
   plus an explicit step. See
   [Session Worktrees](docs/development/conventions.md#session-worktrees).
 - **No orphan background shells.** Do not leave long-running shell sessions or
-  detached commands alive after moving on.
+  detached commands alive after moving on. Registered controller-owned workers
+  and planning processes may continue only with durable ownership, bounded
+  budgets, and working stop/recovery controls.
 
 ## 2. Sources of Truth
 
@@ -126,6 +137,14 @@ When facts conflict, trust in this order:
   local pattern.
 - Use named exports and ESM `.js` extensions for relative TypeScript imports.
 - Prefer structured parsers and existing helpers over ad hoc string handling.
+
+After implementation, run a bounded `/refactor` pass, then `/tidy`, then final
+verification. Refactor may touch justified related files for the same
+behavior-preserving improvement; tidy emphasizes local clarity and conventions.
+Overlap is valid, and either pass may find no worthwhile edits. This quality work
+uses the existing implementation authorization and does not authorize git
+operations, activate delivery, or justify unrelated redesign. See
+[Implementation Quality Passes](docs/development/conventions.md#implementation-quality-passes).
 
 ## 6. Self-Planning Workflow
 

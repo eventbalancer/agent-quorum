@@ -61,6 +61,7 @@ async function claudeStream(
     renderLine: (line) => filter.line(line),
     progressEvent: claudeProgressEvent,
     traceContext,
+    ...(providerRuntime.execution === undefined ? {} : { execution: providerRuntime.execution }),
     ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),
   });
   const output = extractResultField(result.streamLines, 'result');

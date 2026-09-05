@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 
 export function ps(args: string[]): string {
   try {
-    const result = spawnSync('ps', args, { encoding: 'utf8' });
+    const result = spawnSync('ps', args, {
+      encoding: 'utf8',
+      timeout: 1000,
+      killSignal: 'SIGKILL',
+    });
     if (result.status !== 0) {
       return '';
     }

@@ -42,6 +42,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "delivery": "tsx scripts/delivery.ts",
     "prepare": "[ -d .git ] && git config core.hooksPath .githooks || true",
     "build:clean": "rm -rf dist",
     "build": "pnpm run build:clean && tsc -p tsconfig.build.json",

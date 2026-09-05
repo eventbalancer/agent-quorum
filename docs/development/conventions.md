@@ -323,6 +323,24 @@ Each project convention has exactly one owner. This table is the authoritative m
 | Boolean naming                                                              | human review | —                                                                 | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
 | Source comments                                                             | human review | —                                                                 | Not an ESLint check (D-1)                                                                                                                                                                                                                                                                                                                                             |
 
+## Implementation Quality Passes
+
+After implementation, run `/refactor`, then `/tidy`, then final verification.
+These are routine within-scope quality passes under the existing implementation
+request; no separate stage confirmation is needed. `/refactor` makes bounded,
+behavior-preserving structural and readability improvements that benefit the
+current code. It may update related clean files when necessary to complete the
+same refactor, with a concrete reason for including each one. Avoid speculative
+abstractions, unrelated cleanup, new dependencies, and prolonged redesign.
+
+`/tidy` emphasizes repository conventions and smaller improvements to the dirty
+set. The skills may overlap in readability, structure, and conventions. A
+focused pass can conclude that no worthwhile edits are needed; do not repeat a
+pass on unchanged code. Verify after both passes, preserving all applicable
+merge gates. Neither pass changes interactive git permissions or activates
+an autonomous mandate. Under a validated mandate, quality work remains charged
+to the assigned issue and subject to the frozen controller's authority.
+
 ## TypeScript Compiler
 
 `tsconfig.json` is strict and unforgiving by design. Write code that satisfies it without casts:
@@ -334,6 +352,29 @@ Each project convention has exactly one owner. This table is the authoritative m
 - `isolatedModules`, `module: NodeNext` — ESM only; relative imports carry the `.js` extension (`./config.js`), matching the compiled output.
 
 ## Architecture
+
+Repository development also has a local Codex delivery controller under
+`src/delivery/`, entered through `pnpm run delivery -- <command>`. It is development
+tooling, not a generalized public lifecycle stage or a new provider integration.
+Its frozen mandate, broker, durable ownership, budget accounting, and evidence
+admission govern autonomous execution; workflow skills cannot alter those active
+constraints. Mandatory check/test/build scripts, their lifecycle hooks, gate tool
+versions, and lint/test/typecheck/format configuration remain bound to the frozen
+verification contract. A candidate that changes that active contract is deferred
+until the operator reviews and authorizes a new prepared runtime; it cannot
+validate itself using weakened gates. Product dependencies and API contracts can
+still change under the existing assurance. Existing interactive git approvals
+remain unchanged. See
+[Autonomous delivery](../autonomous-delivery.md) and the
+[authorized skill flow](agent-skill-flow.md#authorized-autonomous-delivery).
+
+Autonomous worktrees start from a verified remote `main` revision supplied to
+`worktree:create --from`; do not rely on best-effort synchronization of the shared
+checkout. The pre-commit hook can rewrite and stage tracked files, so final
+verification/review admission must compare the resulting committed tree and
+invalidate affected earlier evidence. Retain completed or deferred worktrees;
+ordinary `worktree:release` requires ancestry and must not be used as proof that
+an issue was delivered.
 
 agent-quorum is a standalone CLI that orchestrates the Codex, Claude Code, and Cursor Agent CLIs through an iterative plan → critique → update loop. It must build, test, and run from its own checkout with no external workspace. See `docs/architecture.md` for the roles, providers, loop, and artifact contract.
 

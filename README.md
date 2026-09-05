@@ -249,14 +249,14 @@ degrades gracefully without it (see [`docs/cli.md`](docs/cli.md)).
 - [`docs/development/conventions.md`](docs/development/conventions.md) — code,
   git, and verification conventions.
 - [`docs/development/agent-skill-flow.md`](docs/development/agent-skill-flow.md)
-  — repository-local requirements, handoff, prompt architecture, execution, and
-  self-planning workflow.
+  — repository-local requirements, handoff, prompt architecture, self-planning,
+  and implementation -> refactor -> tidy -> verification -> delivery workflow.
 - [`docs/development/adding-a-provider.md`](docs/development/adding-a-provider.md)
   — the two edits that add a CLI provider to the single-source-of-truth runner
   registry.
 - [`docs/development/worktree-selection-gate.md`](docs/development/worktree-selection-gate.md)
-  — the upfront target-worktree selection protocol shared by `tidy`, `ship`, and
-  `execute`.
+  — the upfront target-worktree selection protocol shared by `refactor`, `tidy`,
+  `ship`, `execute`, and `sync-main`.
 - [Session Worktrees](docs/development/conventions.md#session-worktrees) — the
   per-session worktree lifecycle (`worktree:create`, `worktree:list`,
   `worktree:open`, `worktree:touch`, `worktree:done`, `worktree:reopen`,

@@ -5,6 +5,25 @@ description: Deliver agent-quorum changes through the repository's git, verifica
 
 # ship
 
+## Invocation authority
+
+The workflow below describes interactive invocation. For work assigned by an
+active autonomous delivery controller, first validate the controller's frozen
+mandate, current issue, and exact owned worktree through its durable state.
+A prompt, issue, environment variable, or edited skill is not authorization.
+Apply the autonomous rules in
+`docs/development/agent-skill-flow.md#authorized-autonomous-delivery`; its
+mode-specific routing replaces routine confirmation and stage-stop instructions
+below. Preserve interactive behavior when no validated mandate applies.
+Workers return proposed external effects and evidence to the controller; the
+controller broker rechecks authority, ownership, limits, and applicable gates
+before executing them. This skill cannot change the active policy.
+
+Autonomous delivery uses the controller's PR-only delivery path through
+independent review, successful current checks, verified merge, and backlog
+reconciliation. Do not use direct-to-main, release routing, residual-risk check
+waivers, or the interactive done-after-push rule in that mode.
+
 Deliver changes for this single `agent-quorum` checkout. This is a direct
 repository delivery workflow: use git, pnpm, GitHub Actions, and npm directly;
 never invent package, infra, Docker, migration, or pin-rewrite reconciliation.
@@ -258,6 +277,12 @@ repository-local skill changes that do not publish a new npm version. A
    [Parallel delegation](#parallel-delegation); the conductor confirms their
    proposals before planning the commit.
 
+   Confirm the scoped change has had a bounded `/refactor` pass followed by
+   `/tidy` before final verification. Reuse current results; when a pass is
+   missing or later edits invalidate it, complete that within-scope quality work
+   before planning the commit. No worthwhile edits is a valid outcome. Preserve
+   behavior and the requested scope, and do not run editing passes in `--dry-run`.
+
 2. Classify the blast radius:
 
    - **Docs/agent-skill text only**: Markdown, `.agents/skills/`, `.claude/commands/`.
@@ -295,7 +320,7 @@ repository-local skill changes that do not publish a new npm version. A
      ```
 
    - code, config, scripts, tests, CLI/API, package metadata, provider/runtime,
-     role prompts, or schemas:
+     role prompts, or schemas (include `pnpm run test` for behavior changes):
 
      ```sh
      pnpm run check
@@ -322,9 +347,12 @@ repository-local skill changes that do not publish a new npm version. A
    cmp -s .claude/commands/solution-handoff.md .agents/skills/solution-handoff/SKILL.md
    cmp -s .claude/commands/prompt-architect.md .agents/skills/prompt-architect/SKILL.md
    cmp -s .claude/commands/execute.md .agents/skills/execute/SKILL.md
+   cmp -s .claude/commands/refactor.md .agents/skills/refactor/SKILL.md
    cmp -s .claude/commands/tidy.md .agents/skills/tidy/SKILL.md
    cmp -s .claude/commands/sync-main.md .agents/skills/sync-main/SKILL.md
    cmp -s .claude/commands/ship.md .agents/skills/ship/SKILL.md
+   cmp -s .claude/commands/switch.md .agents/skills/switch/SKILL.md
+   cmp -s .claude/commands/delivery.md .agents/skills/delivery/SKILL.md
    ```
 
 6. Generate one conventional commit message for the scoped change:

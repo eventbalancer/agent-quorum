@@ -2,8 +2,10 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import { nonEmptyFile } from '../runtime/files.js';
 import { err } from '../runtime/log.js';
-import { spawnDetached, waitForExit } from '../runtime/exec.js';
+import { waitForExit } from '../runtime/exec.js';
+import { spawnControlled } from '../runtime/execution-control.js';
 import { normalizeCodexJsonValue, projectCodexJsonSchema } from './codex-schema.js';
+import { supervisedCodexEnvironment } from './supervised-policy.js';
 import { StreamLogFilter } from './stream-log.js';
 import { runLivenessHeartbeat } from './heartbeat.js';
 import { drainStderr, ProviderStderr, type DiagnosticSink, type TraceContext } from './trace.js';
@@ -27,11 +29,14 @@ function codexArgs(
   schemaPath: string,
   outPath: string,
   prompt: string,
+  providerRuntime: ProviderRuntime,
 ): string[] {
   return [
     'exec',
-    '--sandbox',
-    'read-only',
+    ...(providerRuntime.isolatedUserConfig === true ? ['--ignore-user-config'] : []),
+    ...(providerRuntime.codexPermissionProfile === undefined
+      ? ['--sandbox', 'read-only']
+      : ['-c', `default_permissions=${JSON.stringify(providerRuntime.codexPermissionProfile)}`]),
     '--skip-git-repo-check',
     '--color',
     'never',
@@ -39,6 +44,7 @@ function codexArgs(
     model,
     '-c',
     `model_reasoning_effort="${clampCodexReasoning(reasoning)}"`,
+    ...(providerRuntime.codexConfig ?? []).flatMap((config) => ['-c', config]),
     '--output-schema',
     schemaPath,
     '-o',
@@ -72,13 +78,19 @@ export async function codexRun(
   }
 
   try {
-    const child = spawnDetached(
+    const child = await spawnControlled(
       providerRuntime.binaries.codex,
-      codexArgs(model, reasoning, projectedSchemaPath, outPath, prompt),
+      codexArgs(model, reasoning, projectedSchemaPath, outPath, prompt, providerRuntime),
       {
         cwd: providerRuntime.projectRoot,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
+      providerRuntime.isolatedUserConfig === true
+        ? {
+            ...providerRuntime.execution,
+            env: supervisedCodexEnvironment(providerRuntime.execution?.env ?? process.env),
+          }
+        : providerRuntime.execution,
     );
     const filter = new StreamLogFilter(providerRuntime.claudeThinkingEvery);
     const streamState = new StreamState();

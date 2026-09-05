@@ -25,7 +25,7 @@ readonly RECORD_FILE="agent-quorum-task.md"
 readonly MARKER_FILE="agent-quorum-active-edit.json"
 readonly DONE_FILE="agent-quorum-done.json"
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="${AGENT_QUORUM_WORKTREE_REPOSITORY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 worktree_storage_root() {
   echo "${AGENT_QUORUM_WORKTREE_DIR:-$HOME/.agent-quorum/worktrees}/agent-quorum"
@@ -333,7 +333,9 @@ cmd_create() {
   printf '%s\n' "$desc_content" >"$admin/$RECORD_FILE"
   now="$(iso_now)"
   write_marker "$admin" "$branch" "$now" "$now"
-  (cd "$dir" && pnpm install --frozen-lockfile)
+  if [ "${AGENT_QUORUM_WORKTREE_SKIP_INSTALL:-0}" != "1" ]; then
+    (cd "$dir" && pnpm install --frozen-lockfile)
+  fi
   refresh_marker "$marker"
   echo ""
   echo "[worktree] created session worktree"

@@ -11,11 +11,24 @@
     "tasks"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "suiteId": { "type": "string", "minLength": 1 },
-    "workspaceRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-    "providerConfigSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "passed": { "type": "boolean" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "suiteId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspaceRevision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "providerConfigSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "passed": {
+      "type": "boolean"
+    },
     "tasks": {
       "type": "array",
       "minItems": 1,
@@ -25,8 +38,13 @@
         "additionalProperties": false,
         "required": ["taskId", "passed", "decision", "critiqueIterations", "exitCode", "failures"],
         "properties": {
-          "taskId": { "type": "string", "minLength": 1 },
-          "passed": { "type": "boolean" },
+          "taskId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "passed": {
+            "type": "boolean"
+          },
           "decision": {
             "enum": [
               "ready",
@@ -36,16 +54,38 @@
               "run-failed"
             ]
           },
-          "critiqueIterations": { "type": "integer", "minimum": 0 },
-          "planVersion": { "type": "integer", "minimum": 0 },
-          "exitCode": { "type": "integer", "minimum": 0 },
+          "critiqueIterations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "planVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": 0
+          },
           "failures": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1 },
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
             "uniqueItems": true
           },
-          "finalPlan": { "type": "string", "minLength": 1 },
-          "finalPlanSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "finalPlan": {
+            "type": "string",
+            "minLength": 1
+          },
+          "finalPlanSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "artifactBundleSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     }

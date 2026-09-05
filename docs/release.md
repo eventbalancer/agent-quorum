@@ -103,6 +103,12 @@ boundary challenges, unavailable evidence, all four occurrence dispositions,
 limits, opportunities, unsupported-schema rejection, and resume invalidation
 stay in deterministic tests rather than provider-dependent merge gates.
 
+The output directory keeps `smoke-attempts.json` with each scenario's attempt
+identity, revisions, process ownership, and completion evidence. Reusing that
+directory preserves attempt history and revalidates completed artifact bundles
+before reusing a successful result. A successful task's `artifactBundleSha256`
+binds the result to its artifacts; output owned by a live process is rejected.
+
 For a breaking readiness-contract change, the implementation commit and the
 smoke-manifest pin are separate reviewable commits. First run deterministic
 verification on the clean implementation commit; then pin that exact revision
@@ -111,10 +117,13 @@ repository. Do not reuse a pre-change manifest pin or treat older readiness
 artifacts/records as compatible smoke evidence.
 
 The ten-task `benchmark:planning -- run`, blind bundle, independent reviews, and
-scoring are release calibration, not an every-merge check. Run that full flow
-when changing the provider model, planning prompts or schemas, risk policy, or a
-major planning-loop contract, and periodically when preparing a release whose
-scope includes those surfaces.
+scoring are manual release calibration, not an every-merge check or an automatic
+autonomous-delivery step. Changes to provider models, planning prompts or schemas,
+risk policy, or a major planning-loop contract are calibration triggers for the
+release owner to record and assess during manual release preparation. Autonomous
+delivery retains the mandatory two-sentinel merge gate above and reports an
+unmet gate as blocked; it never substitutes release calibration or silently
+weakens the required merge assurance.
 
 The dry run verifies the package contents generated from `files`, `main`,
 `types`, `exports`, and `bin` in `package.json`. Inspect the dry-run file list

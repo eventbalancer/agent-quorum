@@ -20,7 +20,7 @@ const CURSOR_STALL_RESUME_PROMPT =
   'Continue the original task using the context already gathered in this session. Return the exact output requested by the original prompt and current output mode. Do not ask user questions. If enough evidence is already gathered, produce the final output now.\n';
 
 export function cursorCliSupportsFlag(cursorBin: string, flag: string): boolean {
-  const result = spawnSync(cursorBin, ['--help'], { encoding: 'utf8' });
+  const result = spawnSync(cursorBin, ['--help'], { encoding: 'utf8', timeout: 3000 });
   const combined = `${result.stdout || ''}${result.stderr || ''}`;
   return combined.includes(` ${flag}`);
 }
@@ -48,6 +48,7 @@ async function cursorStream(
     renderLine: (line) => filter.line(line),
     progressEvent: cursorProgressEvent,
     traceContext,
+    ...(providerRuntime.execution === undefined ? {} : { execution: providerRuntime.execution }),
     liveness: true,
     heartbeatSeconds: providerRuntime.livenessHeartbeatSeconds,
     ...(diagnosticSink !== undefined ? { diagnosticSink } : {}),

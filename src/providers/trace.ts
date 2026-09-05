@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import { colorsEnabled, err, log } from '../runtime/log.js';
-import type { Role, Runner } from '../types.js';
+import type { Runner } from '../types.js';
 
 // Redaction contract: every rendered line is metadata only — activity kind,
 // tool name, target path, command/size descriptor, classified reason. It never
@@ -11,7 +11,7 @@ import type { Role, Runner } from '../types.js';
 // bodies, or free-text provider reasons.
 
 export interface TraceContext {
-  readonly role: Role;
+  readonly role: string;
   readonly provider: Runner;
   readonly model: string;
 }

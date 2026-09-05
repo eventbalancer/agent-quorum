@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { err } from '../runtime/log.js';
-import { spawnDetached, waitForExit } from '../runtime/exec.js';
+import { waitForExit } from '../runtime/exec.js';
+import { spawnControlled, type ExecutionControl } from '../runtime/execution-control.js';
 import { isJsonObject, type JsonValue } from '../core/json.js';
 import {
   drainStderr,
@@ -31,14 +32,20 @@ export interface StreamRunOptions {
   readonly diagnosticSink?: DiagnosticSink;
   readonly liveness?: boolean;
   readonly heartbeatSeconds?: number;
+  readonly execution?: ExecutionControl;
 }
 
 export async function runStreamingCli(options: StreamRunOptions): Promise<StreamRunResult> {
   const heartbeatSeconds = options.liveness === true ? (options.heartbeatSeconds ?? 0) : 0;
-  const child = spawnDetached(options.command, [...options.args], {
-    cwd: options.cwd,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const child = await spawnControlled(
+    options.command,
+    [...options.args],
+    {
+      cwd: options.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+    options.execution,
+  );
   const state = new StreamState();
   const lines: string[] = [];
   let pending = '';

@@ -1,4 +1,8 @@
-import { setTimeout as sleep } from 'node:timers/promises';
+import {
+  assertExecutionAllowed,
+  controlledDelay,
+  type ExecutionControl,
+} from './execution-control.js';
 import { err, log } from './log.js';
 
 export interface RetryPolicy {
@@ -17,10 +21,21 @@ export async function runWithRetries(
   label: string,
   policy: RetryPolicy,
   attempt: () => MaybePromise<RetryAttemptResult>,
+  control?: ExecutionControl,
 ): Promise<number> {
+  if (
+    !Number.isSafeInteger(policy.retryCount) ||
+    policy.retryCount < 0 ||
+    !Number.isFinite(policy.retryDelaySeconds) ||
+    policy.retryDelaySeconds < 0
+  ) {
+    throw new TypeError('retry limits must be finite and non-negative');
+  }
   let retry = 0;
   for (;;) {
+    assertExecutionAllowed(control);
     const { status, retryable } = await Promise.resolve(attempt());
+    assertExecutionAllowed(control);
     if (status === 0) {
       return 0;
     }
@@ -35,6 +50,6 @@ export async function runWithRetries(
     log(
       `WARNING: ${label} failed; retry ${retry}/${policy.retryCount} in ${policy.retryDelaySeconds}s`,
     );
-    await sleep(policy.retryDelaySeconds * 1000);
+    await controlledDelay(policy.retryDelaySeconds * 1000, control);
   }
 }
