@@ -28,6 +28,23 @@ function temporary(): string {
   return directory;
 }
 
+function sendOwnerHeartbeats(input: PassThrough): () => void {
+  const deadlineEpochMs = Date.now() + 10_000;
+  const heartbeat = () => {
+    input.write(
+      `${JSON.stringify({
+        deadlineEpochMs,
+        validUntilEpochMs: Math.min(deadlineEpochMs, Date.now() + 450),
+      })}\n`,
+    );
+  };
+  heartbeat();
+  const timer = setInterval(heartbeat, 100);
+  return () => {
+    clearInterval(timer);
+  };
+}
+
 describe('confined repository commands', () => {
   it('uses private candidate environment and no host-wide filesystem or loopback grants', () => {
     const scratch = temporary();
@@ -129,17 +146,25 @@ describe('confined repository commands', () => {
       [
         process.execPath,
         '-e',
-        `require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`,
+        `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(process.pid)), 600)`,
       ],
       input,
     );
-    const deadlineEpochMs = Date.now() + 5000;
-    input.write(`${JSON.stringify({ deadlineEpochMs, validUntilEpochMs: Date.now() + 450 })}\n`);
-    await expect.poll(() => existsSync(receipt)).toBe(true);
-    const pid = Number(readFileSync(receipt, 'utf8'));
-    expect(await result).toBe(143);
-    expect(isAlive(pid)).toBe(false);
-    input.destroy();
+    const stopHeartbeats = sendOwnerHeartbeats(input);
+    try {
+      await expect
+        .poll(() => (existsSync(receipt) ? readFileSync(receipt, 'utf8') : ''), { timeout: 5000 })
+        .toMatch(/^[1-9][0-9]*$/);
+      const pid = Number(readFileSync(receipt, 'utf8'));
+      stopHeartbeats();
+      expect(await result).toBe(143);
+      expect(isAlive(pid)).toBe(false);
+    } finally {
+      stopHeartbeats();
+      input.end();
+      await result;
+      input.destroy();
+    }
   });
 
   it('requires a fresh owner admission and accepts current pings after queued startup pings expire', async () => {
@@ -148,11 +173,15 @@ describe('confined repository commands', () => {
     input.write(
       `${JSON.stringify({ deadlineEpochMs: Date.now() + 5000, validUntilEpochMs: Date.now() - 5000 })}\n`,
     );
-    input.write(
-      `${JSON.stringify({ deadlineEpochMs: Date.now() + 5000, validUntilEpochMs: Date.now() + 450 })}\n`,
-    );
-    expect(await result).toBe(0);
-    input.destroy();
+    const stopHeartbeats = sendOwnerHeartbeats(input);
+    try {
+      expect(await result).toBe(0);
+    } finally {
+      stopHeartbeats();
+      input.end();
+      await result;
+      input.destroy();
+    }
     const disconnected = new PassThrough();
     const absent = runContainerGuard([process.execPath, '-e', 'process.exit(0)'], disconnected);
     disconnected.end();
