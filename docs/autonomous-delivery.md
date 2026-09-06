@@ -13,6 +13,21 @@ autonomous planning profiles support Codex. Ordinary interactive planning keeps
 its provider matrix. Configure actual available model/reasoning combinations;
 there is no automatic provider, model, subscription, or permission substitution.
 
+The macOS host also needs a working `/usr/bin/cc` and its local SDK. Activation
+compiles a frozen C canary outside the sandbox, then runs it under the same Codex
+permission profile as workers. Compilation and the canary share a deadline of at
+most 15 seconds, further limited by the current command and execution bounds.
+The native program avoids interpreter launchers and libraries that can require
+reads beyond the profile's minimal runtime paths. No extra filesystem grant is
+added. Compiler failure blocks activation with
+`native-confinement-compiler-unavailable`; cancellation and deadline errors retain
+their existing behavior.
+
+The canary must read candidate evidence and receive `EACCES` or `EPERM` for a
+neighboring file, candidate writes, and an outbound connection. The neighboring
+file has no extra deny rule. The connection attempt has a two-second bound;
+missing files, connection refusal, and timeouts do not prove confinement.
+
 Create a private JSON profile outside candidate worktrees. The following is an
 example to edit, not an activation-ready configuration:
 

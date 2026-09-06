@@ -135,6 +135,21 @@ describe('bounded activation capability probes', () => {
     expect(ledger.get('activation-probes')).toMatchObject({ passed: false });
   });
 
+  it('stops before authentication, providers, and workers when provider confinement fails', async () => {
+    const { ledger, mandate } = fixture();
+    const confinement = vi.fn().mockResolvedValue(false);
+    await expect(runActivationProbes(ledger, digest(mandate), {}, confinement)).rejects.toThrow(
+      'effective-confinement-probe-failed',
+    );
+    expect(mocks.executor).toHaveBeenCalledOnce();
+    expect(confinement).toHaveBeenCalledWith(mandate, {});
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(mocks.provider).not.toHaveBeenCalled();
+    expect(mocks.work).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+    expect(ledger.get('activation-probes')).toMatchObject({ passed: false });
+  });
+
   it('rejects schema-support failure and a non-independent reviewer', async () => {
     const { ledger, mandate } = fixture();
     mocks.provider.mockResolvedValueOnce(1);

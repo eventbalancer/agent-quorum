@@ -8,6 +8,7 @@ import {
   readdirSync,
   readlinkSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -62,6 +63,9 @@ import { CodexDeliveryWorker } from './worker.js';
 import { VERIFICATION_POLICY_FILES } from './verification-policy.js';
 import { probeDockerExecutor } from './executor-probe.js';
 import { canonicalConfiguration, readCodexConfigurationDigest } from './config-attestation.js';
+import { PROVIDER_CONFINEMENT_PROGRAM } from './provider-confinement-program.js';
+
+const CONFINEMENT_PROBE_TIMEOUT_MS = 15_000;
 
 const FROZEN_DIRECTORIES = [
   'src',
@@ -822,71 +826,82 @@ export async function verifyProviderConfinement(
   }
   await verifyMcpConfiguration(mandate, execution);
   const probeRoot = mkdtempSync(path.join(os.tmpdir(), 'aq-delivery-confinement-'));
-  const candidate = path.join(probeRoot, 'candidate');
-  const controls = path.join(probeRoot, 'controls');
-  mkdirSync(candidate, { mode: 0o700 });
-  mkdirSync(controls, { mode: 0o700 });
-  const allowed = path.join(candidate, 'evidence.txt');
-  const forbidden = path.join(controls, 'canary.txt');
-  writeFileSync(allowed, 'owned evidence');
-  writeFileSync(forbidden, 'private canary');
-  const controlFile = process.env.AGENT_QUORUM_EXECUTION_CONTROL_FILE;
-  const denied = [
-    controls,
-    mandate.runtimeRoot,
-    path.join(mandate.sourceRoot, '.git'),
-    path.join(os.homedir(), '.codex'),
-    path.join(os.homedir(), '.claude'),
-    path.join(os.homedir(), '.config/gh'),
-    path.join(os.homedir(), '.ssh'),
-    ...(controlFile === undefined ? [] : [path.dirname(controlFile)]),
-  ];
-  const policy = supervisedCodexPolicy(candidate, denied, mandate.mcpServerNames);
-  const script = [
-    'import errno,json,socket,sys',
-    'result={"allowed":open(sys.argv[1]).read()=="owned evidence"}',
-    'try:\n open(sys.argv[2]).read()\n result["denied_read"]=False\nexcept OSError as e:\n result["denied_read"]=e.errno in (errno.EACCES,errno.EPERM)',
-    'try:\n open(sys.argv[3],"w").write("unexpected")\n result["denied_write"]=False\nexcept OSError as e:\n result["denied_write"]=e.errno in (errno.EACCES,errno.EPERM)',
-    'connection=socket.socket();connection.settimeout(2)',
-    'try:\n connection.connect(("1.1.1.1",443))\n result["denied_network"]=False\nexcept OSError as e:\n result["denied_network"]=e.errno in (errno.EACCES,errno.EPERM)',
-    'connection.close();print(json.dumps(result));sys.exit(0 if all(result.values()) else 1)',
-  ].join('\n');
-  const result = await runDeliveryCommand({
-    command: 'codex',
-    args: codexSandboxProbeArgs(policy, [
-      '/usr/bin/python3',
-      '-c',
-      script,
-      allowed,
-      forbidden,
-      path.join(candidate, 'write-probe'),
-    ]),
-    cwd: candidate,
-    execution: { ...execution, env: supervisedCodexEnvironment(execution.env ?? process.env) },
-  });
-  if (result.exitCode !== 0) {
-    return false;
-  }
-  const observed = responseObject(JSON.parse(result.stdout) as unknown);
-  if (
-    !['allowed', 'denied_read', 'denied_write', 'denied_network'].every(
-      (key) => observed[key] === true,
-    )
-  ) {
-    return false;
-  }
-  const configured = await runDeliveryCommand({
-    command: 'codex',
-    args: [...policy.codexConfig.flatMap((entry) => ['-c', entry]), 'mcp', 'list', '--json'],
-    cwd: candidate,
-    execution: { ...execution, env: supervisedCodexEnvironment(execution.env ?? process.env) },
-  });
-  if (configured.exitCode !== 0) {
-    return false;
-  }
-  const servers: unknown = JSON.parse(configured.stdout);
-  return (
-    Array.isArray(servers) &&
-    servers.every((server: unknown) => responseObject(server).enabled === false)
+  const timeoutMs = Math.min(
+    CONFINEMENT_PROBE_TIMEOUT_MS,
+    mandate.profile.bounds.commandTimeoutMs,
+    execution.attemptTimeoutMs ?? Infinity,
   );
+  const bounded: ExecutionControl = {
+    ...execution,
+    env: supervisedCodexEnvironment(execution.env ?? process.env),
+    attemptTimeoutMs: timeoutMs,
+    deadlineEpochMs: Math.min(execution.deadlineEpochMs ?? Infinity, Date.now() + timeoutMs),
+  };
+  try {
+    const candidate = path.join(probeRoot, 'candidate');
+    const controls = path.join(probeRoot, 'controls');
+    mkdirSync(candidate, { mode: 0o700 });
+    mkdirSync(controls, { mode: 0o700 });
+    const allowed = path.join(candidate, 'evidence.txt');
+    const forbidden = path.join(controls, 'canary.txt');
+    writeFileSync(allowed, 'owned evidence');
+    writeFileSync(forbidden, 'private canary');
+    const policy = supervisedCodexPolicy(
+      candidate,
+      [mandate.runtimeRoot, path.dirname(mandate.runtimeRoot)],
+      mandate.mcpServerNames,
+    );
+    const source = path.join(probeRoot, 'confinement.c');
+    const binary = path.join(candidate, 'confinement-probe');
+    writeFileSync(source, PROVIDER_CONFINEMENT_PROGRAM);
+    const compiled = await runDeliveryCommand({
+      command: '/usr/bin/cc',
+      args: ['-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', source, '-o', binary],
+      cwd: candidate,
+      execution: bounded,
+    });
+    const metadata = lstatSync(binary, { throwIfNoEntry: false });
+    const isExecutable = metadata?.isFile() === true && (metadata.mode & 0o111) !== 0;
+    if (compiled.exitCode !== 0 || !isExecutable) {
+      throw new DeliveryError('native-confinement-compiler-unavailable', true);
+    }
+    const result = await runDeliveryCommand({
+      command: 'codex',
+      args: codexSandboxProbeArgs(policy, [
+        binary,
+        allowed,
+        forbidden,
+        path.join(candidate, 'write-probe'),
+      ]),
+      cwd: candidate,
+      execution: bounded,
+    });
+    if (result.exitCode !== 0) {
+      return false;
+    }
+    const observed = responseObject(JSON.parse(result.stdout) as unknown);
+    if (
+      !['allowed', 'denied_read', 'denied_write', 'denied_network'].every(
+        (key) => observed[key] === true,
+      )
+    ) {
+      return false;
+    }
+    const configured = await runDeliveryCommand({
+      command: 'codex',
+      args: [...policy.codexConfig.flatMap((entry) => ['-c', entry]), 'mcp', 'list', '--json'],
+      cwd: candidate,
+      execution: bounded,
+    });
+    if (configured.exitCode !== 0) {
+      return false;
+    }
+    const servers: unknown = JSON.parse(configured.stdout);
+    return (
+      Array.isArray(servers) &&
+      servers.every((server: unknown) => responseObject(server).enabled === false)
+    );
+  } finally {
+    rmSync(probeRoot, { recursive: true, force: true });
+  }
 }
