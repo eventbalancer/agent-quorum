@@ -29,17 +29,21 @@ const DISABLED_FEATURES = [
   'workspace_dependencies',
 ] as const;
 
-export interface SupervisedCodexPolicy {
-  readonly isolatedUserConfig: true;
+export interface SupervisedCodexInspectionPolicy {
   readonly codexPermissionProfile: 'agent-quorum-delivery';
   readonly codexConfig: readonly string[];
 }
 
-export function supervisedCodexPolicy(
+export interface SupervisedCodexPolicy extends SupervisedCodexInspectionPolicy {
+  readonly isolatedUserConfig: true;
+}
+
+function supervisedPolicy(
   cwd: string,
-  forbiddenPaths: readonly string[] = [],
-  disabledMcpServers: readonly string[] = [],
-): SupervisedCodexPolicy {
+  forbiddenPaths: readonly string[],
+  disabledMcpServers: readonly string[],
+  materializeMcpTransport: boolean,
+): SupervisedCodexInspectionPolicy {
   if (!path.isAbsolute(cwd) || forbiddenPaths.some((value) => !path.isAbsolute(value))) {
     throw new TypeError('supervised Codex filesystem rules require absolute paths');
   }
@@ -58,7 +62,6 @@ export function supervisedCodexPolicy(
     ...denied.map((value) => `${JSON.stringify(value)}="deny"`),
   ].join(',');
   return {
-    isolatedUserConfig: true,
     codexPermissionProfile: 'agent-quorum-delivery',
     codexConfig: [
       'default_permissions="agent-quorum-delivery"',
@@ -71,15 +74,40 @@ export function supervisedCodexPolicy(
       ...(disabledMcpServers.length === 0
         ? []
         : [
-            `mcp_servers={${[...new Set(disabledMcpServers)].map((name) => `${JSON.stringify(name)}={enabled=false}`).join(',')}}`,
+            `mcp_servers={${[...new Set(disabledMcpServers)]
+              .map(
+                (name) =>
+                  `${JSON.stringify(name)}={enabled=false${materializeMcpTransport ? ',command="/usr/bin/false"' : ''}}`,
+              )
+              .join(',')}}`,
           ]),
       ...DISABLED_FEATURES.map((feature) => `features.${feature}=false`),
     ],
   };
 }
 
+export function supervisedCodexPolicy(
+  cwd: string,
+  forbiddenPaths: readonly string[] = [],
+  disabledMcpServers: readonly string[] = [],
+): SupervisedCodexPolicy {
+  // Codex validates disabled transports even when --ignore-user-config omits their definitions.
+  return {
+    ...supervisedPolicy(cwd, forbiddenPaths, disabledMcpServers, true),
+    isolatedUserConfig: true,
+  };
+}
+
+export function supervisedCodexInspectionPolicy(
+  cwd: string,
+  forbiddenPaths: readonly string[] = [],
+  disabledMcpServers: readonly string[] = [],
+): SupervisedCodexInspectionPolicy {
+  return supervisedPolicy(cwd, forbiddenPaths, disabledMcpServers, false);
+}
+
 export function codexSandboxProbeArgs(
-  policy: SupervisedCodexPolicy,
+  policy: SupervisedCodexInspectionPolicy,
   command: readonly string[],
 ): string[] {
   if (command.length === 0) {

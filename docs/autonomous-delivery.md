@@ -101,7 +101,11 @@ worker/reviewer invocations, confinement, finite starts, cancellation, and limit
 enforcement. The effective Codex configuration, managed layers, and reported
 CLI identity are attested. Inherited MCP servers are inventoried by name and
 configuration digest, explicitly disabled, and checked for drift before provider
-starts. Provider environments exclude delivery credentials and guardian control
+starts. Isolated provider calls supply complete disabled MCP definitions with an
+inert command; inspections that inherit user configuration retain its existing
+transports. An empty-home inventory checks isolated definitions before the real
+role-schema probes verify startup with existing authentication and managed
+configuration. Provider environments exclude delivery credentials and guardian control
 files.
 Private configuration, URLs, tokens, and raw provider output are not status data.
 
