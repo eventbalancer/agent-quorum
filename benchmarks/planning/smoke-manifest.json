@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "suiteId": "bounded-readiness-smoke-v1",
-  "workspaceRevision": "c3ea6fb5ef51f3a21655276b6ebef8316afd71c7",
+  "workspaceRevision": "f5f1f5c55754093538f8e619d5bcc6cf2c61f36a",
   "providerConfig": "provider-config.balanced.json",
   "sentinels": [
     {
