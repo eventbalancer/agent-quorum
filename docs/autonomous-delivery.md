@@ -101,7 +101,11 @@ worker/reviewer invocations, confinement, finite starts, cancellation, and limit
 enforcement. The effective Codex configuration, managed layers, and reported
 CLI identity are attested. Inherited MCP servers are inventoried by name and
 configuration digest, explicitly disabled, and checked for drift before provider
-starts. Provider environments exclude delivery credentials and guardian control
+starts. Isolated provider calls supply complete disabled MCP definitions with an
+inert command; inspections that inherit user configuration retain its existing
+transports. An empty-home inventory checks isolated definitions before the real
+role-schema probes verify startup with existing authentication and managed
+configuration. Provider environments exclude delivery credentials and guardian control
 files.
 Private configuration, URLs, tokens, and raw provider output are not status data.
 
@@ -133,6 +137,13 @@ Codex app heartbeat or new provider API subscription is required. The guardian
 owns each controller step and its child process group. It checks group ownership
 before command admission and during active work, stops observed reparented
 helpers, and confirms cleanup before releasing ownership or acknowledging pause.
+Commands awaiting guardian registration stay in a trusted Node start gate with
+an empty environment. After registration, a private pipe supplies the target
+arguments and environment; `process.execve` starts the command with the same
+PID and start identity. Cancellation, refusal, or an expired deadline closes
+the gate without starting the command. This requires Node's `process.execve`
+support and direct command arguments with only stdin, stdout, and stderr;
+shell spawning, extra descriptors, and IPC are rejected in this supervised mode.
 Restart reconciles owned processes and unfinished operations before dispatching
 work. Host provider supervision covers owned process groups and observed
 orphans; it does not establish kernel containment of a deliberately compromised
@@ -288,6 +299,9 @@ issue work cannot be relabeled to evade its own cap.
 The guardian reserves and checkpoints intervals, settles the preceding interval
 before extending permission, splits accounting at Moscow midnight, and keeps
 uncertain reservations held across recovery. Host downtime is not charged.
+Measured time and retained reservations preserve fractional milliseconds. Child
+deadlines and live-gate request allowances round the remaining time down to whole
+milliseconds without refunding consumed time or increasing an allowance.
 Every actual provider start, including nested recovery/validation retries, has
 an admitted finite attempt and timeout. Exhaustion cannot select a different
 profile or reduce assurance. Idle queues poll every five minutes; passive CI

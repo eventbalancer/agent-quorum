@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +16,7 @@ import type { CommandInput, CommandResult } from '../../src/delivery/commands.js
 import { PROVIDER_CONFINEMENT_PROGRAM } from '../../src/delivery/provider-confinement-program.js';
 import {
   codexSandboxProbeArgs,
+  supervisedCodexInspectionPolicy,
   supervisedCodexPolicy,
 } from '../../src/providers/supervised-policy.js';
 import {
@@ -100,9 +109,10 @@ async function fixture() {
 }
 
 describe('native provider confinement admission', () => {
-  it('compiles frozen source, applies the exact worker policy, and checks MCP disablement', async () => {
+  it('compiles frozen source, preserves worker permissions, and checks both MCP configurations', async () => {
     const mandate = await fixture();
     let expectedPolicy: ReturnType<typeof supervisedCodexPolicy> | undefined;
+    let expectedInspection: ReturnType<typeof supervisedCodexInspectionPolicy> | undefined;
     mocks.command.mockImplementation((input) => {
       if (input.args[0] === 'sandbox') {
         expectedPolicy = supervisedCodexPolicy(
@@ -110,21 +120,38 @@ describe('native provider confinement admission', () => {
           [mandate.runtimeRoot, path.dirname(mandate.runtimeRoot)],
           mandate.mcpServerNames,
         );
+        expectedInspection = supervisedCodexInspectionPolicy(
+          input.cwd,
+          [mandate.runtimeRoot, path.dirname(mandate.runtimeRoot)],
+          mandate.mcpServerNames,
+        );
+      }
+      if (input.execution.env?.CODEX_HOME?.endsWith('/empty-codex-home') === true) {
+        expect(readdirSync(input.execution.env.CODEX_HOME)).toEqual([]);
       }
       return Promise.resolve(command(input));
     });
     expect(await verifyProviderConfinement(mandate, {})).toBe(true);
     const calls = mocks.command.mock.calls.map(([input]) => input);
-    expect(calls.map((input) => input.command)).toEqual(['codex', '/usr/bin/cc', 'codex', 'codex']);
+    expect(calls.map((input) => input.command)).toEqual([
+      'codex',
+      '/usr/bin/cc',
+      'codex',
+      'codex',
+      'codex',
+    ]);
     const probe = calls[2];
     expect(probe).toBeDefined();
-    if (probe === undefined || expectedPolicy === undefined) {
+    if (probe === undefined || expectedPolicy === undefined || expectedInspection === undefined) {
       throw new Error('Missing sandbox probe');
     }
     const actualCandidate = probe.cwd;
-    const expectedConfig = expectedPolicy.codexConfig;
+    const expectedConfig = expectedInspection.codexConfig;
     const probeCommand = probe.args.slice(probe.args.indexOf('--') + 1);
-    expect(probe.args).toEqual(codexSandboxProbeArgs(expectedPolicy, probeCommand));
+    expect(probe.args).toEqual(codexSandboxProbeArgs(expectedInspection, probeCommand));
+    expect(expectedConfig.filter((entry) => !entry.startsWith('mcp_servers='))).toEqual(
+      expectedPolicy.codexConfig.filter((entry) => !entry.startsWith('mcp_servers=')),
+    );
     expect(probe.args).toContain('--include-managed-config');
     expect(probeCommand).toHaveLength(4);
     expect(path.dirname(probeCommand[0] ?? '')).toBe(actualCandidate);
@@ -136,6 +163,16 @@ describe('native provider confinement admission', () => {
       'list',
       '--json',
     ]);
+    expect(calls[4]?.args).toEqual([
+      ...expectedPolicy.codexConfig.flatMap((entry) => ['-c', entry]),
+      'mcp',
+      'list',
+      '--json',
+    ]);
+    expect(calls[4]?.execution.env?.CODEX_HOME).toBe(
+      path.join(path.dirname(actualCandidate), 'empty-codex-home'),
+    );
+    expect(calls[4]?.execution.env?.HOME).toBe(calls[3]?.execution.env?.HOME);
     expect(existsSync(path.dirname(actualCandidate))).toBe(false);
     expect(mocks.configuration).toHaveBeenCalledOnce();
   });
@@ -245,17 +282,38 @@ describe('native provider confinement admission', () => {
     expect(mocks.command).toHaveBeenCalledTimes(3);
   });
 
-  it('rejects active MCP tools after successful native assertions', async () => {
+  it.each(['inherited', 'isolated'] as const)(
+    'rejects active MCP tools in the %s configuration',
+    async (context) => {
+      const mandate = await fixture();
+      mocks.command.mockImplementation((input) => {
+        return Promise.resolve(
+          input.args.some((arg) => arg.startsWith('mcp_servers=')) &&
+            input.args.includes('mcp') &&
+            (input.execution.env?.CODEX_HOME?.endsWith('/empty-codex-home') === true) ===
+              (context === 'isolated')
+            ? { ...success, stdout: '[{"name":"fixture","enabled":true}]' }
+            : command(input),
+        );
+      });
+      expect(await verifyProviderConfinement(mandate, {})).toBe(false);
+      expect(mocks.command).toHaveBeenCalledTimes(context === 'isolated' ? 5 : 4);
+      expect(existsSync(mocks.command.mock.calls.at(-1)?.[0].cwd ?? '')).toBe(false);
+    },
+  );
+
+  it('rejects isolated MCP configuration parse failure after inherited disablement passes', async () => {
     const mandate = await fixture();
     mocks.command.mockImplementation((input) => {
       return Promise.resolve(
-        input.args.some((arg) => arg.startsWith('mcp_servers=')) && input.args.includes('mcp')
-          ? { ...success, stdout: '[{"name":"fixture","enabled":true}]' }
+        input.execution.env?.CODEX_HOME?.endsWith('/empty-codex-home') === true
+          ? { exitCode: 1, stdout: '', stderr: 'invalid transport' }
           : command(input),
       );
     });
     expect(await verifyProviderConfinement(mandate, {})).toBe(false);
-    expect(mocks.command).toHaveBeenCalledTimes(4);
+    expect(mocks.command).toHaveBeenCalledTimes(5);
+    expect(existsSync(mocks.command.mock.calls.at(-1)?.[0].cwd ?? '')).toBe(false);
   });
 
   it('rejects changed effective configuration before compiling', async () => {

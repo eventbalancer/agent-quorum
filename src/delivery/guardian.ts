@@ -421,7 +421,10 @@ export async function runGuardianStep(
   const wallAnchor = Date.now();
   const monotonicAnchor = performance.now();
   const budget = ledger.budget(issue, wallAnchor);
-  const allowanceDeadline = Math.min(wallAnchor + budget.availableMs, nextDeliveryDay(wallAnchor));
+  const allowanceDeadline = Math.min(
+    wallAnchor + Math.floor(budget.availableMs),
+    nextDeliveryDay(wallAnchor),
+  );
   const deadlineEpochMs =
     options.blockedRecoveryDigest === undefined
       ? allowanceDeadline

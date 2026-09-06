@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   codexSandboxProbeArgs,
+  supervisedCodexInspectionPolicy,
   supervisedCodexPolicy,
 } from '../../src/providers/supervised-policy.js';
 
@@ -41,5 +42,25 @@ describe('supervised Codex policy', () => {
   it('rejects ambiguous filesystem rules', () => {
     expect(() => supervisedCodexPolicy('.')).toThrow('absolute');
     expect(() => supervisedCodexPolicy(process.cwd(), ['relative'])).toThrow('absolute');
+  });
+
+  it('materializes inert disabled transports only when user configuration is isolated', () => {
+    const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'policy-test-')));
+    directories.push(directory);
+    const names = ['computer-use', 'server.with.dots', 'quoted"server', 'computer-use'];
+    const isolated = supervisedCodexPolicy(directory, [], names);
+    const inherited = supervisedCodexInspectionPolicy(directory, [], names);
+    expect(isolated.isolatedUserConfig).toBe(true);
+    expect(inherited).not.toHaveProperty('isolatedUserConfig');
+    expect(isolated.codexPermissionProfile).toBe(inherited.codexPermissionProfile);
+    expect(isolated.codexConfig.filter((entry) => !entry.startsWith('mcp_servers='))).toEqual(
+      inherited.codexConfig.filter((entry) => !entry.startsWith('mcp_servers=')),
+    );
+    expect(isolated.codexConfig.find((entry) => entry.startsWith('mcp_servers='))).toBe(
+      'mcp_servers={"computer-use"={enabled=false,command="/usr/bin/false"},"server.with.dots"={enabled=false,command="/usr/bin/false"},"quoted\\"server"={enabled=false,command="/usr/bin/false"}}',
+    );
+    expect(inherited.codexConfig.find((entry) => entry.startsWith('mcp_servers='))).toBe(
+      'mcp_servers={"computer-use"={enabled=false},"server.with.dots"={enabled=false},"quoted\\"server"={enabled=false}}',
+    );
   });
 });

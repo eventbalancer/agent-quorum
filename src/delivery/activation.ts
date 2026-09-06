@@ -28,6 +28,7 @@ import { RUNNER_META, resolveRunnerBinaries } from '../providers/registry.js';
 import {
   codexSandboxProbeArgs,
   supervisedCodexEnvironment,
+  supervisedCodexInspectionPolicy,
   supervisedCodexPolicy,
 } from '../providers/supervised-policy.js';
 import {
@@ -772,7 +773,7 @@ export async function readMcpConfiguration(
   run: (input: CommandInput) => Promise<CommandResult> = runDeliveryCommand,
   readConfiguration: typeof readCodexConfigurationDigest = readCodexConfigurationDigest,
 ): Promise<McpConfiguration> {
-  const policy = supervisedCodexPolicy(root);
+  const policy = supervisedCodexInspectionPolicy(root);
   const result = await checkedRun(
     {
       command: 'codex',
@@ -846,9 +847,10 @@ export async function verifyProviderConfinement(
     const forbidden = path.join(controls, 'canary.txt');
     writeFileSync(allowed, 'owned evidence');
     writeFileSync(forbidden, 'private canary');
-    const policy = supervisedCodexPolicy(
+    const forbiddenPaths = [mandate.runtimeRoot, path.dirname(mandate.runtimeRoot)];
+    const policy = supervisedCodexInspectionPolicy(
       candidate,
-      [mandate.runtimeRoot, path.dirname(mandate.runtimeRoot)],
+      forbiddenPaths,
       mandate.mcpServerNames,
     );
     const source = path.join(probeRoot, 'confinement.c');
@@ -887,20 +889,39 @@ export async function verifyProviderConfinement(
     ) {
       return false;
     }
-    const configured = await runDeliveryCommand({
-      command: 'codex',
-      args: [...policy.codexConfig.flatMap((entry) => ['-c', entry]), 'mcp', 'list', '--json'],
-      cwd: candidate,
-      execution: bounded,
-    });
-    if (configured.exitCode !== 0) {
-      return false;
+    const emptyCodexHome = path.join(probeRoot, 'empty-codex-home');
+    mkdirSync(emptyCodexHome, { mode: 0o700 });
+    const isolatedPolicy = supervisedCodexPolicy(candidate, forbiddenPaths, mandate.mcpServerNames);
+    for (const configuration of [
+      { policy, execution: bounded },
+      {
+        policy: isolatedPolicy,
+        execution: { ...bounded, env: { ...bounded.env, CODEX_HOME: emptyCodexHome } },
+      },
+    ]) {
+      const configured = await runDeliveryCommand({
+        command: 'codex',
+        args: [
+          ...configuration.policy.codexConfig.flatMap((entry) => ['-c', entry]),
+          'mcp',
+          'list',
+          '--json',
+        ],
+        cwd: candidate,
+        execution: configuration.execution,
+      });
+      if (configured.exitCode !== 0) {
+        return false;
+      }
+      const servers: unknown = JSON.parse(configured.stdout);
+      if (
+        !Array.isArray(servers) ||
+        !servers.every((server: unknown) => responseObject(server).enabled === false)
+      ) {
+        return false;
+      }
     }
-    const servers: unknown = JSON.parse(configured.stdout);
-    return (
-      Array.isArray(servers) &&
-      servers.every((server: unknown) => responseObject(server).enabled === false)
-    );
+    return true;
   } finally {
     rmSync(probeRoot, { recursive: true, force: true });
   }

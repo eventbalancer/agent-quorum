@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import {
   runGuardianStep,
 } from '../../src/delivery/guardian.js';
 import { deliveryFixture } from '../helpers/delivery.js';
+import { nextDeliveryDay } from '../../src/delivery/ledger.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -134,6 +135,76 @@ describe('guardian repository ownership and lifetime', () => {
     expect(ledger.get('owned-processes')).toEqual([]);
   });
 
+  it.each([
+    { accounting: 'measured', elapsedMs: 0.25 },
+    { accounting: 'reserved', elapsedMs: 0.25 },
+    { accounting: 'measured', elapsedMs: 0.000001 },
+  ] as const)(
+    'admits a real child handoff after $elapsedMs ms of $accounting time without restoring allowance',
+    async ({ accounting, elapsedMs }) => {
+      const { ledger, root } = fixture();
+      const realNow = Date.now.bind(Date);
+      const started = realNow();
+      const midday = nextDeliveryDay(started) - 12 * 60 * 60_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => midday + realNow() - started);
+      const permit = ledger.reserveActive(
+        0,
+        0,
+        accounting === 'measured' ? Date.now() : nextDeliveryDay(Date.now()) - elapsedMs,
+        'fixture',
+      );
+      if (accounting === 'measured') {
+        ledger.settleActive(permit.id, elapsedMs, 'fixture');
+      } else {
+        ledger.retainInterruptedPermit();
+      }
+      const original = ledger.budget(0, Date.now());
+      expect(original.dailyMeasuredMs + original.dailyReservedMs).toBe(elapsedMs);
+      const budget = vi.spyOn(ledger, 'budget');
+      const output = path.join(root, 'accepted-handoff.json');
+      const reader = new URL('../../src/runtime/execution-handoff.ts', import.meta.url).href;
+      const program = `
+        import { readFileSync, writeFileSync } from 'node:fs';
+        import { setTimeout } from 'node:timers/promises';
+        import { readExecutionHandoff } from ${JSON.stringify(reader)};
+        await setTimeout(120);
+        const file = process.env.AGENT_QUORUM_EXECUTION_CONTROL_FILE;
+        const execution = readExecutionHandoff(file);
+        const handoff = JSON.parse(readFileSync(file, 'utf8'));
+        writeFileSync(${JSON.stringify(output)}, JSON.stringify({
+          deadlineEpochMs: execution.deadlineEpochMs,
+          handoffFile: file,
+          socketPath: handoff.socketPath,
+        }));
+      `;
+      const status = await runGuardianStep(ledger, {
+        command: {
+          bin: process.execPath,
+          args: ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', program],
+        },
+      });
+      expect(status, readFileSync(path.join(ledger.directory, 'worker.log'), 'utf8')).toBe(0);
+      const accepted = JSON.parse(readFileSync(output, 'utf8')) as {
+        deadlineEpochMs: number;
+        handoffFile: string;
+        socketPath: string;
+      };
+      const wallAnchor = budget.mock.calls[0]?.[1];
+      expect(wallAnchor).toBeDefined();
+      expect(accepted.deadlineEpochMs).toBe((wallAnchor ?? 0) + Math.floor(original.availableMs));
+      expect(Number.isSafeInteger(accepted.deadlineEpochMs)).toBe(true);
+      expect(ledger.budget(0, Date.now()).dailyMeasuredMs).toBeGreaterThan(
+        original.dailyMeasuredMs,
+      );
+      expect(ledger.budget(0, Date.now()).dailyReservedMs).toBe(original.dailyReservedMs);
+      expect(ledger.get('open-permit')).toBeUndefined();
+      expect(ledger.owner('step')).toBeUndefined();
+      expect(ledger.get('owned-processes')).toEqual([]);
+      expect(existsSync(accepted.handoffFile)).toBe(false);
+      expect(existsSync(accepted.socketPath)).toBe(false);
+    },
+  );
+
   it('kills an ignored-signal worker after authority is paused', async () => {
     const { ledger } = fixture();
     const timer = setTimeout(() => {
@@ -191,7 +262,7 @@ describe('guardian repository ownership and lifetime', () => {
     });
     ledger.set('current-issue', 1);
     const original = ledger.budget(1, Date.now());
-    vi.spyOn(ledger, 'budget').mockReturnValue({ ...original, availableMs: 600 });
+    vi.spyOn(ledger, 'budget').mockReturnValue({ ...original, availableMs: 600.75 });
     const status = await runGuardianStep(ledger, {
       command: {
         bin: process.execPath,
