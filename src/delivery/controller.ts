@@ -2266,6 +2266,10 @@ export async function productionDeliveryServices(
         throw new DeliveryError('live-implementation-revision-missing');
       }
       const decoderContext = planningDecoderContext(mandate, ledger.directory, implementation);
+      const remainingActiveMs = Math.floor(ledger.budget(issue.number, Date.now()).availableMs);
+      if (remainingActiveMs <= 0) {
+        throw new DeliveryError('live-budget-insufficient');
+      }
       const requestFile = issueArtifact(ledger, issue.number, `live-request-${randomUUID()}.json`);
       writeFileSync(
         requestFile,
@@ -2280,7 +2284,7 @@ export async function productionDeliveryServices(
             ledger.counter(`attempt-grant:live:${issue.number}`),
           executionControlFile,
           decoderContext,
-          remainingActiveMs: ledger.budget(issue.number, Date.now()).availableMs,
+          remainingActiveMs,
         }),
         { mode: 0o600 },
       );

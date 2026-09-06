@@ -288,6 +288,9 @@ issue work cannot be relabeled to evade its own cap.
 The guardian reserves and checkpoints intervals, settles the preceding interval
 before extending permission, splits accounting at Moscow midnight, and keeps
 uncertain reservations held across recovery. Host downtime is not charged.
+Measured time and retained reservations preserve fractional milliseconds. Child
+deadlines and live-gate request allowances round the remaining time down to whole
+milliseconds without refunding consumed time or increasing an allowance.
 Every actual provider start, including nested recovery/validation retries, has
 an admitted finite attempt and timeout. Exhaustion cannot select a different
 profile or reduce assurance. Idle queues poll every five minutes; passive CI
