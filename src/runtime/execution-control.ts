@@ -2,6 +2,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { killTree, spawnOwned, terminateOwned, waitForExit } from './exec.js';
 import { pgidOf, procStartToken } from './proc.js';
+import { spawnExecutionStartGate } from './execution-start-gate.js';
 
 export interface ExecutionAttempt {
   readonly command: string;
@@ -138,15 +139,16 @@ export async function spawnControlled(
       ),
     };
   }
-  const child = spawnOwned(
-    command,
-    args,
-    {
-      ...options,
-      ...(control?.env === undefined ? {} : { env: control.env }),
-    },
-    control?.processGroup !== 'shared',
-  );
+  const spawnOptions = {
+    ...options,
+    ...(control?.env === undefined ? {} : { env: control.env }),
+  };
+  const gate =
+    control?.processGroup === 'shared' && control.onSpawn !== undefined
+      ? spawnExecutionStartGate(command, args, spawnOptions)
+      : undefined;
+  const child =
+    gate?.child ?? spawnOwned(command, args, spawnOptions, control?.processGroup !== 'shared');
   const exit = waitForExit(child);
   let timer: NodeJS.Timeout | undefined;
   let stopping: Promise<void> | undefined;
@@ -181,9 +183,15 @@ export async function spawnControlled(
       );
     }
     assertExecutionAllowed(control);
+    if (gate !== undefined) {
+      await awaitExecution(gate.release(), control);
+      assertExecutionAllowed(control);
+    }
     return child;
   } catch (error) {
     await terminateOwned(child, 0);
     throw error;
+  } finally {
+    gate?.close();
   }
 }

@@ -137,6 +137,13 @@ Codex app heartbeat or new provider API subscription is required. The guardian
 owns each controller step and its child process group. It checks group ownership
 before command admission and during active work, stops observed reparented
 helpers, and confirms cleanup before releasing ownership or acknowledging pause.
+Commands awaiting guardian registration stay in a trusted Node start gate with
+an empty environment. After registration, a private pipe supplies the target
+arguments and environment; `process.execve` starts the command with the same
+PID and start identity. Cancellation, refusal, or an expired deadline closes
+the gate without starting the command. This requires Node's `process.execve`
+support and direct command arguments with only stdin, stdout, and stderr;
+shell spawning, extra descriptors, and IPC are rejected in this supervised mode.
 Restart reconciles owned processes and unfinished operations before dispatching
 work. Host provider supervision covers owned process groups and observed
 orphans; it does not establish kernel containment of a deliberately compromised
