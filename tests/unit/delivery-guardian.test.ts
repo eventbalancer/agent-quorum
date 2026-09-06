@@ -1,6 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createConnection } from 'node:net';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { digest } from '../../src/delivery/contract.js';
 import {
@@ -8,10 +10,15 @@ import {
   admitGuardianRequest,
   currentProcessOwner,
   launchAgentDocument,
+  openGuardianAdmission,
   runGuardianStep,
 } from '../../src/delivery/guardian.js';
 import { deliveryFixture } from '../helpers/delivery.js';
 import { nextDeliveryDay } from '../../src/delivery/ledger.js';
+import {
+  StageProcessEvidenceError,
+  type StageProcessReader,
+} from '../../src/delivery/process-supervision.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -41,6 +48,55 @@ function message(type = 'before-spawn', nonce = 'n'.repeat(48), command = 'codex
     attempt: { command, cwd: '/fixture' },
   };
 }
+
+function sendAdmission(socketPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const connection = createConnection(socketPath);
+    connection.once('error', reject);
+    connection.once('connect', () => {
+      connection.write(`${JSON.stringify(message('before-spawn', 'n'.repeat(48), 'git'))}\n`);
+    });
+    connection.once('data', (data: Buffer) => {
+      connection.destroy();
+      resolve(data.toString());
+    });
+  });
+}
+
+function delayedStageReader(delayMs: number): StageProcessReader {
+  return async (group, control) => {
+    if (control.signal === undefined) {
+      return [];
+    }
+    await sleep(delayMs, undefined, { signal: control.signal });
+    return [{ pid: Number(group), parentPid: process.pid, group: Number(group), state: 'S' }];
+  };
+}
+
+interface Deferred {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+}
+
+function deferred(): Deferred {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+const deadlineStageReader: StageProcessReader = async (_group, control) => {
+  if (control.signal === undefined) {
+    return [];
+  }
+  const deadline = control.deadlineMonotonicMs ?? performance.now();
+  await sleep(Math.max(1, deadline - performance.now()), undefined, { signal: control.signal });
+  while (performance.now() < deadline) {
+    await sleep(1, undefined, { signal: control.signal });
+  }
+  throw new StageProcessEvidenceError({ reason: 'timeout', exitCode: null, signal: 'SIGKILL' });
+};
 
 describe('delivery guardian admission', () => {
   it('requires live authority and nonce before consuming provider starts', () => {
@@ -98,6 +154,84 @@ describe('delivery guardian admission', () => {
       ),
     ).toThrow('spawned-process-ownership-mismatch');
   });
+
+  it.each(['pause', 'deadline'] as const)(
+    'rechecks %s after a fresh pending sample before acknowledging admission',
+    async (condition) => {
+      const { ledger, root } = fixture();
+      const started = deferred();
+      const sample = deferred();
+      const options = {
+        ledger,
+        issue: 0,
+        nonce: 'n'.repeat(48),
+        deadlineEpochMs: Date.now() + 5000,
+        processGroup: () => '1',
+        verifyProcessTree: () => {
+          started.resolve();
+          return sample.promise;
+        },
+      };
+      const socketPath = path.join(root, 'admission.sock');
+      const admission = await openGuardianAdmission(options, socketPath);
+      try {
+        const response = sendAdmission(socketPath);
+        await started.promise;
+        if (condition === 'pause') {
+          ledger.changeMode('pausing', 'fixture');
+        } else {
+          options.deadlineEpochMs = Date.now() - 1;
+        }
+        sample.resolve();
+        expect(await response).toBe('{"ok":false}\n');
+      } finally {
+        sample.resolve();
+        await admission.close();
+      }
+    },
+  );
+
+  it('closes a pending admitted sampler without manufacturing a new blocker', async () => {
+    const { ledger, root } = fixture();
+    const started = deferred();
+    const options = {
+      ledger,
+      issue: 0,
+      nonce: 'n'.repeat(48),
+      deadlineEpochMs: Date.now() + 5000,
+      processGroup: () => '1',
+      verifyProcessTree: (signal: AbortSignal) => {
+        started.resolve();
+        return new Promise<void>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(
+                new StageProcessEvidenceError({
+                  reason: 'cancelled',
+                  exitCode: null,
+                  signal: 'SIGKILL',
+                }),
+              );
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const socketPath = path.join(root, 'admission.sock');
+    const admission = await openGuardianAdmission(options, socketPath);
+    const connection = createConnection(socketPath);
+    try {
+      connection.write(`${JSON.stringify(message())}\n`);
+      await started.promise;
+      await admission.close();
+      expect(ledger.get('execution-admission-blocker')).toBeUndefined();
+      expect(ledger.mode()).toBe('active');
+    } finally {
+      connection.destroy();
+    }
+  });
 });
 
 describe('guardian repository ownership and lifetime', () => {
@@ -133,6 +267,109 @@ describe('guardian repository ownership and lifetime', () => {
     expect(ledger.get('open-permit')).toBeUndefined();
     expect(ledger.owner('step')).toBeUndefined();
     expect(ledger.get('owned-processes')).toEqual([]);
+  });
+
+  it('settles and extends a permit while a fresh process sample remains pending', async () => {
+    const { ledger } = fixture();
+    const read = vi.fn(delayedStageReader(1000));
+    const settlement = ledger.settleActive.bind(ledger);
+    const pendingAtCheckpoint: boolean[] = [];
+    const settle = vi.spyOn(ledger, 'settleActive').mockImplementation((...args) => {
+      pendingAtCheckpoint.push(
+        read.mock.results.at(-1)?.type === 'return' &&
+          read.mock.settledResults.at(-1)?.type === 'incomplete',
+      );
+      settlement(...args);
+    });
+    const status = await runGuardianStep(ledger, {
+      command: { bin: process.execPath, args: ['-e', 'setTimeout(() => {}, 1500)'] },
+      readStageProcesses: read,
+    });
+    expect(status).toBe(0);
+    expect(settle.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(pendingAtCheckpoint[0]).toBe(true);
+    expect(ledger.get('clock-blocker')).toBeUndefined();
+    expect(ledger.budget(0, Date.now()).dailyMeasuredMs).toBeGreaterThan(1400);
+    expect(ledger.get('open-permit')).toBeUndefined();
+    expect(read.mock.calls.some(([, control]) => control.signal?.aborted === true)).toBe(true);
+  });
+
+  it('cancels pending process evidence before acknowledging pause or releasing ownership', async () => {
+    const { ledger } = fixture();
+    const read = vi.fn(delayedStageReader(2000));
+    const timer = setTimeout(() => {
+      ledger.changeMode('pausing', 'fixture');
+    }, 300);
+    try {
+      const started = performance.now();
+      const status = await runGuardianStep(ledger, {
+        command: {
+          bin: process.execPath,
+          args: ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],
+        },
+        readStageProcesses: read,
+      });
+      expect(status).not.toBe(0);
+      expect(performance.now() - started).toBeLessThan(1200);
+      expect(ledger.mode()).toBe('paused');
+      expect(ledger.owner('step')).toBeUndefined();
+      expect(read.mock.calls[0]?.[1].signal?.aborted).toBe(true);
+      expect(ledger.get('execution-admission-blocker')).toBeUndefined();
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  it('retains sanitized failed acquisition evidence and blocks without releasing a successful stage', async () => {
+    const { ledger } = fixture();
+    const evidence = { reason: 'exit', exitCode: 7, signal: null } as const;
+    const read: StageProcessReader = (_group, control) => {
+      return control.signal === undefined
+        ? Promise.resolve([])
+        : Promise.reject(new StageProcessEvidenceError(evidence));
+    };
+    await expect(
+      runGuardianStep(ledger, {
+        command: { bin: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'] },
+        readStageProcesses: read,
+      }),
+    ).rejects.toThrow('stage-process-evidence-unavailable');
+    expect(ledger.mode()).toBe('blocked');
+    expect(ledger.events()).toContainEqual(
+      expect.objectContaining({
+        kind: 'stage-process-evidence-failed',
+        detail: { issue: 0, ...evidence },
+      }),
+    );
+    expect(ledger.owner('step')).toBeUndefined();
+  });
+
+  it('retains ownership and the open reservation when final cleanup evidence is unavailable', async () => {
+    const { ledger } = fixture();
+    const read: StageProcessReader = (group, control) => {
+      if (control.signal === undefined) {
+        return Promise.reject(
+          new StageProcessEvidenceError({
+            reason: 'exit',
+            exitCode: 7,
+            signal: null,
+          }),
+        );
+      }
+      return Promise.resolve([
+        { pid: Number(group), parentPid: process.pid, group: Number(group), state: 'S' },
+      ]);
+    };
+    await expect(
+      runGuardianStep(ledger, {
+        command: { bin: process.execPath, args: ['-e', 'setTimeout(()=>{},120)'] },
+        readStageProcesses: read,
+      }),
+    ).rejects.toThrow('stage-process-evidence-unavailable');
+    expect(ledger.mode()).toBe('blocked');
+    expect(ledger.get('cleanup-blocker')).toBe('stage-process-cleanup-unconfirmed');
+    expect(ledger.owner('step')).toBeDefined();
+    expect(ledger.get('open-permit')).toBeDefined();
   });
 
   it.each([
@@ -263,19 +500,45 @@ describe('guardian repository ownership and lifetime', () => {
     ledger.set('current-issue', 1);
     const original = ledger.budget(1, Date.now());
     vi.spyOn(ledger, 'budget').mockReturnValue({ ...original, availableMs: 600.75 });
+    const read = vi.fn(deadlineStageReader);
     const status = await runGuardianStep(ledger, {
       command: {
         bin: process.execPath,
         args: ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],
       },
+      readStageProcesses: read,
     });
     expect(status).not.toBe(0);
     expect(ledger.issue(1)?.stage).toBe('deferred');
     expect(ledger.get('resume-stage:1')).toBe('implement');
     expect(ledger.get('pending-status:1')).toMatchObject({ blocker: 'issue-active-limit' });
     expect(ledger.get('current-issue')).toBe(0);
+    expect(ledger.get('execution-admission-blocker')).toBeUndefined();
+    expect(read.mock.calls[0]?.[1].signal).toBeDefined();
     vi.restoreAllMocks();
     expect(ledger.budget(1, Date.now()).issueMeasuredMs).toBeLessThan(700);
+  });
+
+  it('classifies a capped pending sample as daily exhaustion without a shared evidence blocker', async () => {
+    const { ledger } = fixture();
+    const original = ledger.budget(0, Date.now());
+    vi.spyOn(ledger, 'budget').mockReturnValue({ ...original, availableMs: 600.75 });
+    const read = vi.fn(deadlineStageReader);
+    const status = await runGuardianStep(ledger, {
+      command: {
+        bin: process.execPath,
+        args: ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],
+      },
+      readStageProcesses: read,
+    });
+    expect(status).not.toBe(0);
+    expect(ledger.mode()).toBe('daily-limit');
+    expect(ledger.get('daily-resume-after')).toBe(nextDeliveryDay(Date.now()));
+    expect(ledger.get('execution-admission-blocker')).toBeUndefined();
+    expect(read.mock.calls[0]?.[1].signal).toBeDefined();
+    expect(ledger.get('open-permit')).toBeUndefined();
+    vi.restoreAllMocks();
+    expect(ledger.budget(0, Date.now()).dailyMeasuredMs).toBeLessThan(700);
   });
 
   it('blocks a discontinuous wall clock while using a monotonic hard deadline', async () => {

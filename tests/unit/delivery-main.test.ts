@@ -134,4 +134,43 @@ describe('delivery operator controls', () => {
     expect(JSON.stringify(output)).not.toContain(secret);
     expect(JSON.stringify(output)).not.toContain('Private finding');
   });
+
+  it.each(['stage-process-evidence-unavailable', 'guardian-installation-failed'])(
+    'reports the current %s reason separately from a historical shared blocker',
+    async (reason) => {
+      const { ledger } = fixture();
+      const sharedBlocker = { reason: 'github-existing-credential-unavailable', currentIssue: 0 };
+      ledger.set('shared-blocker', sharedBlocker);
+      ledger.changeMode('blocked', sharedBlocker.reason);
+      ledger.changeMode('active', 'operator-resume');
+      ledger.saveIssue(issue(31, 'refine'));
+      ledger.set('current-issue', 31);
+      const executionAdmissionBlocker =
+        reason === 'stage-process-evidence-unavailable' ? { issue: 31, code: reason } : undefined;
+      if (executionAdmissionBlocker !== undefined) {
+        ledger.set('execution-admission-blocker', executionAdmissionBlocker);
+      }
+      ledger.changeMode('blocked', reason);
+      const events = ledger.events();
+      ledger.acknowledge(events.at(-1)?.sequence ?? 0);
+      const budget = ledger.budget(31, Date.now());
+      const output: unknown[] = [];
+      await runDeliveryCli(['status', '--state-dir', ledger.directory], {
+        output: (value) => {
+          output.push(value);
+        },
+      });
+      expect(output[0]).toMatchObject({
+        mode: 'blocked',
+        modeReason: reason,
+        executionAdmissionBlocker,
+        currentIssue: 31,
+        sharedBlocker,
+        budget,
+      });
+      expect(ledger.events()).toEqual(events);
+      expect(ledger.get('shared-blocker')).toEqual(sharedBlocker);
+      expect(ledger.get('execution-admission-blocker')).toEqual(executionAdmissionBlocker);
+    },
+  );
 });

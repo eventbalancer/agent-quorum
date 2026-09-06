@@ -319,6 +319,8 @@ export async function runDeliveryCli(
       const issue = ledger.get<number>('current-issue') ?? 0;
       output({
         mode: ledger.mode(),
+        modeReason: ledger.modeReason(),
+        executionAdmissionBlocker: ledger.get<unknown>('execution-admission-blocker'),
         digest: ledger.get<string>('mandate-digest'),
         currentIssue: issue,
         budget: ledger.budget(issue, Date.now()),

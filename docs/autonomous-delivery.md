@@ -137,6 +137,9 @@ Codex app heartbeat or new provider API subscription is required. The guardian
 owns each controller step and its child process group. It checks group ownership
 before command admission and during active work, stops observed reparented
 helpers, and confirms cleanup before releasing ownership or acknowledging pause.
+Fresh process snapshots are collected asynchronously, allowing budget
+checkpoints and stop deadlines to remain active while sampling runs. Missing or
+failed process evidence blocks work.
 Commands awaiting guardian registration stay in a trusted Node start gate with
 an empty environment. After registration, a private pipe supplies the target
 arguments and environment; `process.execve` starts the command with the same
@@ -145,7 +148,12 @@ the gate without starting the command. This requires Node's `process.execve`
 support and direct command arguments with only stdin, stdout, and stderr;
 shell spawning, extra descriptors, and IPC are rejected in this supervised mode.
 Restart reconciles owned processes and unfinished operations before dispatching
-work. Host provider supervision covers owned process groups and observed
+work. An issue's recorded worktree intent retains its original branch, path,
+and creation base across mandate changes, including interruption before the
+issue record was saved. Recovery verifies that exact Git checkout; refinement
+merges newer main before recording a newer base. Conflicting ownership or
+multiple intents block recovery.
+Host provider supervision covers owned process groups and observed
 orphans; it does not establish kernel containment of a deliberately compromised
 provider engine. The supported installed Codex engine/version and read-only
 policy remain activation prerequisites. Candidate commands run within the
@@ -166,6 +174,11 @@ Status reports mandate identity, stage, issue, worktree, PR, budgets, measured
 activity, held reservations, blockers, pending effect identities and input
 digests, API backoff, and evidence references. Raw effect inputs and outputs
 remain private.
+`modeReason` reports the latest recorded transition to the current mode, and
+`executionAdmissionBlocker` exposes the guardian's recorded admission failure.
+These appear before `sharedBlocker`, which retains the last shared failure and
+can describe an earlier stop. Reading status preserves those separate facts
+and includes the mode reason even after its event has been acknowledged.
 Events contain sanitized facts. Read notifications using the events command and
 acknowledge delivered events using its `--acknowledge` sequence option. Repeating
 an unchanged observation does not create another notification.

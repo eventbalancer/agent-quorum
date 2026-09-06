@@ -216,6 +216,24 @@ export class DeliveryLedger {
     return mode;
   }
 
+  modeReason(): string | undefined {
+    const row = this.database
+      .prepare("SELECT detail FROM events WHERE kind='mode' ORDER BY sequence DESC LIMIT 1")
+      .get();
+    const detail = row === undefined ? undefined : decoded(row.detail);
+    if (
+      typeof detail !== 'object' ||
+      detail === null ||
+      !('mode' in detail) ||
+      detail.mode !== this.mode() ||
+      !('reason' in detail) ||
+      typeof detail.reason !== 'string'
+    ) {
+      return undefined;
+    }
+    return detail.reason;
+  }
+
   changeMode(mode: DeliveryMode, reason: string): void {
     if (this.mode() === mode) {
       return;

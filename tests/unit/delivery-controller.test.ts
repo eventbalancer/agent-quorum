@@ -273,7 +273,7 @@ function scenario(numbers: readonly number[], options: ScenarioOptions = {}) {
         heads.set(number, base);
         committedContents.set(number, mainText);
         calls.push(`worktree:${number}:${base}`);
-        return Promise.resolve({ worktree, branch: `codex/issue-${number}` });
+        return Promise.resolve({ worktree, branch: `codex/issue-${number}`, baseSha: base });
       },
       treeDigest: (worktree) => Promise.resolve(contentDigest(readme(worktree))),
       changedPaths: () => Promise.resolve(['README.md']),
@@ -404,6 +404,140 @@ async function until(
 }
 
 describe('autonomous issue delivery acceptance', () => {
+  it.each([
+    { route: 'refine', interruption: 'created' },
+    { route: 'refine', interruption: 'completed' },
+    { route: 'refine', interruption: 'saved' },
+    { route: 'recover', interruption: 'created' },
+    { route: 'recover', interruption: 'completed' },
+    { route: 'recover', interruption: 'saved' },
+  ] as const)(
+    'restores the original worktree through $route after $interruption and merges new main before refinement',
+    async ({ route, interruption }) => {
+      const fixture = scenario([1]);
+      await runDeliveryStep(ledger, {}, fixture.services);
+      const selected = ledger.issue(1);
+      if (selected === undefined) {
+        throw new Error('fixture issue missing');
+      }
+      const worktree = path.join(root, 'issue-1');
+      const branch = `session/delivery-1-${digest(ledger.mandate()).slice(0, 10)}`;
+      const key = `worktree:1:${branch}`;
+      ledger.intendEffect({
+        key,
+        kind: 'branch',
+        issue: 1,
+        state: 'intended',
+        input: { worktree, branch, base: BASE },
+      });
+      await fixture.services.repository.createWorktree(1, BASE);
+      if (interruption !== 'created') {
+        ledger.finishEffect(key, 'completed', { worktree, branch });
+      }
+      ledger.saveIssue({
+        ...selected,
+        stage: route,
+        ...(interruption === 'saved' ? { worktree, branch } : {}),
+      });
+      ledger.set('resume-stage:1', 'refine');
+      ledger.changeMode('blocked', 'fixture interruption');
+      ledger.prepare({ ...ledger.mandate(), controllerDigest: 'replacement frozen runtime' });
+      ledger.changeMode('active', 'fixture reauthorization');
+      const currentMain = '2'.repeat(40);
+      const merged = path.join(worktree, 'merged-main');
+      const recoveries: (string | undefined)[] = [];
+      const services: DeliveryServices = {
+        ...fixture.services,
+        github: { ...fixture.services.github, getMain: () => Promise.resolve(currentMain) },
+        repository: {
+          ...fixture.services.repository,
+          createWorktree: (_number, _base, effectKey) => {
+            recoveries.push(effectKey);
+            ledger.finishEffect(key, 'completed', { worktree, branch });
+            return Promise.resolve({ worktree, branch, baseSha: BASE });
+          },
+          git: (cwd, args, number, mutation) => {
+            if (args[0] === 'merge') {
+              expect(cwd).toBe(worktree);
+              expect(args).toEqual(['merge', '--no-edit', currentMain]);
+              expect(mutation).toBe(true);
+              expect(ledger.issue(1)).toMatchObject({ worktree, branch, baseSha: BASE });
+              writeFileSync(merged, currentMain);
+              return Promise.resolve('');
+            }
+            return fixture.services.repository.git(cwd, args, number, mutation);
+          },
+        },
+        worker: {
+          ...fixture.services.worker,
+          work: (input) => {
+            expect(readFileSync(merged, 'utf8')).toBe(currentMain);
+            expect(ledger.issue(1)).toMatchObject({ worktree, branch, baseSha: currentMain });
+            return fixture.services.worker.work(input);
+          },
+        },
+      };
+      const budget = ledger.budget(1, Date.now());
+      if (route === 'recover') {
+        await runDeliveryStep(ledger, {}, services);
+        expect(ledger.issue(1)).toMatchObject({ stage: 'refine', worktree, branch, baseSha: BASE });
+        expect(recoveries).toEqual([key]);
+      }
+      await runDeliveryStep(ledger, {}, services);
+      expect(ledger.issue(1)).toMatchObject({
+        stage: 'implement',
+        worktree,
+        branch,
+        baseSha: currentMain,
+      });
+      expect(fixture.calls.filter((call) => call.startsWith('worktree:1:'))).toHaveLength(1);
+      expect(ledger.effects().filter((effect) => effect.kind === 'branch')).toEqual([
+        expect.objectContaining({ key, state: 'completed', output: { worktree, branch } }),
+      ]);
+      expect(ledger.budget(1, Date.now())).toEqual(budget);
+    },
+  );
+
+  it('preserves restored ownership and original base when the main merge fails', async () => {
+    const fixture = scenario([1]);
+    await runDeliveryStep(ledger, {}, fixture.services);
+    const owned = await fixture.services.repository.createWorktree(1, BASE);
+    const currentMain = '2'.repeat(40);
+    let workerCalled = false;
+    await runDeliveryStep(
+      ledger,
+      {},
+      {
+        ...fixture.services,
+        github: { ...fixture.services.github, getMain: () => Promise.resolve(currentMain) },
+        repository: {
+          ...fixture.services.repository,
+          createWorktree: () => Promise.resolve(owned),
+          git: (cwd, args, number, mutation) => {
+            if (args[0] === 'merge') {
+              expect(ledger.issue(1)).toMatchObject(owned);
+              return Promise.reject(new DeliveryError('git-operation-failed'));
+            }
+            return fixture.services.repository.git(cwd, args, number, mutation);
+          },
+        },
+        worker: {
+          ...fixture.services.worker,
+          work: (input) => {
+            workerCalled = true;
+            return fixture.services.worker.work(input);
+          },
+        },
+      },
+    );
+    expect(workerCalled).toBe(false);
+    expect(ledger.issue(1)).toMatchObject({
+      ...owned,
+      stage: 'deferred',
+      blocker: 'git-operation-failed',
+    });
+  });
+
   it('preserves original issue content across status replacement and an uncertain real adapter response', async () => {
     const fixture = scenario([1], { requiresPlan: true });
     const original = issue(1);

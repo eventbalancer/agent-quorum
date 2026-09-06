@@ -21,7 +21,7 @@ import {
 } from '../runtime/execution-control.js';
 import { terminateOwned, waitForExit } from '../runtime/exec.js';
 import { contentDigest, DeliveryError, digest, type Mandate } from './contract.js';
-import type { DeliveryLedger } from './ledger.js';
+import type { DeliveryLedger, EffectRecord } from './ledger.js';
 import { dockerExecutorArgs } from './confined-executor.js';
 import { frozenGateArgs } from './gate-toolchain.js';
 import { assertFrozenVerificationPolicy } from './verification-policy.js';
@@ -39,6 +39,52 @@ const OWNER_HEARTBEAT_INTERVAL_MS = 100;
 interface DeliveryWorktree {
   readonly worktree: string;
   readonly branch: string;
+  readonly baseSha: string;
+}
+
+interface WorktreeIntent extends DeliveryWorktree {
+  readonly key: string;
+  readonly slug: string;
+}
+
+function recordedWorktreeIntent(effect: EffectRecord, issue: number): WorktreeIntent {
+  const input = effect.input;
+  if (
+    effect.kind !== 'branch' ||
+    effect.issue !== issue ||
+    !['intended', 'unknown', 'completed'].includes(effect.state) ||
+    typeof input !== 'object' ||
+    input === null ||
+    !('worktree' in input) ||
+    typeof input.worktree !== 'string' ||
+    !('branch' in input) ||
+    typeof input.branch !== 'string' ||
+    !new RegExp(`^session/delivery-${issue}-[a-f0-9]{10}$`, 'u').test(input.branch) ||
+    !('base' in input) ||
+    typeof input.base !== 'string' ||
+    !/^[a-f0-9]{40}$/u.test(input.base)
+  ) {
+    throw new DeliveryError('worktree-intent-invalid');
+  }
+  const slug = input.branch.slice('session/'.length);
+  const worktree = path.join(os.homedir(), '.agent-quorum/worktrees/agent-quorum', slug);
+  if (input.worktree !== worktree || effect.key !== `worktree:${issue}:${input.branch}`) {
+    throw new DeliveryError('worktree-intent-invalid');
+  }
+  if (effect.state === 'completed' || effect.output !== undefined) {
+    const output = effect.output;
+    if (
+      typeof output !== 'object' ||
+      output === null ||
+      !('worktree' in output) ||
+      output.worktree !== worktree ||
+      !('branch' in output) ||
+      output.branch !== input.branch
+    ) {
+      throw new DeliveryError('worktree-intent-output-mismatch');
+    }
+  }
+  return { key: effect.key, slug, worktree, branch: input.branch, baseSha: input.base };
 }
 
 export interface CommandResult {
@@ -529,31 +575,71 @@ export class RepositoryBroker {
     return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))].sort();
   }
 
-  async createWorktree(issue: number, base: string): Promise<DeliveryWorktree> {
+  async createWorktree(issue: number, base: string, effectKey?: string): Promise<DeliveryWorktree> {
     this.ledger.assertAuthorized('branch', issue);
-    const slug = `delivery-${issue}-${digest(this.mandate).slice(0, 10)}`;
-    const worktree = path.join(os.homedir(), '.agent-quorum/worktrees/agent-quorum', slug);
-    const branch = `session/${slug}`;
-    const key = `worktree:${issue}:${branch}`;
-    const prior = this.ledger.effect(key);
+    const recorded = this.ledger.effects().filter((effect) => {
+      return (
+        (effect.issue === issue && effect.kind === 'branch') ||
+        effect.key.startsWith(`worktree:${issue}:`)
+      );
+    });
+    if (recorded.length > 1) {
+      throw new DeliveryError('worktree-ownership-ambiguous');
+    }
+    const prior = recorded[0];
+    if (effectKey !== undefined && prior?.key !== effectKey) {
+      throw new DeliveryError('worktree-intent-identity-mismatch');
+    }
+    const freshSlug = `delivery-${issue}-${digest(this.mandate).slice(0, 10)}`;
+    const intent = recordedWorktreeIntent(
+      prior ?? {
+        key: `worktree:${issue}:session/${freshSlug}`,
+        kind: 'branch',
+        issue,
+        state: 'intended',
+        input: {
+          worktree: path.join(os.homedir(), '.agent-quorum/worktrees/agent-quorum', freshSlug),
+          branch: `session/${freshSlug}`,
+          base,
+        },
+      },
+      issue,
+    );
+    const { key, slug, worktree, branch, baseSha } = intent;
+    const current = this.ledger.issue(issue);
+    if (
+      (current?.worktree !== undefined && current.worktree !== worktree) ||
+      (current?.branch !== undefined && current.branch !== branch)
+    ) {
+      throw new DeliveryError('worktree-ownership-ambiguous');
+    }
     if (existsSync(worktree)) {
-      if (
-        prior === undefined ||
-        (await this.git(worktree, ['branch', '--show-current'], issue)) !== branch
-      ) {
+      if (prior === undefined) {
         throw new DeliveryError('worktree-ownership-ambiguous');
       }
     } else {
+      if (prior?.state === 'completed' || current?.worktree !== undefined) {
+        throw new DeliveryError('recorded-worktree-missing');
+      }
       this.ledger.intendEffect({
         key,
         kind: 'branch',
         issue,
         state: 'intended',
-        input: { worktree, branch, base },
+        input: { worktree, branch, base: baseSha },
       });
       await this.git(this.mandate.sourceRoot, ['fetch', 'origin', 'main'], issue);
-      if ((await this.git(this.mandate.sourceRoot, ['rev-parse', 'origin/main'], issue)) !== base) {
+      if (
+        prior === undefined &&
+        (await this.git(this.mandate.sourceRoot, ['rev-parse', 'origin/main'], issue)) !== baseSha
+      ) {
         throw new DeliveryError('base-changed-before-worktree');
+      }
+      if (
+        (await this.git(this.mandate.sourceRoot, ['rev-parse', `${baseSha}^{commit}`], issue)) !==
+        baseSha
+      ) {
+        throw new DeliveryError('worktree-base-unavailable');
       }
       const hooks = path.join(this.ledger.directory, 'empty-hooks');
       mkdirSync(hooks, { recursive: true, mode: 0o700 });
@@ -567,6 +653,7 @@ export class RepositoryBroker {
         GIT_CONFIG_KEY_1: 'core.fsmonitor',
         GIT_CONFIG_VALUE_1: 'false',
       };
+      this.ledger.assertAuthorized('branch', issue);
       const creation = await runDeliveryCommand({
         command: 'pnpm',
         args: [
@@ -576,7 +663,7 @@ export class RepositoryBroker {
           '--desc',
           `Autonomous delivery of issue #${issue}`,
           '--from',
-          base,
+          baseSha,
         ],
         cwd: this.mandate.runtimeRoot,
         execution: this.commandExecution(env),
@@ -593,8 +680,37 @@ export class RepositoryBroker {
         env,
       });
     }
+    await this.assertWorktreeOwnership(intent, issue);
+    this.ledger.assertAuthorized('branch', issue);
     this.ledger.finishEffect(key, 'completed', { worktree, branch });
-    return { worktree, branch };
+    return { worktree, branch, baseSha };
+  }
+
+  private async assertWorktreeOwnership(intent: WorktreeIntent, issue: number): Promise<void> {
+    const { worktree, branch, baseSha } = intent;
+    if (
+      !lstatSync(worktree).isDirectory() ||
+      !lstatSync(path.join(worktree, '.git')).isFile() ||
+      (await this.git(worktree, ['branch', '--show-current'], issue)) !== branch ||
+      realpathSync(await this.git(worktree, ['rev-parse', '--show-toplevel'], issue)) !==
+        realpathSync(worktree)
+    ) {
+      throw new DeliveryError('worktree-ownership-ambiguous');
+    }
+    const commonArgs = ['rev-parse', '--path-format=absolute', '--git-common-dir'];
+    const common = await this.git(worktree, commonArgs, issue);
+    const sourceCommon = await this.git(this.mandate.sourceRoot, commonArgs, issue);
+    if (
+      realpathSync(common) !== realpathSync(sourceCommon) ||
+      (await this.git(worktree, ['merge-base', baseSha, 'HEAD'], issue)) !== baseSha
+    ) {
+      throw new DeliveryError('worktree-ownership-ambiguous');
+    }
+    const admin = await this.git(worktree, ['rev-parse', '--absolute-git-dir'], issue);
+    const registeredGitFile = readFileSync(path.join(admin, 'gitdir'), 'utf8').trim();
+    if (realpathSync(registeredGitFile) !== realpathSync(path.join(worktree, '.git'))) {
+      throw new DeliveryError('worktree-ownership-ambiguous');
+    }
   }
 
   async commit(

@@ -822,12 +822,13 @@ class DeliveryController {
   }
 
   private async recover(issue: DeliveryIssue): Promise<void> {
+    let current = issue;
     this.ledger.set(`last-recovery:${issue.number}`, this.services.now());
     const resume = this.ledger.get<IssueStage>(`resume-stage:${issue.number}`) ?? 'refine';
     const resumesImplementation =
       this.ledger.get<boolean>(`recover-implementation:${issue.number}`) ?? true;
     try {
-      await this.reconcileEffects(issue);
+      current = await this.reconcileEffects(current);
       const remaining = this.ledger
         .effects()
         .filter(
@@ -837,7 +838,7 @@ class DeliveryController {
         );
       if (remaining.length > 0) {
         this.save({
-          ...issue,
+          ...current,
           stage: 'deferred',
           ...(resumesImplementation
             ? {
@@ -849,17 +850,17 @@ class DeliveryController {
         });
         return;
       }
-      await this.reconcileDeferredStatus(issue);
+      await this.reconcileDeferredStatus(current);
       if (!resumesImplementation) {
-        this.save({ ...issue, stage: 'deferred' });
+        this.save({ ...current, stage: 'deferred' });
         this.ledger.event('deferred-status-reconciled', {
           issue: issue.number,
-          blocker: issue.blocker,
+          blocker: current.blocker,
         });
         return;
       }
       this.save({
-        ...issue,
+        ...current,
         stage: resume === 'recover' || resume === 'deferred' ? 'refine' : resume,
       });
       this.ledger.event('issue-recovered', { issue: issue.number, resumed: resume }, true);
@@ -874,7 +875,7 @@ class DeliveryController {
       if (error instanceof DeliveryError && error.code === 'issue-problem-changed') {
         return;
       }
-      this.save({ ...issue, stage: 'deferred' });
+      this.save({ ...(this.ledger.issue(issue.number) ?? current), stage: 'deferred' });
       this.ledger.event('backlog-reconciliation-pending', {
         issue: issue.number,
         blocker: 'recovery-not-confirmed',
@@ -882,7 +883,26 @@ class DeliveryController {
     }
   }
 
-  private async reconcileEffects(issue: DeliveryIssue): Promise<void> {
+  private async reconcileEffects(issue: DeliveryIssue): Promise<DeliveryIssue> {
+    const branch = this.ledger.effects().find((effect) => {
+      return (
+        (effect.issue === issue.number && effect.kind === 'branch') ||
+        effect.key.startsWith(`worktree:${issue.number}:`)
+      );
+    });
+    if (branch !== undefined) {
+      const owned = await this.services.repository.createWorktree(
+        issue.number,
+        issue.baseSha,
+        branch.key,
+      );
+      issue = {
+        ...issue,
+        ...owned,
+        baseSha: issue.worktree === undefined ? owned.baseSha : issue.baseSha,
+      };
+      this.save(issue);
+    }
     const effects = this.ledger
       .effects()
       .filter(
@@ -973,8 +993,6 @@ class DeliveryController {
         ) {
           outcome = current;
         }
-      } else if (effect.kind === 'branch') {
-        outcome = await this.services.repository.createWorktree(issue.number, issue.baseSha);
       } else if (effect.kind === 'commit' && issue.worktree !== undefined) {
         const marker = `Delivery-Operation: ${effect.key}`;
         const existing = await this.services.repository.git(
@@ -990,6 +1008,7 @@ class DeliveryController {
         this.ledger.finishEffect(effect.key, 'completed', outcome);
       }
     }
+    return issue;
   }
 
   private async hasOpenDependencies(issue: DeliveryIssue): Promise<boolean> {
@@ -1086,13 +1105,15 @@ class DeliveryController {
         ? await this.services.repository.createWorktree(issue.number, currentMain)
         : {
             worktree: issue.worktree,
+            baseSha: issue.baseSha,
             ...(issue.branch === undefined ? {} : { branch: issue.branch }),
           };
-    if (issue.worktree !== undefined && issue.baseSha !== currentMain) {
-      await this.services.repository.git(issue.worktree, ['fetch', 'origin', 'main'], issue.number);
+    this.save({ ...issue, ...owned });
+    if (owned.baseSha !== currentMain) {
+      await this.services.repository.git(owned.worktree, ['fetch', 'origin', 'main'], issue.number);
       await this.services.repository.git(
-        issue.worktree,
-        ['merge', '--no-edit', 'origin/main'],
+        owned.worktree,
+        ['merge', '--no-edit', currentMain],
         issue.number,
         true,
       );

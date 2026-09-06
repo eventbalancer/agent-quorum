@@ -17,7 +17,12 @@ import { spawnOwned, terminateOwned, waitForExit } from '../runtime/exec.js';
 import { isAlive, pgidOf, procStartToken } from '../runtime/proc.js';
 import { DELIVERY_REPOSITORY, DeliveryError, digest, type Mandate } from './contract.js';
 import { restoreSharedMainHealth, sharedMainRecoveryIssue } from './main-recovery.js';
-import { assertNoStageOrphans, assertStageProcessesStopped } from './process-supervision.js';
+import {
+  assertNoStageOrphans,
+  assertStageProcessesStopped,
+  StageProcessEvidenceError,
+  type StageProcessReader,
+} from './process-supervision.js';
 import { DeliveryLedger, nextDeliveryDay, type ActivePermit, type ProcessOwner } from './ledger.js';
 
 export const IDLE_WAIT_MS = 300_000;
@@ -182,11 +187,10 @@ export interface GuardianAdmission {
   readonly blockedRecoveryDigest?: string;
   readonly processGroup: () => string | undefined;
   readonly verifyProviderPolicy?: (signal: AbortSignal) => Promise<void>;
-  readonly verifyProcessTree?: () => void;
+  readonly verifyProcessTree?: (signal: AbortSignal) => Promise<void>;
 }
 
-export function admitGuardianRequest(options: GuardianAdmission, value: unknown): boolean {
-  const message = admissionMessage(value);
+function assertGuardianAuthority(options: GuardianAdmission, message: AdmissionMessage): void {
   if (message.nonce !== options.nonce || Date.now() >= options.deadlineEpochMs) {
     throw new DeliveryError('execution-admission-expired', true);
   }
@@ -202,7 +206,11 @@ export function admitGuardianRequest(options: GuardianAdmission, value: unknown)
   ) {
     throw new DeliveryError('preflight-authorization-changed', true);
   }
-  options.verifyProcessTree?.();
+}
+
+export function admitGuardianRequest(options: GuardianAdmission, value: unknown): boolean {
+  const message = admissionMessage(value);
+  assertGuardianAuthority(options, message);
   if (
     message.type === 'before-spawn' &&
     ['codex', 'claude', 'cursor-agent'].includes(path.basename(message.attempt.command))
@@ -293,13 +301,18 @@ export async function openGuardianAdmission(
         let authenticated = false;
         try {
           const message = admissionMessage(JSON.parse(input.slice(0, newline)) as unknown);
-          const watch = admitGuardianRequest(options, message);
+          assertGuardianAuthority(options, message);
           authenticated = true;
+          await options.verifyProcessTree?.(cancellation.signal);
+          cancellation.signal.throwIfAborted();
+          const watch = admitGuardianRequest(options, message);
           if (
             message.type === 'before-spawn' &&
             path.basename(message.attempt.command) === 'codex'
           ) {
             await options.verifyProviderPolicy?.(cancellation.signal);
+            await options.verifyProcessTree?.(cancellation.signal);
+            cancellation.signal.throwIfAborted();
             admitGuardianRequest(options, message);
           }
           connection.write('{"ok":true}\n');
@@ -309,7 +322,7 @@ export async function openGuardianAdmission(
             connection.end();
           }
         } catch (error) {
-          if (authenticated && error instanceof DeliveryError) {
+          if (authenticated && !cancellation.signal.aborted && error instanceof DeliveryError) {
             options.ledger.set('execution-admission-blocker', {
               issue: options.issue,
               code: error.code,
@@ -378,6 +391,12 @@ function assertConfirmedCleanup(error: unknown): void {
   }
 }
 
+function recordStageProcessFailure(ledger: DeliveryLedger, issue: number, error: unknown): void {
+  if (error instanceof StageProcessEvidenceError) {
+    ledger.event('stage-process-evidence-failed', { issue, ...error.evidence });
+  }
+}
+
 function deferExhaustedIssue(ledger: DeliveryLedger, issue: number): void {
   const current = ledger.issue(issue);
   if (current !== undefined) {
@@ -396,14 +415,17 @@ function deferExhaustedIssue(ledger: DeliveryLedger, issue: number): void {
   }
 }
 
+export interface GuardianStepOptions {
+  readonly preflightDigest?: string;
+  readonly blockedRecoveryDigest?: string;
+  readonly command?: { readonly bin: string; readonly args: readonly string[] };
+  readonly signal?: AbortSignal;
+  readonly readStageProcesses?: StageProcessReader;
+}
+
 export async function runGuardianStep(
   ledger: DeliveryLedger,
-  options: {
-    readonly preflightDigest?: string;
-    readonly blockedRecoveryDigest?: string;
-    readonly command?: { readonly bin: string; readonly args: readonly string[] };
-    readonly signal?: AbortSignal;
-  } = {},
+  options: GuardianStepOptions = {},
 ): Promise<number> {
   const mandate = ledger.mandate();
   const githubBackoffMs = (ledger.get<number>('github-backoff-until') ?? 0) - Date.now();
@@ -444,21 +466,55 @@ export async function runGuardianStep(
   const boot = guardianBoot();
   let permit: ActivePermit | undefined;
   let stepGroup: string | undefined;
-  const verifyProcessTree = () => {
+  const supervisionCancellation = new AbortController();
+  let supervision: Promise<void> | undefined;
+  let supervisionError: Error | undefined;
+  const verifyProcessTree = async (signal: AbortSignal) => {
     if (stepGroup === undefined) {
       return;
     }
     try {
-      assertNoStageOrphans(stepGroup);
+      const control = {
+        signal,
+        deadlineMonotonicMs: deadlineMonotonicMs - shutdownMarginMs,
+      };
+      await assertNoStageOrphans(stepGroup, control, options.readStageProcesses);
     } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      if (performance.now() >= deadlineMonotonicMs - shutdownMarginMs) {
+        throw new DOMException('Stage shutdown deadline reached', 'AbortError');
+      }
       const code =
         error instanceof DeliveryError ? error.code : 'stage-process-evidence-unavailable';
       ledger.set('execution-admission-blocker', { issue, code });
+      recordStageProcessFailure(ledger, issue, error);
       if (['active', 'prepared', 'blocked'].includes(ledger.mode())) {
         ledger.changeMode('blocked', code);
       }
       throw error;
     }
+  };
+  const startSupervision = () => {
+    if (supervision !== undefined) {
+      return;
+    }
+    supervision = verifyProcessTree(supervisionCancellation.signal)
+      .catch((error: unknown) => {
+        if (
+          !supervisionCancellation.signal.aborted &&
+          performance.now() < deadlineMonotonicMs - shutdownMarginMs
+        ) {
+          supervisionError =
+            error instanceof Error
+              ? error
+              : new DeliveryError('stage-process-evidence-unavailable', true);
+        }
+      })
+      .finally(() => {
+        supervision = undefined;
+      });
   };
   const admission = await openGuardianAdmission(
     {
@@ -550,6 +606,7 @@ export async function runGuardianStep(
       state.finished = true;
       return code;
     });
+    startSupervision();
     while (!finished()) {
       if (permit === undefined) {
         await completion;
@@ -561,8 +618,8 @@ export async function runGuardianStep(
       );
       const untilShutdown = Math.max(1, deadlineMonotonicMs - shutdownMarginMs - performance.now());
       await Promise.race([completion, sleep(Math.min(250, untilPermit, untilShutdown))]);
-      if (!finished()) {
-        verifyProcessTree();
+      if (supervisionError !== undefined) {
+        throw supervisionError;
       }
       const modeAllowed =
         options.blockedRecoveryDigest !== undefined
@@ -643,26 +700,39 @@ export async function runGuardianStep(
       if (permit === undefined && !finished()) {
         await completion;
       }
+      if (!finished() && !interrupted) {
+        startSupervision();
+      }
     }
     const code = await completion;
     return interrupted && code === 0 ? 1 : code;
   } finally {
     let cleanupError: unknown;
     try {
-      if (child !== undefined) {
-        await terminateOwned(child, 0);
+      supervisionCancellation.abort();
+      const cleanup = await Promise.allSettled([
+        admission.close(),
+        supervision,
+        child === undefined ? undefined : terminateOwned(child, 0),
+      ]);
+      for (const outcome of cleanup) {
+        if (outcome.status === 'rejected') {
+          assertConfirmedCleanup(
+            outcome.reason ?? new DeliveryError('stage-process-cleanup-unconfirmed', true),
+          );
+        }
       }
       if (stepGroup !== undefined) {
-        await assertStageProcessesStopped(stepGroup);
+        await assertStageProcessesStopped(stepGroup, options.readStageProcesses);
       }
     } catch (error) {
       cleanupError = error;
+      recordStageProcessFailure(ledger, issue, error);
       ledger.set('cleanup-blocker', 'stage-process-cleanup-unconfirmed');
       if (!['revoked', 'stopped'].includes(ledger.mode())) {
         ledger.changeMode('blocked', 'stage-process-cleanup-unconfirmed');
       }
     } finally {
-      await admission.close();
       if (cleanupError === undefined) {
         if (permit !== undefined) {
           ledger.settleActive(permit.id, performance.now(), boot);
