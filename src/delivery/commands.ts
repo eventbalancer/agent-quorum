@@ -32,6 +32,10 @@ import {
   type ProviderRequestHandler,
 } from './provider-channel.js';
 
+// Leave room for host/VM clock skew below both container guards' 500 ms ceiling.
+const OWNER_HEARTBEAT_LEASE_MS = 400;
+const OWNER_HEARTBEAT_INTERVAL_MS = 100;
+
 interface DeliveryWorktree {
   readonly worktree: string;
   readonly branch: string;
@@ -116,12 +120,11 @@ export async function runDeliveryCommand(input: CommandInput): Promise<CommandRe
       throw new DeliveryError('container-deadline-required', true);
     }
     const ping = () => {
-      child.stdin?.write(
-        `${JSON.stringify({ deadlineEpochMs, validUntilEpochMs: Math.min(deadlineEpochMs, Date.now() + 500) })}\n`,
-      );
+      const validUntilEpochMs = Math.min(deadlineEpochMs, Date.now() + OWNER_HEARTBEAT_LEASE_MS);
+      child.stdin?.write(`${JSON.stringify({ deadlineEpochMs, validUntilEpochMs })}\n`);
     };
     ping();
-    heartbeat = setInterval(ping, 100);
+    heartbeat = setInterval(ping, OWNER_HEARTBEAT_INTERVAL_MS);
   } else {
     child.stdin?.end(input.input);
   }

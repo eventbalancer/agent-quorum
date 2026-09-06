@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   RepositoryBroker,
   repositoryEnvironment,
@@ -28,8 +28,10 @@ function temporary(): string {
   return directory;
 }
 
-function sendOwnerHeartbeats(input: PassThrough): () => void {
-  const deadlineEpochMs = Date.now() + 10_000;
+function sendOwnerHeartbeats(
+  input: PassThrough,
+  deadlineEpochMs = Date.now() + 10_000,
+): () => void {
   const heartbeat = () => {
     input.write(
       `${JSON.stringify({
@@ -138,25 +140,87 @@ describe('confined repository commands', () => {
     ).toThrow('executor-path');
   });
 
-  it('stops an uncooperative container command when owner heartbeats disappear', async () => {
-    const directory = temporary();
-    const receipt = path.join(directory, 'pid');
+  it.each([-25, 25])(
+    'renews a guarded command with a %i ms container clock offset',
+    async (clockOffsetMs) => {
+      const guard = new URL('../../src/delivery/container-guard.ts', import.meta.url).href;
+      const program = `
+        import { runContainerGuard } from ${JSON.stringify(guard)};
+        const hostNow = Date.now;
+        Date.now = () => hostNow() + ${clockOffsetMs};
+        const status = await runContainerGuard(
+          [process.execPath, '-e', "setTimeout(() => process.stdout.write('complete'), 750)"],
+          process.stdin,
+        );
+        process.exit(status);
+      `;
+      const result = await runDeliveryCommand({
+        command: process.execPath,
+        args: ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', program],
+        cwd: temporary(),
+        execution: { deadlineEpochMs: Date.now() + 5000 },
+        keepAlive: true,
+      });
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.stdout).toBe('complete');
+    },
+  );
+
+  it.each([
+    { label: 'expired', validUntilOffsetMs: 0 },
+    { label: 'overlong', validUntilOffsetMs: 501 },
+  ])('rejects an $label heartbeat after owner admission', async ({ validUntilOffsetMs }) => {
     const input = new PassThrough();
     const result = runContainerGuard(
-      [
-        process.execPath,
-        '-e',
-        `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(process.pid)), 600)`,
-      ],
+      [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
       input,
     );
-    const stopHeartbeats = sendOwnerHeartbeats(input);
+    const now = Date.now();
+    const deadlineEpochMs = now + 5000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      input.write(`${JSON.stringify({ deadlineEpochMs, validUntilEpochMs: now + 400 })}\n`);
+      input.write(
+        `${JSON.stringify({ deadlineEpochMs, validUntilEpochMs: now + validUntilOffsetMs })}\n`,
+      );
+    } finally {
+      clock.mockRestore();
+    }
+    try {
+      expect(await result).toBe(143);
+    } finally {
+      input.end();
+      await result;
+      input.destroy();
+    }
+  });
+
+  it('finishes stopping an uncooperative command despite late owner heartbeats', async () => {
+    const directory = temporary();
+    const receipt = path.join(directory, 'pid');
+    const stopping = path.join(directory, 'stopping');
+    const input = new PassThrough();
+    const program = `
+      const fs = require('node:fs');
+      process.on('SIGTERM', () => {
+        fs.writeFileSync(${JSON.stringify(stopping)}, 'yes');
+      });
+      setInterval(() => {}, 1000);
+      setTimeout(() => {
+        fs.writeFileSync(${JSON.stringify(receipt)}, String(process.pid));
+      }, 600);
+    `;
+    const result = runContainerGuard([process.execPath, '-e', program], input);
+    const deadlineEpochMs = Date.now() + 10_000;
+    let stopHeartbeats = sendOwnerHeartbeats(input, deadlineEpochMs);
     try {
       await expect
         .poll(() => (existsSync(receipt) ? readFileSync(receipt, 'utf8') : ''), { timeout: 5000 })
         .toMatch(/^[1-9][0-9]*$/);
       const pid = Number(readFileSync(receipt, 'utf8'));
       stopHeartbeats();
+      await expect.poll(() => existsSync(stopping), { timeout: 5000, interval: 10 }).toBe(true);
+      stopHeartbeats = sendOwnerHeartbeats(input, deadlineEpochMs);
       expect(await result).toBe(143);
       expect(isAlive(pid)).toBe(false);
     } finally {

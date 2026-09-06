@@ -180,6 +180,12 @@ delivery reliability, ready improvements, and issue age. Selection rationale is
 persisted. Ambiguous ownership is ineligible; advisory worktree marker expiry
 never proves that a session is safe to take over.
 
+A missing checkout may retain its completion marker in Git's registered worktree
+admin directory. The controller honors that existing marker only after verifying
+the unique canonical path mapping, common repository, HEAD, and current commit.
+Missing unfinished checkouts and inconsistent or aliased registrations remain
+ambiguous; discovery never removes registrations or writes completion markers.
+
 Refinement preserves original evidence and intended outcomes, actualizes stale
 facts, and defines observable acceptance. Technical/product choices and breaking
 contracts are recorded as mandate-authorized decisions. An obvious fix may skip
@@ -360,6 +366,12 @@ PID 1 with dumpability disabled; candidate processes cannot reopen the owner's
 heartbeat input. The container drops all capabilities, denies privilege gains,
 has a read-only root filesystem, and has its own network namespace with no
 external interface.
+
+The owner renews command heartbeats every 100 ms with a lease of at most 400 ms,
+capped by the command deadline. The shorter lease leaves room for small host/VM
+clock differences below both supervisors' 500 ms acceptance ceiling.
+Expired or excessive heartbeats still stop admitted commands, and a late renewal
+cannot cancel termination after lease expiry.
 
 Prepare `/aq-toolchain` in the image from the exact source snapshot used by
 `delivery prepare`. It must contain byte-identical `package.json`,
