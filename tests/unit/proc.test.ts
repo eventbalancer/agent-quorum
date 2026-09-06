@@ -10,11 +10,10 @@ it('bounds a stalled ps lookup and kills a child that ignores SIGTERM', async ()
   const pidFile = path.join(root, 'ps.pid');
   writeFileSync(
     path.join(root, 'ps'),
-    `#!${process.execPath}
-const { writeFileSync } = require('node:fs');
-process.on('SIGTERM', () => {});
-writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
-setInterval(() => {}, 1000);
+    `#!/bin/sh
+trap '' TERM
+printf '%s' "$$" > '${pidFile.replaceAll("'", "'\\''")}'
+exec /bin/sleep 30
 `,
     { mode: 0o755 },
   );
